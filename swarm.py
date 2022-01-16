@@ -1,7 +1,45 @@
 import numpy as np
 import torch as th
+from ray.rllib.models import ModelV2
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.utils.typing import TensorType
 from torch import nn
 from pdb import set_trace as TT
+
+
+class Swarm(object):
+    def __init__(self, n_pop, fov=1, trg_scape_val=1.0):
+        assert fov > 0
+        self.ps = None
+        self.vs = None
+        self.fov = fov
+        self.n_pop = n_pop
+        self.landscape = None
+        self.trg_scape_val = trg_scape_val
+
+    def reset(self, scape):
+        self.landscape = scape
+        self.ps, self.vs = init_ps(self.world_width, self.n_pop)
+
+    def get_observations(self):
+        fov = self.fov
+        patch_w = fov * 2 + 1
+        # Add new dimensions for patch_w-width patches of the environment around each agent
+        ps_int = np.floor(self.ps).astype(int)
+        # weird edge case, is modulo broken?
+        ps_int = np.where(ps_int == self.world_width, 0, ps_int)
+        # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
+        scape = np.pad(self.landscape, fov, mode='wrap')
+        # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
+        nbs = [scape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
+        nbs = np.stack(nbs)
+        nbs = nbs[:, None, ...]
+        nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
+        return nbs
+
+    def get_rewards(self):
+        ps = self.ps.astype(int)
+        return np.abs(self.trg_scape_val - self.landscape[ps[:, 0], ps[:, 1]])
 
 
 def init_ps(world_width, npop, ndim=2):
@@ -19,15 +57,13 @@ def init_ps(world_width, npop, ndim=2):
     return ps.astype(np.float64), vls
 
 
-class Swarm():
-    def __init__(self, n_pop):
-        self.ps = None
-        self.vs = None
-        self.n_pop = n_pop
-        self.landscape = None
-
-    def reset(self, scape):
-        self.landscape = scape
+# def init_weights(m):
+#     if isinstance(m, nn.Linear):
+#         m.weight.data.uniform_(-1.0, 1.0)
+#         m.bias.data.fill_(0.01)
+#     if isinstance(m, nn.Conv2d):
+#         m.weight.data.uniform_(-1.0, 1.0)
+#         m.bias.data.fill_(0.01)
 
 
 class NN(nn.Module):
@@ -35,55 +71,62 @@ class NN(nn.Module):
         super().__init__()
         kernel_width = 2 * fov + 1
         self.l1 = nn.Conv2d(1, 32, kernel_width, 1, padding=0)
-        self.flatten = nn.Flatten(1)
         self.l2 = nn.Linear(32, 32)
-        self.l3 = nn.Linear(32, 2)
+        self.l3 = nn.Linear(32, 6)  # double length of actual output because TorchDiagGaussian computes mean and std
+                                    # https://github.com/ray-project/ray/issues/17934
+        self.l4 = nn.Linear(32, 1)
+        # self.apply(init_weights)
 
     def forward(self, x):
         x = th.relu(self.l1(x))
-        x = self.flatten(x)
-        x = th.sigmoid(self.l2(x))
-        x = th.sigmoid(self.l3(x))
-        x = x * 2 - 1
+        x = x.view(x.shape[0], -1)
+        # x = th.sigmoid(self.l2(x))
+        act = th.sigmoid(self.l3(x))
+        act = act * 2 - 1
+        self.val = self.l4(x)
+        hids = {}
+        return act, hids
 
-        return x
+
+class RLlibNN(NN, TorchModelV2):
+    def __init__(self, obs_space, act_space, num_outputs, model_config, name, **customized_model_kwargs):
+        ModelV2.__init__(self, obs_space, act_space, num_outputs, model_config, name, framework='torch')
+        fov = model_config["custom_model_config"]["fov"]
+        NN.__init__(self, fov=fov)
+        self.tower_stats = {}
+
+    def forward(self, input_dict, state_batches=None, seq_lens=None):
+        obs = input_dict['obs']
+        ret = super().forward(obs)
+        return ret
+
+    def value_function(self) -> TensorType:
+        return self.val.squeeze(-1)
 
 
 class NeuralSwarm(Swarm):
     def __init__(self, world_width, n_pop: int, fov: int = 4, trg_scape_val=1.0):
-        super().__init__(n_pop)
-        assert fov > 0
-        self.fov = fov
+        super().__init__(n_pop, fov, trg_scape_val=trg_scape_val)
         self.world_width = world_width
-        self.trg_scape_val = trg_scape_val
-        self.nn = NN(fov=fov)
+        # self.nn = NN(fov=fov)
+        self.nn = None
 
-    def reset(self, scape):
-        super().reset(scape)
-        self.ps, self.vs = init_ps(self.world_width, self.n_pop)
-
-    def update(self, obstacles=None):
+    def update(self, accelerations=None, obstacles=None):
+        if accelerations is None:
+            if self.nn is None:
+                print("Generating random NN swarm policies inside environment, because no accelerations were supplied "
+                      "when updating swarms.")
+            nbs = self.get_observations(fov=self.fov)
+            accelerations = self.nn(th.Tensor(nbs)).detach().numpy()
         if obstacles is not None:
+            # TODO: collision detection
             pass
         else:
-            self.ps += self.vs
+            self.ps += accelerations - 1
         self.ps = self.ps % self.world_width
-        fov = self.fov
-        patch_w = fov * 2 + 1
-        # Add new dimensions for patch_w-width patches of the environment around each agent
-        ps_int = np.floor(self.ps).astype(int)
-        # weird edge case, is modulo broken?
-        ps_int = np.where(ps_int == self.world_width, 0, ps_int)
-        # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
-        scape = np.pad(self.landscape, fov, mode='wrap')
-        # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
-        nbs = [scape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
-        nbs = np.stack(nbs)
-        nbs = nbs[:, None, ...]
-        ds = self.nn(th.Tensor(nbs)).detach().numpy()
-        momentum = 0.5
-        self.vs += ds * momentum
-        self.vs /= 1 + 0.1 * momentum
+        # momentum = 0.5
+        # self.vs += accelerations * momentum
+        # self.vs /= 1 + 0.1 * momentum
 
 
 class GreedySwarm(Swarm):

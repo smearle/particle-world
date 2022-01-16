@@ -1,3 +1,5 @@
+from pdb import set_trace as TT
+
 import numpy as np
 import torch as th
 from torch import nn
@@ -27,14 +29,19 @@ class Generator(object):
         pass
 
     def render(self, screen):
-        screen.fill((255, 255, 255))
-        bg = self.landscape
-        bg = bg[..., None]
-        bg = np.concatenate((bg, bg, bg), axis=2)
-        bg = pygame.surfarray.make_surface(bg * 255)
-        bg = pygame.transform.scale(bg, (screen.get_width(), screen.get_height()))
-        screen.blit(bg, (0, 0))
-        pygame.display.update()
+        return render_landscape(screen, self.landscape)
+
+
+def render_landscape(screen, landscape):
+    screen.fill((255, 255, 255))
+    bg = landscape
+    bg = bg[..., None]
+    bg = (bg - bg.min()) / (bg.max() - bg.min())
+    bg = np.concatenate((bg, bg, bg), axis=2)
+    bg = pygame.surfarray.make_surface(bg * 255)
+    bg = pygame.transform.scale(bg, (screen.get_width(), screen.get_height()))
+    screen.blit(bg, (0, 0))
+    pygame.display.update()
 
 
 class FixedGenerator(Generator):
@@ -48,7 +55,7 @@ class FixedGenerator(Generator):
 class TileFlipFixedGenerator(FixedGenerator):
     def __init__(self, width):
         super().__init__(width)
-        self.landscape = np.random.normal(.5, .25, (self.width, self.width))
+        self.landscape = np.random.random((self.width, self.width))
 
     def set_weights(self, w):
         # self.landscape = th.sigmoid(th.Tensor(w.reshape((width, width)))).numpy()
@@ -58,11 +65,13 @@ class TileFlipFixedGenerator(FixedGenerator):
 class Rastrigin(Generator):
     def __init__(self, width):
         super().__init__(width)
-
-    def generate(self, render=False, screen=False):
         self.landscape = rastrigin(self.xy)
-        if render:
-            self._render(screen=screen)
+
+
+class Hill(Generator):
+    def __init__(self, width):
+        super().__init__(width)
+        self.landscape = hill(self.xy)
 
 
 class NNGenerator(Generator):
@@ -231,6 +240,26 @@ def rastrigin(ps):
     Y = ps[1, ...]
     Z = X ** 2 - 10 * np.cos(2 * np.pi * X) + \
         Y ** 2 - 10 * np.cos(2 * np.pi * Y)
-    return - (Z - Z.min()) / (Z.max() - Z.min())
+    # set mean of zero and std of 1
+    Z = (Z - Z.mean()) / Z.std()
+    Z = Z / np.abs(Z).max()
+    return Z
 
+
+
+def hill(ps):
+    """
+    :param ps: coordinates in the unit square
+    """
+    scale = 1
+    low, high = -5, 5
+    low /= scale
+    high /= scale
+    ps = ps * high
+    ndim = ps.shape[0]
+    assert ndim == 2
+    X = ps[0, ...]
+    Y = ps[1, ...]
+    Z = X ** 2 + Y ** 2
+    return (Z - Z.mean()) / Z.std()
 

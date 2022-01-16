@@ -4,6 +4,7 @@ import pickle
 import random
 import time
 from functools import partial
+from pdb import set_trace as TT
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,6 +13,7 @@ from deap import base
 from deap import creator
 from deap import tools
 from qdpy import containers
+import ray
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 from qdpy.base import ParallelismManager
 from qdpy.plots import plotGridSubplots
@@ -21,9 +23,10 @@ from ribs.optimizers import Optimizer
 from ribs.visualize import grid_archive_heatmap
 from tqdm import tqdm
 
-from env import ParticleSwarmEnv, ParticleMazeEnv
-from generator import TileFlipFixedGenerator, SinCPPNGenerator
-from swarm import eval_fit
+from env import ParticleSwarmEnv, ParticleMazeEnv, ParticleGym, ParticleGymRLlib
+from generator import TileFlipFixedGenerator, SinCPPNGenerator, Rastrigin, Hill
+from rllib_utils import init_particle_trainer
+from swarm import eval_fit, NN, RLlibNN
 from utils import infer, visualize, infer_elites, qdpy_eval, simulate, save
 
 seed = None
@@ -44,18 +47,44 @@ fitness_weight = -1.0
 creator.create("FitnessMin", base.Fitness, weights=(-fitness_weight,))
 creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 
-generator_phase = True
+generator_phase = False  # Do we start by evolving generators, or training players?
 gen_phase_len = 100
 play_phase_len = 1000
 
-def callback(itr):
-    if generator_phase:
-        if itr % gen_phase_len:
-            train_players(n_itr=play_phase_len)
-    else:
-        if itr % play_phase_len:
-            pass
 
+def train_players(n_itr, trainer, landscapes):
+    trainer.workers.foreach_worker(
+        lambda worker: worker.foreach_env(lambda env: env.set_landscape(landscapes[0])))
+    for i in range(n_itr):
+        stats = trainer.train()
+        keys = ['episode_reward_max', 'episode_reward_mean']
+        print('\n'.join([f'Training iteration {i}'] + [f'{k}: {stats[k]}' for k in keys]))
+        if i % 10 == 0:
+            checkpoint = trainer.save()
+            print("checkpoint saved at", checkpoint)
+
+    # Also, in case you have trained a model outside of ray/RLlib and have created
+    # an h5-file with weight values in it, e.g.
+    # my_keras_model_trained_outside_rllib.save_weights("model.h5")
+    # (see: https://keras.io/models/about-keras-models/)
+
+    trainer.load_checkpoint()
+    # ... you can load the h5-weights into your Trainer's Policy's ModelV2
+    # (tf or torch) by doing:
+    trainer.import_model("my_weights.h5")
+    # NOTE: In order for this to work, your (custom) model needs to implement
+    # the `import_from_h5` method.
+    # See https://github.com/ray-project/ray/blob/master/rllib/tests/test_model_imports.py
+    # for detailed examples for tf- and torch trainers/models.
+
+
+def callback(itr, player_trainer, landscapes):
+    # if generator_phase:
+    if itr % gen_phase_len:
+        train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=landscapes)
+    # else:
+    #     if itr % play_phase_len:
+            # pass
 
 
 def run_qdpy():
@@ -70,7 +99,6 @@ def run_qdpy():
 
     save_interval = 100
     if load:
-
         creator.create("FitnessMin", base.Fitness, weights=(1.0,))
         creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
         fname = f'latest-{args.loadIteration}' if args.loadIteration is not None else 'latest-0'
@@ -152,7 +180,7 @@ def run_qdpy():
                                verbose=verbose, show_warnings=show_warnings,
                                results_infos=results_infos, log_base_path=log_base_path, save_period=save_interval,
                                iteration_filename='latest-{}.p',
-                                iteration_callback_fn = qdpy_callback,
+                               iteration_callback_fn=iteration_callback,
         )
         # Run the illumination process !
         algo.run(init_batch_size=init_batch_size)
@@ -235,7 +263,7 @@ def run_pyribs():
         pool = Pool()
         generators = [generator_cls(width=width) for _ in range(batch_size * n_emitters)]
         # generators = [generator for _ in range(batch_size * n_emitters)]
-        envs = [ParticleSwarmEnv(width=width, n_pop=n_pop, n_policies=n_pop) for _ in
+        envs = [ParticleGym(width=width, n_pop=n_pop, n_policies=n_policies) for _ in
                 range(batch_size * n_emitters)]
         # envs = [env for _ in range(batch_size * n_emitters)]
     for itr in tqdm(range(1, total_itrs + 1)):
@@ -269,13 +297,15 @@ def run_pyribs():
 
 
 if __name__ == '__main__':
-    # generator_cls = Rastrigin
-    generator_cls = TileFlipFixedGenerator
+    # generator_cls = Hill
+    generator_cls = Rastrigin
+    # generator_cls = TileFlipFixedGenerator
     # generator_cls = NCAGenerator
     # generator_cls = SinCPPNGenerator
     generator = generator_cls(width=width)
-    env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
+    # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
     # env = ParticleMazeEnv(width=width, n_policies=n_policies, n_pop=n_pop)
+    env = ParticleGym(width=width, n_policies=n_policies, n_pop=n_pop, max_steps=n_sim_steps, pg_width=pg_width)
 
     initial_weights = generator.get_init_weights()
 
@@ -304,9 +334,17 @@ if __name__ == '__main__':
     save_interval = 10
     features_domain = [(0., 1.)] * nb_features  # The domain (min/max values) of the features
 
-    if args.algo == 'me':
-        run_qdpy()
-    elif args.algo == 'cmame':
-        run_pyribs()
-    elif args.algo == 'ppo':
-        pass
+    particle_trainer = init_particle_trainer(env)
+
+    if generator_phase:
+        if args.algo == 'me':
+            run_qdpy()
+        elif args.algo == 'cmame':
+            run_pyribs()
+        elif args.algo == 'ppo':
+            # TODO: train generators?
+            pass
+    else:
+        # TODO: evolve players?
+        train_players(1000, trainer=particle_trainer, landscapes=[generator.landscape])
+        # train_players(play_phase_len, particle_trainer)
