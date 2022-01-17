@@ -40,7 +40,7 @@ def init_particle_trainer(env, num_rllib_workers, num_rllib_envs):
             "max_steps": env.max_steps,
             # "pg_width": pg_width,
         },
-        "num_gpus": 1,
+        "num_gpus": 0,
         "num_workers": num_rllib_workers,
         "num_envs_per_worker": math.ceil(num_rllib_envs / workers),
         "framework": "torch",

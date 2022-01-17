@@ -38,7 +38,7 @@ width = 100
 pg_delay = 50
 n_nca_steps = 10
 n_sim_steps = 100
-pg_width = 500
+pg_width = 200
 pg_scale = pg_width / width
 # swarm_type = MemorySwarm
 n_policies = 3
@@ -331,9 +331,12 @@ if __name__ == '__main__':
                         help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
     parser.add_argument('-li', '--loadIteration', default=1, type=int)
-    parser.add_argument('-a', '--algo', default='cmame')
+    parser.add_argument('-a', '--algo', default='me')
     parser.add_argument('-exp', '--experimentName', default='test')
     args = parser.parse_args()
+    save_dir = os.path.join(args.outputDir, args.experimentName)
+    if not os.path.isdir(save_dir):
+        os.mkdir(save_dir)
     num_rllib_workers = 0
     num_rllib_envs = 12
     load = args.load

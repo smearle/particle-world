@@ -74,7 +74,7 @@ class ParticleSwarmEnv(object):
             for agent_pos in policy_i.ps:
                 pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
                                    self.particle_draw_size * pg_scale)
-        pygame.display.update(scape=self.landscape)
+        pygame.display.update()
         pygame.time.delay(pg_delay)
         return pygame.surfarray.array3d(self.screen)
 
@@ -87,7 +87,7 @@ class ParticleSwarmEnv(object):
         # p1, p2 = self.swarms[0], self.swarms[1]
         # objs = fit_dist([p1, p2], self.landscape)
         ps1, ps2 = self.swarms[0].ps, self.swarms[1].ps
-        objs = contrastive_pop([swarm.ps for swarm in self.swarms], generator.width)
+        objs = contrastive_pop([swarm.ps for swarm in self.swarms], self.width)
         bcs = ps1.mean(0)
         return objs, bcs
 
@@ -121,7 +121,6 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
 
     def set_landscape(self, landscape):
         self.landscape = landscape
-        print(f'set landscape with shape {landscape.shape}')
 
     def set_trainer(self, trainer):
         self.trainer = trainer
@@ -141,7 +140,7 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
                             for j in range(len(self.swarms))}
         [swarm.update(scape=self.landscape, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
-        rew = self.get_reward()
+        rew = self.get_reward(self.landscape)
         done = self.get_dones()
         info = {}
         self.n_step += 1
@@ -157,8 +156,8 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
         return {(i, j): swarm.get_observations(scape=self.landscape)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
 
-    def get_reward(self):
-        return {(i, j): swarm.get_rewards()[j] for i, swarm in enumerate(self.swarms)
+    def get_reward(self, scape):
+        return {(i, j): swarm.get_rewards(scape)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
 
 
@@ -169,8 +168,11 @@ class ParticleGymRLlib(ParticleGym):
 
     def set_world(self, id, world):
         self.world_idx = id
-        TT()
-        super().set_landscape(world)
+        landscape = np.array(world).reshape(self.width, self.width)
+        super().set_landscape(landscape)
+
+    def get_fitness(self):
+        return (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
 
 
 class ParticleMazeEnv(ParticleSwarmEnv):

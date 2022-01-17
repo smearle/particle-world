@@ -51,9 +51,9 @@ class Swarm(object):
         nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
         return nbs
 
-    def get_rewards(self):
+    def get_rewards(self, scape):
         ps = self.ps.astype(int)
-        return np.abs(self.trg_scape_val - self.landscape[ps[:, 0], ps[:, 1]])
+        return np.abs(self.trg_scape_val - scape[ps[:, 0], ps[:, 1]])
 
 
 def init_ps(world_width, npop, ndim=2):
@@ -128,20 +128,20 @@ class NeuralSwarm(Swarm):
         PPOTorchPolicy
     def set_nn(self, nn, policy_id, obs_space, act_space, trainer_config):
         self.nn = type(nn)(obs_space, act_space, trainer_config['model'])
-        # self.nn.model = type(nn.model)(obs_space, act_space, nn.model.num_outputs, trainer_config['model'], f'policy_{policy_id}')
+        self.nn.model = type(nn.model)(obs_space, act_space, nn.model.num_outputs, trainer_config['model'], f'policy_{policy_id}')
         self.nn.set_state(copy.deepcopy(nn.get_state()))
         self.nn.set_weights(copy.deepcopy(nn.get_weights()))
         self.nn.model.load_state_dict(copy.copy(nn.model.state_dict()))
         self.nn.__delattr__ = None
+        self.nn.model_gpu_towers = None
         attrs = dir(self.nn)
-        TT()
         for k in self.nn.__dict__:
 
         # for attr in attrs:
-            at = getattr(self.nn, attr)
-            print('at', attr, at)
+            at = getattr(self.nn, k)
+            print('at', k, at)
             copy.deepcopy(at)
-        TT()
+        return
 
     def update(self, scape, accelerations=None, obstacles=None):
         if accelerations is None:

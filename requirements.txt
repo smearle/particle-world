@@ -1,0 +1,4 @@
+ray[rllib]
+qdpy[deap]
+neat-python
+./pytorch-neat
