@@ -1,0 +1,3 @@
+[submodule "pytorch-neat"]
+	path = pytorch-neat
+	url = git@github.com:smearle/pytorch-neat

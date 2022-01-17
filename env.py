@@ -6,6 +6,7 @@ import numpy as np
 import pygame
 import ray
 from ray import rllib
+from ray.rllib.policy.policy import PolicySpec
 
 from generator import render_landscape
 from swarm import NeuralSwarm, GreedySwarm, contrastive_pop
@@ -48,17 +49,18 @@ class ParticleSwarmEnv(object):
                 trg_scape_val=1.0)
             for si, trg in zip(range(n_policies), np.arange(n_policies) / (n_policies - 1))]
 
-    def set_policies(self, policies):
-        self.swarms = policies
+    def set_policies(self, policies, trainer_config):
+        # self.swarms = policies
+        [swarm.set_nn(policy, i, self.observation_spaces[i], self.action_spaces[i], trainer_config) for i, (swarm, policy) in enumerate(zip(self.swarms, policies))]
 
     def reset(self, landscape):
         self.landscape = landscape
         [swarm.reset(landscape) for swarm in self.swarms]
 
     def step_swarms(self):
-        [s.update() for s in self.swarms]
+        [s.update(scape=self.landscape) for s in self.swarms]
 
-    def render(self, screen=None, pg_delay=0):
+    def render(self, mode='human', pg_delay=0):
         pg_scale = self.pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([self.pg_width, self.pg_width])
@@ -72,9 +74,9 @@ class ParticleSwarmEnv(object):
             for agent_pos in policy_i.ps:
                 pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
                                    self.particle_draw_size * pg_scale)
-        pygame.display.update()
+        pygame.display.update(scape=self.landscape)
         pygame.time.delay(pg_delay)
-        return True
+        return pygame.surfarray.array3d(self.screen)
 
     def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=1):
         for i in range(n_steps):
@@ -88,6 +90,17 @@ class ParticleSwarmEnv(object):
         objs = contrastive_pop([swarm.ps for swarm in self.swarms], generator.width)
         bcs = ps1.mean(0)
         return objs, bcs
+
+
+def gen_policy(i, observation_space, action_space, fov):
+    config = {
+        "model": {
+            "custom_model_config": {
+                "fov": fov,
+            }
+        }
+    }
+    return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
 
 
 class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
@@ -104,9 +117,15 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
                               for i in range(n_policies)}
         self.max_steps = max_steps
         self.n_step = 0
+        self.trainer = None
 
     def set_landscape(self, landscape):
         self.landscape = landscape
+        print(f'set landscape with shape {landscape.shape}')
+
+    def set_trainer(self, trainer):
+        self.trainer = trainer
+
 
     def reset(self):
         self.n_step = 0
@@ -120,7 +139,7 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
         batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] for i in range(self.swarms[j].n_pop)])
                             for j in range(len(self.swarms))}
-        [swarm.update(accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
+        [swarm.update(scape=self.landscape, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
         rew = self.get_reward()
         done = self.get_dones()
@@ -135,7 +154,7 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
         return dones
 
     def get_particle_observations(self):
-        return {(i, j): swarm.get_observations()[j] for i, swarm in enumerate(self.swarms)
+        return {(i, j): swarm.get_observations(scape=self.landscape)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
 
     def get_reward(self):
@@ -146,6 +165,12 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
         super().__init__(**cfg)
+        self.world_idx = None
+
+    def set_world(self, id, world):
+        self.world_idx = id
+        TT()
+        super().set_landscape(world)
 
 
 class ParticleMazeEnv(ParticleSwarmEnv):
@@ -159,7 +184,7 @@ class ParticleMazeEnv(ParticleSwarmEnv):
         [swarm.reset(landscape) for swarm in self.swarms]
 
     def step_swarms(self):
-        [s.update(obstacles=self.landscape) for s in self.swarms]
+        [s.update(scape=self.landscape, obstacles=self.landscape) for s in self.swarms]
 
     def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=1):
         generator.landscape = self.landscape  # just for rendering

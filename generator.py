@@ -1,9 +1,13 @@
 from pdb import set_trace as TT
 
+import neat
 import numpy as np
-import torch as th
-from torch import nn
 import pygame
+import torch as th
+from neat.genome import DefaultGenome
+import pytorch_neat
+from pytorch_neat.cppn import create_cppn, Leaf
+from torch import nn
 
 
 class Generator(object):
@@ -204,6 +208,47 @@ def set_weights(nn, weights):
                 layer.bias = th.nn.Parameter(th.Tensor(b_weights))
                 layer.bias.requires_grad = False
     return nn
+
+
+class CPPN(Generator):
+    def __init__(self, width):
+        super().__init__(width)
+        n_actions = 1
+        neat_config_path = 'config_cppn'
+        self.neat_config = neat.config.Config(DefaultGenome, neat.reproduction.DefaultReproduction,
+                                              neat.species.DefaultSpeciesSet, neat.stagnation.DefaultStagnation,
+                                              neat_config_path)
+        self.n_actions = n_actions
+        self.neat_config.genome_config.num_outputs = n_actions
+        self.neat_config.genome_config.num_hidden = 2
+        self.genome = DefaultGenome(0)
+        self.genome.configure_new(self.neat_config.genome_config)
+        self.input_names = ['x_in', 'y_in']
+        self.output_names = ['tile_{}'.format(i) for i in range(n_actions)]
+        self.cppn = create_cppn(self.genome, self.neat_config, self.input_names, self.output_names)
+
+    def mate(self, ind_1, fit_0, fit_1):
+        self.genome.fitness = fit_0
+        ind_1.genome.fitness = fit_1
+        return self.genome.configure_crossover(self.genome, ind_1.genome, self.neat_config.genome_config)
+
+    def mutate(self):
+        #       print(self.input_names, self.neat_config.genome_config.input_keys, self.genome.nodes)
+        self.genome.mutate(self.neat_config.genome_config)
+        self.cppn = create_cppn(self.genome, self.neat_config, self.input_names, self.output_names)
+
+    # def draw_net(self):
+    #     draw_net(self.neat_config, self.genome,  view=True, filename='cppn')
+    #
+    def generate(self, render=False, screen=None, pg_delay=0):
+        X = th.arange(self.width)
+        Y = th.arange(self.width)
+        X, Y = th.meshgrid(X/X.max(), Y/Y.max())
+        tile_probs = [self.cppn[i](x_in=X, y_in=Y) for i in range(self.n_actions)]
+        multi_hot = th.stack(tile_probs, axis=0)
+        multi_hot = multi_hot.unsqueeze(0)
+        return multi_hot
+
 
 
 def set_nograd(nn):

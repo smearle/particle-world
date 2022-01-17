@@ -2,6 +2,7 @@ import argparse
 import os
 import pickle
 import random
+import sys
 import time
 from functools import partial
 from pdb import set_trace as TT
@@ -24,7 +25,8 @@ from ribs.visualize import grid_archive_heatmap
 from tqdm import tqdm
 
 from env import ParticleSwarmEnv, ParticleMazeEnv, ParticleGym, ParticleGymRLlib
-from generator import TileFlipFixedGenerator, SinCPPNGenerator, Rastrigin, Hill
+from generator import TileFlipFixedGenerator, SinCPPNGenerator, Rastrigin, Hill, CPPN
+from qdpy_utils import qdRLlibEval
 from rllib_utils import init_particle_trainer
 from swarm import eval_fit, NN, RLlibNN
 from utils import infer, visualize, infer_elites, qdpy_eval, simulate, save
@@ -47,8 +49,8 @@ fitness_weight = -1.0
 creator.create("FitnessMin", base.Fitness, weights=(-fitness_weight,))
 creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 
-generator_phase = False  # Do we start by evolving generators, or training players?
-gen_phase_len = 100
+generator_phase = True  # Do we start by evolving generators, or training players?
+gen_phase_len = 10
 play_phase_len = 1000
 
 
@@ -60,7 +62,7 @@ def train_players(n_itr, trainer, landscapes):
         keys = ['episode_reward_max', 'episode_reward_mean']
         print('\n'.join([f'Training iteration {i}'] + [f'{k}: {stats[k]}' for k in keys]))
         if i % 10 == 0:
-            checkpoint = trainer.save()
+            checkpoint = trainer.save(f'./runs/{args.experimentName}')
             print("checkpoint saved at", checkpoint)
 
     # Also, in case you have trained a model outside of ray/RLlib and have created
@@ -71,14 +73,14 @@ def train_players(n_itr, trainer, landscapes):
     trainer.load_checkpoint()
     # ... you can load the h5-weights into your Trainer's Policy's ModelV2
     # (tf or torch) by doing:
-    trainer.import_model("my_weights.h5")
+    # trainer.import_model("my_weights.h5")
     # NOTE: In order for this to work, your (custom) model needs to implement
     # the `import_from_h5` method.
     # See https://github.com/ray-project/ray/blob/master/rllib/tests/test_model_imports.py
     # for detailed examples for tf- and torch trainers/models.
 
 
-def callback(itr, player_trainer, landscapes):
+def phase_switch_callback(itr, player_trainer, landscapes):
     # if generator_phase:
     if itr % gen_phase_len:
         train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=landscapes)
@@ -87,27 +89,34 @@ def callback(itr, player_trainer, landscapes):
             # pass
 
 
+class CPPNIndividual(creator.Individual, CPPN):
+    def __init__(self):
+        CPPN.__init__(self, width)
+        creator.Individual.__init__(self)
+
+
 def run_qdpy():
 
     def iteration_callback(itr, batch, container, logbook):
         if itr % save_interval == 0:
-            with open('learn.pickle', 'wb') as handle:
+            with open(f'runs/{args.experimentName}/learn.pickle', 'wb') as handle:
                 dict = {
                     'policies': env.swarms,
                 }
                 pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        phase_switch_callback(itr, player_trainer=particle_trainer, landscapes=container)
 
     save_interval = 100
     if load:
         creator.create("FitnessMin", base.Fitness, weights=(1.0,))
         creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
         fname = f'latest-{args.loadIteration}' if args.loadIteration is not None else 'latest-0'
-        with open(f"runs/{fname}.p", "rb") as f:
+        with open(f"runs/{args.experimentName}/{fname}.p", "rb") as f:
             data = pickle.load(f)
-        with open('learn.pickle', 'rb') as f:
+        with open(f'runs/{args.experimentName}/learn.pickle', 'rb') as f:
             supp_data = pickle.load(f)
             policies = supp_data['policies']
-        env.set_policies(policies)
+        # env.set_policies(policies)
         grid = data['container']
         curr_iter = data['current_iteration']
         if enjoy:
@@ -122,8 +131,8 @@ def run_qdpy():
     assert (nb_features >= 1)
     bins_per_dim = int(pow(args.maxTotalBins, 1. / nb_features))
 
-    init_batch_size = 10  # The number of evaluations of the initial batch ('batch' = population)
-    batch_size = 10  # The number of evaluations in each subsequent batch
+    init_batch_size = num_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
+    batch_size = num_rllib_envs  # The number of evaluations in each subsequent batch
     nb_iterations = total_itrs - curr_iter  # The number of iterations (i.e. times where a new batch is evaluated)
     if generator_cls == TileFlipFixedGenerator:
         mutation_pb = 0.003  # The probability of mutating each value of a genome
@@ -149,6 +158,7 @@ def run_qdpy():
     toolbox = base.Toolbox()
     toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
     toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
+    # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
     toolbox.register("evaluate", qdpy_eval, env, generator)
@@ -174,6 +184,7 @@ def run_qdpy():
         grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
                                fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
+        qd_algo = partial(qdRLlibEval, particle_trainer)
         # Create a QD algorithm
         algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
                                batch_size=batch_size, niter=nb_iterations,
@@ -181,6 +192,7 @@ def run_qdpy():
                                results_infos=results_infos, log_base_path=log_base_path, save_period=save_interval,
                                iteration_filename='latest-{}.p',
                                iteration_callback_fn=iteration_callback,
+                               ea_fn=qd_algo,
         )
         # Run the illumination process !
         algo.run(init_batch_size=init_batch_size)
@@ -212,8 +224,8 @@ def run_pyribs():
             policies = dict['policies']
         visualize(archive)
         if enjoy:
-            env.set_policies(policies)
-            infer(env, generator, archive, pg_width, pg_delay)
+            # env.set_policies(policies)
+            infer(env, generator, particle_trainer, archive, pg_width, pg_delay)
     else:
         stats = {
             'n_iter': 0,
@@ -276,7 +288,7 @@ def run_pyribs():
             objs, bcs = zip(*ret)
         else:
             for i, sol in enumerate(sols):
-                obj, bc = simulate(generator, sol, env, n_steps=n_sim_steps, n_eps=1, screen=None, pg_delay=pg_delay, pg_scale=pg_scale)
+                obj, bc = simulate(generator, particle_trainer, sol, env, n_steps=n_sim_steps, n_eps=1, screen=None, pg_delay=pg_delay, pg_scale=pg_scale)
                 objs.append(obj)
                 bcs.append(bc)
         optimizer.tell(objs, bcs)
@@ -298,10 +310,11 @@ def run_pyribs():
 
 if __name__ == '__main__':
     # generator_cls = Hill
-    generator_cls = Rastrigin
-    # generator_cls = TileFlipFixedGenerator
+    # generator_cls = Rastrigin
+    generator_cls = TileFlipFixedGenerator
     # generator_cls = NCAGenerator
     # generator_cls = SinCPPNGenerator
+    # generator_cls = CPPN
     generator = generator_cls(width=width)
     # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
     # env = ParticleMazeEnv(width=width, n_policies=n_policies, n_pop=n_pop)
@@ -317,10 +330,12 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--parallelismType', type=str, default='None',
                         help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
-    parser.add_argument('-li', '--loadIteration', default=None)
+    parser.add_argument('-li', '--loadIteration', default=1, type=int)
     parser.add_argument('-a', '--algo', default='cmame')
     parser.add_argument('-exp', '--experimentName', default='test')
     args = parser.parse_args()
+    num_rllib_workers = 0
+    num_rllib_envs = 12
     load = args.load
     enjoy = args.enjoy
     total_itrs = 50000
@@ -334,7 +349,17 @@ if __name__ == '__main__':
     save_interval = 10
     features_domain = [(0., 1.)] * nb_features  # The domain (min/max values) of the features
 
-    particle_trainer = init_particle_trainer(env)
+    particle_trainer = init_particle_trainer(env, num_rllib_workers=num_rllib_workers, num_rllib_envs=num_rllib_envs)
+    # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
+    # env.set_trainer(particle_trainer)
+
+    if args.load:
+        particle_trainer.load_checkpoint(f'runs/{args.experimentName}/checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}')
+        if args.enjoy:
+            particle_trainer.evaluation_workers.foreach_worker(
+                lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.landscape)))
+            particle_trainer.evaluate()
+            sys.exit()
 
     if generator_phase:
         if args.algo == 'me':

@@ -1,10 +1,25 @@
+import copy
+
 import numpy as np
 import torch as th
+from ray.rllib.agents.ppo import PPOTorchPolicy
 from ray.rllib.models import ModelV2
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.utils.typing import TensorType
 from torch import nn
 from pdb import set_trace as TT
+
+
+def gen_policy(i, observation_space, action_space, fov):
+    config = {
+        "model": {
+            "custom_model_config": {
+                "fov": fov,
+            }
+        }
+    }
+    return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
 
 
 class Swarm(object):
@@ -14,14 +29,13 @@ class Swarm(object):
         self.vs = None
         self.fov = fov
         self.n_pop = n_pop
-        self.landscape = None
         self.trg_scape_val = trg_scape_val
 
     def reset(self, scape):
-        self.landscape = scape
+        # self.landscape = scape
         self.ps, self.vs = init_ps(self.world_width, self.n_pop)
 
-    def get_observations(self):
+    def get_observations(self, scape):
         fov = self.fov
         patch_w = fov * 2 + 1
         # Add new dimensions for patch_w-width patches of the environment around each agent
@@ -29,7 +43,7 @@ class Swarm(object):
         # weird edge case, is modulo broken?
         ps_int = np.where(ps_int == self.world_width, 0, ps_int)
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
-        scape = np.pad(self.landscape, fov, mode='wrap')
+        scape = np.pad(scape, fov, mode='wrap')
         # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
         nbs = [scape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
@@ -111,13 +125,34 @@ class NeuralSwarm(Swarm):
         # self.nn = NN(fov=fov)
         self.nn = None
 
-    def update(self, accelerations=None, obstacles=None):
+        PPOTorchPolicy
+    def set_nn(self, nn, policy_id, obs_space, act_space, trainer_config):
+        self.nn = type(nn)(obs_space, act_space, trainer_config['model'])
+        # self.nn.model = type(nn.model)(obs_space, act_space, nn.model.num_outputs, trainer_config['model'], f'policy_{policy_id}')
+        self.nn.set_state(copy.deepcopy(nn.get_state()))
+        self.nn.set_weights(copy.deepcopy(nn.get_weights()))
+        self.nn.model.load_state_dict(copy.copy(nn.model.state_dict()))
+        self.nn.__delattr__ = None
+        attrs = dir(self.nn)
+        TT()
+        for k in self.nn.__dict__:
+
+        # for attr in attrs:
+            at = getattr(self.nn, attr)
+            print('at', attr, at)
+            copy.deepcopy(at)
+        TT()
+
+    def update(self, scape, accelerations=None, obstacles=None):
         if accelerations is None:
             if self.nn is None:
                 print("Generating random NN swarm policies inside environment, because no accelerations were supplied "
                       "when updating swarms.")
-            nbs = self.get_observations(fov=self.fov)
-            accelerations = self.nn(th.Tensor(nbs)).detach().numpy()
+            nbs = self.get_observations(scape=scape)
+            actions, hid_state = self.nn({'obs': th.Tensor(nbs)})
+            actions = actions.detach().numpy()
+            TT()
+            accelerations = actions.argmax(0)
         if obstacles is not None:
             # TODO: collision detection
             pass
@@ -141,24 +176,9 @@ class GreedySwarm(Swarm):
         super().reset(scape)
         self.ps, self.vs = init_ps(self.world_width, self.n_pop)
 
-    def update(self, obstacles=None):
+    def update(self, scape, obstacles=None):
         if obstacles is not None:
-            new_ps = self.ps + self.vs
-            # For each particle, get the largest delta of the two directions
-            max_step = self.vs[np.arange(self.vs.shape[0]), np.abs(self.vs).argmax(axis=-1)]
-            # Ceiling of how many cells we will cross through in direction of greatest change
-            n_steps = np.ceil(np.abs(max_step))
-            step_size = 1 / n_steps
-            # FIXME: lazily checking too many inter-cells here
-            step_fracs = np.arange(1, n_steps.max() + 1) / n_steps.max()
-            print(step_fracs.shape)
-            inter_steps = np.tile(self.vs, len(step_fracs)) * np.repeat(step_fracs, 2)
-            inter_cells = np.tile(self.ps, len(step_fracs)) + inter_steps
-            # Taking floors to get grid coordinates
-            inter_cells_int = inter_cells.astype(int)
-            collisions = obstacles[inter_cells_int[:, 0], inter_cells_int[:, 1]]
-            print(collisions.shape)
-            pass
+            update_pos_with_collision(self.ps, self.vs, obstacles)
         else:
             self.ps += self.vs
         self.ps = self.ps % self.world_width
@@ -169,7 +189,7 @@ class GreedySwarm(Swarm):
         # weird edge case, is modulo broken?
         ps_int = np.where(ps_int == self.world_width, 0, ps_int)
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
-        scape = np.pad(self.landscape, fov, mode='wrap')
+        scape = np.pad(scape, fov, mode='wrap')
         # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
         nbs = [scape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
@@ -192,16 +212,16 @@ class MemorySwarm(Swarm):
     def reset(self, scape):
         super().reset(scape)
         self.ps, self.vs = init_ps(self.n_pop)
-        self.i_vals = eval_fit(self.ps.swapaxes(1, 0), self.landscape)
+        self.i_vals = eval_fit(self.ps.swapaxes(1, 0), scape)
         self.i_bests = self.ps.copy()
         g_best_idx = np.argmax(self.i_vals)
         self.g_best = self.i_bests[g_best_idx]
         self.g_val = self.i_vals[g_best_idx]
 
-    def update(self):
+    def update(self, scape):
         self.ps += self.vs
         self.ps = self.ps % self.world_width
-        fits = eval_fit(self.ps.swapaxes(1, 0), self.landscape)
+        fits = eval_fit(self.ps.swapaxes(1, 0), scape)
         i_idxs = np.where(fits > self.i_vals)
         self.i_bests[i_idxs, :] = self.ps[i_idxs, :]
         self.i_vals[i_idxs] = fits[i_idxs]
@@ -243,3 +263,36 @@ def toroidal_distance(a, b, width):
     return dist
 
 
+def update_pos_with_collision(ps, vs, obstacles):
+    new_ps = ps + vs
+    # get all gridlines with which each line intersects
+    xs = np.hstack(ps[:, 0], new_ps[:, 0])
+    ys = np.hstack(ps[:, 1], new_ps[:, 1])
+    x0s, x1s = np.min(xs, -1), np.max(xs, -1)
+    y0s, y1s = np.min(ys, -1), np.max(ys, -1)
+    gridlines = [(np.arange(x0, x1), np.arange(y0, y1)) for x0, x1, y0, y1 in zip(x0s, x1s, y0s, y1s)]
+    for pi, line in enumerate(gridlines):
+        grid_xs, grid_ys = line
+        # get all points of intersection with grid
+        grid_points = []
+        for grid_x in grid_xs:
+            a = (grid_x - ps[pi, 0]) / vs[ps, 0]
+            grid_y = ps[pi, 0] + a * vs[ps, 1]
+            grid_points.append((grid_x, grid_y))
+
+    # For each particle, get the largest delta of the two directions
+    max_step = vs[np.arange(vs.shape[0]), np.abs(vs).argmax(axis=-1)]
+    # Ceiling of how many cells we will cross through in direction of greatest change
+    n_steps = np.ceil(np.abs(max_step))
+    step_size = 1 / n_steps
+    # FIXME: lazily checking too many inter-cells here
+    step_fracs = np.arange(1, n_steps.max() + 1) / n_steps.max()
+    print(step_fracs.shape)
+    inter_steps = np.tile(vs, len(step_fracs)) * np.repeat(step_fracs, 2)
+    inter_cells = np.tile(ps, len(step_fracs)) + inter_steps
+    # Taking floors to get grid coordinates
+    inter_cells_int = inter_cells.astype(int)
+    collisions = obstacles[inter_cells_int[:, 0], inter_cells_int[:, 1]]
+    print(collisions.shape)
+
+    return new_ps

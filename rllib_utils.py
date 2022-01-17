@@ -1,30 +1,23 @@
 # Each policy can have a different configuration (including custom model).
 import copy
+import math
 
 from ray.rllib.agents.ppo import ppo
 from ray.rllib.models import MODEL_DEFAULTS
 from ray.rllib.policy.policy import PolicySpec
 
-from env import ParticleGymRLlib
+from env import ParticleGymRLlib, gen_policy
 
 
-def gen_policy(i, observation_space, action_space, fov):
-    config = {
-        "model": {
-            "custom_model_config": {
-                "fov": fov,
-            }
-        }
-    }
-    return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
-
-
-def init_particle_trainer(env):
+def init_particle_trainer(env, num_rllib_workers, num_rllib_envs):
     # env is currently a dummy environment that will not be used in actual training
     MODEL_CONFIG = copy.copy(MODEL_DEFAULTS)
     MODEL_CONFIG.update({
-        "use_lstm": True,
+        # "use_lstm": True,
+        # "fcnet_hiddens": [32, 32],
     })
+    workers = 1 if num_rllib_workers == 0 else num_rllib_workers
+
     trainer_config = {
         "multiagent": {
             "policies": {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
@@ -48,14 +41,16 @@ def init_particle_trainer(env):
             # "pg_width": pg_width,
         },
         "num_gpus": 1,
-        # "num_workers": 12,
-        # "num_envs_per_worker": 2,
+        "num_workers": num_rllib_workers,
+        "num_envs_per_worker": math.ceil(num_rllib_envs / workers),
         "framework": "torch",
         "render_env": True,
+        "evaluation_interval": 10,
         # "explore": False,
         # "lr": 0.1,
         # "train_batch_size": 500,
         # "log_level": "INFO",
+        "record_env": True,
     }
     trainer = ppo.PPOTrainer(env=ParticleGymRLlib, config=trainer_config)
     return trainer
