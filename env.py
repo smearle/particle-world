@@ -29,12 +29,13 @@ class ParticleSwarmEnv(object):
             pg_width = width
         self.pg_width=pg_width
         self.landscape = None
+        self.landscape_set = False
         self.swarms = None
         self.width = width
         # self.fovs = [si+1 for si in range(n_policies)]
         self.fovs = [3 for si in range(n_policies)]
         self._gen_swarms(n_policies, n_pop, self.fovs)
-        self.particle_draw_size = 1
+        self.particle_draw_size = 0.3
         self.n_steps = None
         self.screen = None
 
@@ -53,14 +54,18 @@ class ParticleSwarmEnv(object):
         # self.swarms = policies
         [swarm.set_nn(policy, i, self.observation_spaces[i], self.action_spaces[i], trainer_config) for i, (swarm, policy) in enumerate(zip(self.swarms, policies))]
 
-    def reset(self, landscape):
-        self.landscape = landscape
-        [swarm.reset(landscape) for swarm in self.swarms]
+    def reset(self):
+        # assert self.landscape_set
+        assert self.landscape is not None
+        assert len(self.landscape.shape) == 2
+        [swarm.reset(scape=self.landscape) for swarm in self.swarms]
 
     def step_swarms(self):
         [s.update(scape=self.landscape) for s in self.swarms]
 
     def render(self, mode='human', pg_delay=0):
+        pg_delay = 0
+        # print('render')
         pg_scale = self.pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([self.pg_width, self.pg_width])
@@ -72,11 +77,16 @@ class ParticleSwarmEnv(object):
                 sys.exit()
         for pi, policy_i in enumerate(self.swarms):
             for agent_pos in policy_i.ps:
+                agent_pos = agent_pos.astype(int) + 0.5
                 pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
                                    self.particle_draw_size * pg_scale)
         pygame.display.update()
         pygame.time.delay(pg_delay)
-        return pygame.surfarray.array3d(self.screen)
+        arr = pygame.surfarray.array3d(self.screen)
+        # arr = arr.transpose(2, 0, 1)
+        # arr = arr / 255
+        # return arr
+        return True
 
     def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=1):
         for i in range(n_steps):
@@ -90,6 +100,11 @@ class ParticleSwarmEnv(object):
         objs = contrastive_pop([swarm.ps for swarm in self.swarms], self.width)
         bcs = ps1.mean(0)
         return objs, bcs
+
+    def set_landscape(self, landscape):
+        assert landscape is not None
+        self.landscape_set = True
+        self.landscape = landscape
 
 
 def gen_policy(i, observation_space, action_space, fov):
@@ -119,45 +134,47 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
         self.n_step = 0
         self.trainer = None
 
-    def set_landscape(self, landscape):
-        self.landscape = landscape
-
     def set_trainer(self, trainer):
         self.trainer = trainer
 
 
     def reset(self):
+        # print('reset', self.worlds.keys())
         self.n_step = 0
         # TODO: reset to a landscape in the archive, via rllib config args?
-        super().reset(landscape=self.landscape)
+        super().reset()
         obs = self.get_particle_observations()
         return obs
 
     def step(self, actions):
+        assert self.landscape is not None
         swarm_acts = {i: {} for i in range(len(self.swarms))}
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
         batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] for i in range(self.swarms[j].n_pop)])
                             for j in range(len(self.swarms))}
         [swarm.update(scape=self.landscape, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
-        rew = self.get_reward(self.landscape)
+        rew = self.get_reward()
         done = self.get_dones()
         info = {}
         self.n_step += 1
+        assert self.landscape is not None
         return obs, rew, done, info
 
     def get_dones(self):
         dones = {(i, j): False for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
-        dones.update({'__all__': self.n_step > 0 and self.n_step % self.max_steps == 0})
+        dones.update({'__all__': self.n_step > 0 and self.n_step % (self.max_steps - 1) == 0})
+        if dones['__all__']:
+            self.landscape_set = False
         return dones
 
     def get_particle_observations(self):
         return {(i, j): swarm.get_observations(scape=self.landscape)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
 
-    def get_reward(self, scape):
-        return {(i, j): swarm.get_rewards(scape)[j] for i, swarm in enumerate(self.swarms)
+    def get_reward(self):
+        return {(i, j): swarm.get_rewards(self.landscape)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
 
 
@@ -166,24 +183,47 @@ class ParticleGymRLlib(ParticleGym):
         super().__init__(**cfg)
         self.world_idx = None
 
-    def set_world(self, id, world):
-        self.world_idx = id
-        landscape = np.array(world).reshape(self.width, self.width)
-        super().set_landscape(landscape)
+    def set_world(self, worlds):
+        self.world_idx = 0
+        self.worlds = worlds
+        self.fitnesses = {}
+        # print('set worlds ', worlds.keys())
+
+    def reset(self):
+        if not hasattr(self, 'worlds'):
+            print(self)
+        assert hasattr(self, 'worlds')
+        # print('reset w/ worlds', self.worlds.keys())
+        world_idx = list(self.worlds.keys())[self.world_idx]
+        world = self.worlds[world_idx]
+        self.set_landscape(np.array(world).reshape(self.width, self.width))
+        self.world_idx = (self.world_idx + 1) % len(self.worlds)
+
+        return super().reset()
 
     def get_fitness(self):
-        return (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
+        return self.fitnesses
+
+    def step(self, actions):
+        obs, rew, dones, info = super().step(actions)
+        if dones['__all__']:
+            world_idx = list(self.worlds.keys())[self.world_idx]
+            self.fitnesses[world_idx] = (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
+
+        return obs, rew, dones, info
 
 
 class ParticleMazeEnv(ParticleSwarmEnv):
     def __init__(self, width, n_policies, n_pop):
         super().__init__(width, n_policies, n_pop)
-        self.particle_draw_size = 0.8
+        self.particle_draw_size = 0.1
 
-    def reset(self, landscape):
+    def set_landscape(self, landscape):
         self.landscape = landscape.round().astype(int)
+
+    def reset(self):
         # TODO: invisible fitness landscape atm!
-        [swarm.reset(landscape) for swarm in self.swarms]
+        [swarm.reset(self.landscape) for swarm in self.swarms]
 
     def step_swarms(self):
         [s.update(scape=self.landscape, obstacles=self.landscape) for s in self.swarms]

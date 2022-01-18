@@ -43,9 +43,9 @@ class Swarm(object):
         # weird edge case, is modulo broken?
         ps_int = np.where(ps_int == self.world_width, 0, ps_int)
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
-        scape = np.pad(scape, fov, mode='wrap')
+        landscape = np.pad(scape, fov, mode='wrap')
         # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
-        nbs = [scape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
+        nbs = [landscape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
         nbs = nbs[:, None, ...]
         nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
@@ -125,22 +125,21 @@ class NeuralSwarm(Swarm):
         # self.nn = NN(fov=fov)
         self.nn = None
 
-        PPOTorchPolicy
     def set_nn(self, nn, policy_id, obs_space, act_space, trainer_config):
-        self.nn = type(nn)(obs_space, act_space, trainer_config['model'])
+        # self.nn = type(nn)(obs_space, act_space, trainer_config['model'])
         self.nn.model = type(nn.model)(obs_space, act_space, nn.model.num_outputs, trainer_config['model'], f'policy_{policy_id}')
-        self.nn.set_state(copy.deepcopy(nn.get_state()))
-        self.nn.set_weights(copy.deepcopy(nn.get_weights()))
-        self.nn.model.load_state_dict(copy.copy(nn.model.state_dict()))
-        self.nn.__delattr__ = None
-        self.nn.model_gpu_towers = None
-        attrs = dir(self.nn)
-        for k in self.nn.__dict__:
-
+        # self.nn.set_state(copy.deepcopy(nn.get_state()))
+        # self.nn.set_weights(copy.deepcopy(nn.get_weights()))
+        # self.nn.model.load_state_dict(copy.copy(nn.model.state_dict()))
+        # self.nn.__delattr__ = None
+        # self.nn.model_gpu_towers = None
+        # attrs = dir(self.nn)
+        # for k in self.nn.__dict__:
+        #
         # for attr in attrs:
-            at = getattr(self.nn, k)
-            print('at', k, at)
-            copy.deepcopy(at)
+            # at = getattr(self.nn, k)
+            # print('at', k, at)
+            # copy.deepcopy(at)
         return
 
     def update(self, scape, accelerations=None, obstacles=None):
@@ -158,9 +157,10 @@ class NeuralSwarm(Swarm):
             pass
         else:
             self.ps += accelerations - 1
+            # self.ps += self.vs
         self.ps = self.ps % self.world_width
         # momentum = 0.5
-        # self.vs += accelerations * momentum
+        # self.vs += (accelerations - 1) * momentum
         # self.vs /= 1 + 0.1 * momentum
 
 
@@ -189,9 +189,9 @@ class GreedySwarm(Swarm):
         # weird edge case, is modulo broken?
         ps_int = np.where(ps_int == self.world_width, 0, ps_int)
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
-        scape = np.pad(scape, fov, mode='wrap')
+        landscape = np.pad(scape, fov, mode='wrap')
         # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
-        nbs = [scape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
+        nbs = [landscape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
         nbs[..., 1:-1, 1:-1] = -1  # observe only the periphery of our field of vision
         # nbs += np.random.normal(0, 0.1, (nbs.shape))

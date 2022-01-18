@@ -26,7 +26,7 @@ from tqdm import tqdm
 
 from env import ParticleSwarmEnv, ParticleMazeEnv, ParticleGym, ParticleGymRLlib
 from generator import TileFlipFixedGenerator, SinCPPNGenerator, Rastrigin, Hill, CPPN
-from qdpy_utils import qdRLlibEval
+from qdpy_utils import qdRLlibEval, rllib_evaluate_worlds
 from rllib_utils import init_particle_trainer
 from swarm import eval_fit, NN, RLlibNN
 from utils import infer, visualize, infer_elites, qdpy_eval, simulate, save
@@ -34,14 +34,14 @@ from utils import infer, visualize, infer_elites, qdpy_eval, simulate, save
 seed = None
 ndim = 2
 n_pop = 5
-width = 100
+width = 16
 pg_delay = 50
 n_nca_steps = 10
 n_sim_steps = 100
 pg_width = 200
 pg_scale = pg_width / width
 # swarm_type = MemorySwarm
-n_policies = 3
+n_policies = 2
 
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
@@ -51,26 +51,33 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 
 generator_phase = True  # Do we start by evolving generators, or training players?
 gen_phase_len = 10
-play_phase_len = 1000
+play_phase_len = 10
 
 
 def train_players(n_itr, trainer, landscapes):
-    trainer.workers.foreach_worker(
-        lambda worker: worker.foreach_env(lambda env: env.set_landscape(landscapes[0])))
+    particle_trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
+    for i in range(n_policies):
+        particle_trainer.get_policy(f'policy_{i}').config["explore"] = True
     for i in range(n_itr):
-        stats = trainer.train()
+        worlds = {i: l for i, l in enumerate(landscapes)}
+        all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds)
         keys = ['episode_reward_max', 'episode_reward_mean']
+        # TODO: track stats over calls to train (shouldn't be necessary during evolution
+        stats = all_stats[-1]
         print('\n'.join([f'Training iteration {i}'] + [f'{k}: {stats[k]}' for k in keys]))
         if i % 10 == 0:
             checkpoint = trainer.save(f'./runs/{args.experimentName}')
             print("checkpoint saved at", checkpoint)
+    for i in range(n_policies):
+        particle_trainer.get_policy(f'policy_{i}').config["explore"] = False
+    particle_trainer.workers.local_worker().set_policies_to_train([])
 
     # Also, in case you have trained a model outside of ray/RLlib and have created
     # an h5-file with weight values in it, e.g.
     # my_keras_model_trained_outside_rllib.save_weights("model.h5")
     # (see: https://keras.io/models/about-keras-models/)
 
-    trainer.load_checkpoint()
+    # trainer.load_checkpoint()
     # ... you can load the h5-weights into your Trainer's Policy's ModelV2
     # (tf or torch) by doing:
     # trainer.import_model("my_weights.h5")
@@ -80,13 +87,27 @@ def train_players(n_itr, trainer, landscapes):
     # for detailed examples for tf- and torch trainers/models.
 
 
-def phase_switch_callback(itr, player_trainer, landscapes):
+def phase_switch_callback(itr, player_trainer, container):
     # if generator_phase:
-    if itr % gen_phase_len:
-        train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=landscapes)
+    if itr > 0 and itr % gen_phase_len == 0:
+        train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=container)
     # else:
     #     if itr % play_phase_len:
             # pass
+        invalid_ind = [ind for ind in container]
+        container.clear_all()
+        rllib_stats, fitnesses = rllib_evaluate_worlds(player_trainer, {i: ind for i, ind in enumerate(invalid_ind)})
+        fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
+
+        # fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+        for ind, fit in zip(invalid_ind, fitnesses):
+            ind.fitness.values = fit[0]
+            ind.features = fit[1]
+
+        # Store batch in container
+        nb_updated = container.update(invalid_ind, issue_warning=True)
+        if nb_updated == 0:
+            raise ValueError("No individual could be added back to the QD container when re-evaluating after player training.")
 
 
 class CPPNIndividual(creator.Individual, CPPN):
@@ -104,7 +125,7 @@ def run_qdpy():
                     'policies': env.swarms,
                 }
                 pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        phase_switch_callback(itr, player_trainer=particle_trainer, landscapes=container)
+        phase_switch_callback(itr, player_trainer=particle_trainer, container=container)
 
     save_interval = 100
     if load:
@@ -180,9 +201,12 @@ def run_qdpy():
     results_infos['mutation_pb'] = mutation_pb
     results_infos['eta'] = eta
     if not load:
+        for i in range(n_policies):
+            particle_trainer.get_policy(f'policy_{i}').config["explore"] = False
         # Create container
         grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
                                fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
+
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
         qd_algo = partial(qdRLlibEval, particle_trainer)
         # Create a QD algorithm

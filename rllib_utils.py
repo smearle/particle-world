@@ -45,12 +45,13 @@ def init_particle_trainer(env, num_rllib_workers, num_rllib_envs):
         "num_envs_per_worker": math.ceil(num_rllib_envs / workers),
         "framework": "torch",
         "render_env": True,
-        "evaluation_interval": 10,
+        # "evaluation_interval": 10,
         # "explore": False,
         # "lr": 0.1,
-        # "train_batch_size": 500,
         # "log_level": "INFO",
-        "record_env": True,
+        # "record_env": True,
+        "rollout_fragment_length": env.max_steps,
+        "train_batch_size": env.max_steps * num_rllib_envs,
     }
     trainer = ppo.PPOTrainer(env=ParticleGymRLlib, config=trainer_config)
     return trainer

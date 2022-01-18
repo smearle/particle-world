@@ -306,5 +306,8 @@ def hill(ps):
     X = ps[0, ...]
     Y = ps[1, ...]
     Z = X ** 2 + Y ** 2
-    return (Z - Z.mean()) / Z.std()
+    # set mean of zero and std of 1
+    Z = (Z - Z.mean()) / Z.std()
+    Z = Z / np.abs(Z).max()
+    return Z
 
