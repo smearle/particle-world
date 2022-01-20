@@ -10,54 +10,10 @@ from pdb import set_trace as TT
 from qdpy.phenotype import *
 from qdpy.containers import *
 
-
-def rllib_evaluate_worlds(trainer, worlds):
-    idxs = np.random.permutation(list(worlds.keys()))
-    workers = trainer.workers
-
-    # workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env.set_world(worlds={
-    #     idxs[0]: worlds[idxs.pop(0)]
-    # })))
-    world_id = 0
-    fitnesses = {}
-    all_stats = []
-
-    while world_id == 0 or world_id < len(worlds) - 1:
-        envs = []
-        for (wrk_i, worker) in enumerate([workers.local_worker()] + workers.remote_workers()):
-            if wrk_i == 0:  # only ever 1 local worker
-                envs += worker.foreach_env(lambda env: env)
-            else:
-                # world_i = idxs[wrk_i % len(idxs)]
-                # worker.foreach_env.remote(lambda env: env.set_world(worlds={world_i: worlds[world_i]}))
-                envs += ray.get(worker.foreach_env.remote(lambda env: env))
-        if len(worlds) < len(envs):
-            idxs = idxs * len(envs)
-
-        [env.set_world(worlds={i: worlds[i]}) for i, env in zip(idxs[world_id:], envs)]
-        world_id += len(envs)
+from rllib_utils import IdxCounter, rllib_evaluate_worlds
 
 
-        stats = trainer.train()
-        all_stats.append(stats)
-        # new_fitnesses = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env.get_fitness()))
-        # new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
-        # [fitnesses.update(nf) for nf in new_fitnesses]
-
-
-        for (wrk_i, worker) in enumerate([workers.local_worker()] + workers.remote_workers()):
-            world_i = idxs[wrk_i % len(idxs)]
-            if wrk_i == 0:  # only ever 1 local worker
-                new_fitnesses = worker.foreach_env(lambda env: env.get_fitness())
-            else:
-                new_fitnesses = worker.foreach_env.remote(lambda env: env.get_fitness())
-            for nf in new_fitnesses:
-                fitnesses.update(nf)
-
-    return all_stats, fitnesses
-
-
-def qdRLlibEval(rllib_trainer, init_batch, toolbox, container, batch_size, niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, start_time = None, iteration_callback = None):
+def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container, batch_size, niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, start_time = None, iteration_callback = None):
     """The simplest QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
     :param init_batch: Sequence of individuals used as initial batch.
@@ -77,6 +33,7 @@ def qdRLlibEval(rllib_trainer, init_batch, toolbox, container, batch_size, niter
 
     TODO
     """
+    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
     rllib_trainer.workers.local_worker().set_policies_to_train([])
     if start_time == None:
         start_time = timer()
@@ -88,11 +45,16 @@ def qdRLlibEval(rllib_trainer, init_batch, toolbox, container, batch_size, niter
 
     # Evaluate the individuals with an invalid fitness
     # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
-    invalid_ind = init_batch
-    rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(init_batch)})
-    fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
 
-    # fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+    # Evaluate all individuals
+    invalid_ind = init_batch
+
+    if rllib_eval:
+        rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter)
+        fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
+
+    else:
+        fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
     for ind, fit in zip(invalid_ind, fitnesses):
         ind.fitness.values = fit[0]
         ind.features = fit[1]
@@ -135,10 +97,14 @@ def qdRLlibEval(rllib_trainer, init_batch, toolbox, container, batch_size, niter
 
         # Evaluate the individuals with an invalid fitness
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-        rllib_fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)})
-        fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
 
-        # fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+        if rllib_eval:
+            rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter)
+            fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
+
+        else:
+            fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+
         for ind, fit in zip(invalid_ind, fitnesses):
             ind.fitness.values = fit[0]
             ind.features = fit[1]

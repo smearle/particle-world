@@ -61,11 +61,11 @@ def init_ps(world_width, npop, ndim=2):
     vls = np.zeros((npop, ndim))
     # vls = (np.random.random(size=(npop, ndim)) - 0.5) * 1
     # ps = np.random.random(size=(npop, ndim)) * width
-    x = np.linspace(0, 2 * np.pi + 0.1 * np.pi, npop)[:, None]
+    x = np.linspace(0, 2 * np.pi, npop + 1)[:-1, None]
     ps = (np.hstack((np.sin(x), np.cos(x))))
+    ps = ps * world_width / 4
     ps -= world_width / 2
     # ps = ps / np.sqrt((ps ** 2).sum(axis=-1))[:, None]
-    ps = ps * world_width / 4
     # ps += width / 2
     ps = ps % world_width
     return ps.astype(np.float64), vls
@@ -85,7 +85,7 @@ class NN(nn.Module):
         super().__init__()
         kernel_width = 2 * fov + 1
         self.l1 = nn.Conv2d(1, 32, kernel_width, 1, padding=0)
-        self.l2 = nn.Linear(32, 32)
+        self.l2 = nn.Linear(256, 256)
         self.l3 = nn.Linear(32, 6)  # double length of actual output because TorchDiagGaussian computes mean and std
                                     # https://github.com/ray-project/ray/issues/17934
         self.l4 = nn.Linear(32, 1)
@@ -122,8 +122,9 @@ class NeuralSwarm(Swarm):
     def __init__(self, world_width, n_pop: int, fov: int = 4, trg_scape_val=1.0):
         super().__init__(n_pop, fov, trg_scape_val=trg_scape_val)
         self.world_width = world_width
-        # self.nn = NN(fov=fov)
-        self.nn = None
+
+        self.nn = NN(fov=fov)
+        # self.nn = None
 
     def set_nn(self, nn, policy_id, obs_space, act_space, trainer_config):
         # self.nn = type(nn)(obs_space, act_space, trainer_config['model'])
@@ -148,10 +149,10 @@ class NeuralSwarm(Swarm):
                 print("Generating random NN swarm policies inside environment, because no accelerations were supplied "
                       "when updating swarms.")
             nbs = self.get_observations(scape=scape)
-            actions, hid_state = self.nn({'obs': th.Tensor(nbs)})
+            # actions, hid_state = self.nn({'obs': th.Tensor(nbs)})
+            actions, hid_state = self.nn(th.Tensor(nbs))
             actions = actions.detach().numpy()
-            TT()
-            accelerations = actions.argmax(0)
+            accelerations = np.hstack((actions[:, :3].argmax(1)[...,None], actions[:, 3:].argmax(1)[...,None]))
         if obstacles is not None:
             # TODO: collision detection
             pass
@@ -177,11 +178,11 @@ class GreedySwarm(Swarm):
         self.ps, self.vs = init_ps(self.world_width, self.n_pop)
 
     def update(self, scape, obstacles=None):
-        if obstacles is not None:
-            update_pos_with_collision(self.ps, self.vs, obstacles)
-        else:
-            self.ps += self.vs
-        self.ps = self.ps % self.world_width
+        # if obstacles is not None:
+        #     update_pos_with_collision(self.ps, self.vs, obstacles)
+        # else:
+        #     self.ps += self.vs
+        # self.ps = self.ps % self.world_width
         fov = self.fov
         patch_w = fov * 2 + 1
         # Add new dimensions for patch_w-width patches of the environment around each agent
@@ -198,9 +199,13 @@ class GreedySwarm(Swarm):
         flat_ds = np.abs(nbs.reshape(self.n_pop, -1) - self.trg_scape_val).argmin(axis=-1)
         ds = np.stack((flat_ds // patch_w, flat_ds % patch_w)).swapaxes(1, 0)
         ds = (ds - fov) / fov * 1.0
-        momentum = 0.5
-        self.vs += ds * momentum
-        self.vs /= 1 + 0.1 * momentum
+
+        self.ps += ds
+        self.ps = self.ps % self.world_width
+
+        # momentum = 0.5
+        # self.vs += ds * momentum
+        # self.vs /= 1 + 0.1 * momentum
 
 
 class MemorySwarm(Swarm):

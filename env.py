@@ -24,7 +24,7 @@ player_colors = [
 class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
     propelling themselves toward desirable regions in the fitness landscape."""
-    def __init__(self, width, n_policies, n_pop, pg_width=None):
+    def __init__(self, swarm_cls, width, n_policies, n_pop, pg_width=None):
         if not pg_width:
             pg_width = width
         self.pg_width=pg_width
@@ -34,15 +34,16 @@ class ParticleSwarmEnv(object):
         self.width = width
         # self.fovs = [si+1 for si in range(n_policies)]
         self.fovs = [3 for si in range(n_policies)]
-        self._gen_swarms(n_policies, n_pop, self.fovs)
+        self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
         self.n_steps = None
         self.screen = None
 
-    def _gen_swarms(self, n_policies, n_pop, fovs):
+    def _gen_swarms(self, swarm_cls, n_policies, n_pop, fovs):
         self.swarms = [
             # GreedySwarm(
-            NeuralSwarm(
+            # NeuralSwarm(
+            swarm_cls(
                 world_width=self.width,
                 n_pop=n_pop,
                 fov=fovs[si],
@@ -63,8 +64,7 @@ class ParticleSwarmEnv(object):
     def step_swarms(self):
         [s.update(scape=self.landscape) for s in self.swarms]
 
-    def render(self, mode='human', pg_delay=0):
-        pg_delay = 0
+    def render(self, mode='human', pg_delay=1):
         # print('render')
         pg_scale = self.pg_width / self.width
         if not self.screen:
@@ -89,6 +89,8 @@ class ParticleSwarmEnv(object):
         return True
 
     def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=1):
+        pg_delay = 100
+        self.reset()
         for i in range(n_steps):
             self.step_swarms()
             if render:
@@ -119,9 +121,9 @@ def gen_policy(i, observation_space, action_space, fov):
 
 
 class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
-    def __init__(self, width, n_policies, n_pop, max_steps, pg_width=1000):
+    def __init__(self, swarm_cls, width, n_policies, n_pop, max_steps, pg_width=500):
         n_chan = 1
-        super().__init__(width, n_policies, n_pop, pg_width=pg_width)
+        super().__init__(swarm_cls, width, n_policies, n_pop, pg_width=pg_width)
         patch_ws = [fov * 2 + 1 for fov in self.fovs]
         # self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
         self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(n_chan, patch_ws[i] * patch_ws[i]))
@@ -183,21 +185,27 @@ class ParticleGymRLlib(ParticleGym):
         super().__init__(**cfg)
         self.world_idx = None
 
-    def set_world(self, worlds):
-        self.world_idx = 0
-        self.worlds = worlds
+    def set_world(self, worlds, idx_counter):
+        # self.world_idx = 0
+        self.world_idx = ray.get(idx_counter.get.remote(hash(self)))
+        self.world = worlds[self.world_idx].reshape(self.width, self.width)
+        # self.worlds = {idx: worlds[idx]}
         self.fitnesses = {}
         # print('set worlds ', worlds.keys())
 
+    def set_world_eval(self, world, idx):
+        self.world_idx = idx
+        self.world = world
+        self.fitnesses = {}
+
     def reset(self):
-        if not hasattr(self, 'worlds'):
-            print(self)
-        assert hasattr(self, 'worlds')
         # print('reset w/ worlds', self.worlds.keys())
-        world_idx = list(self.worlds.keys())[self.world_idx]
-        world = self.worlds[world_idx]
-        self.set_landscape(np.array(world).reshape(self.width, self.width))
-        self.world_idx = (self.world_idx + 1) % len(self.worlds)
+        # world_idx = list(self.worlds.keys())[self.world_idx]
+        # world = self.worlds[world_idx]
+        world = self.world
+        self.set_landscape(world)
+        # self.set_landscape(np.array(world).reshape(self.width, self.width))
+        # self.world_idx = (self.world_idx + 1) % len(self.worlds)
 
         return super().reset()
 
@@ -207,8 +215,8 @@ class ParticleGymRLlib(ParticleGym):
     def step(self, actions):
         obs, rew, dones, info = super().step(actions)
         if dones['__all__']:
-            world_idx = list(self.worlds.keys())[self.world_idx]
-            self.fitnesses[world_idx] = (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
+            # world_idx = list(self.worlds.keys())[self.world_idx]
+            self.fitnesses[self.world_idx] = (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
 
         return obs, rew, dones, info
 
