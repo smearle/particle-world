@@ -38,7 +38,7 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
     if start_time == None:
         start_time = timer()
     logbook = deap.tools.Logbook()
-    logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + (stats.fields if stats else []) + ["elapsed"]
+    logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + (stats.fields if stats else []) + ["elapsed"] #+ ["meanAgentReward", "minAgentReward", "maxAgentReward"]
 
     if len(init_batch) == 0:
         raise ValueError("``init_batch`` must not be empty.")
@@ -52,6 +52,8 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
     if rllib_eval:
         rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter)
         fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
+        assert len(rllib_stats) == 1
+        rllib_stats = rllib_stats[0]
 
     else:
         fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
@@ -73,7 +75,7 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
 
     # Compile stats and update logs
     record = stats.compile(container) if stats else {}
-    logbook.record(iteration=0, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record)
+    logbook.record(iteration=0, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
     if verbose:
         print(logbook.stream)
     # Call callback function
@@ -101,6 +103,8 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
         if rllib_eval:
             rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter)
             fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
+            assert len(rllib_stats) == 1
+            rllib_stats = rllib_stats[0]
 
         else:
             fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
@@ -118,7 +122,7 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
 
         # Append the current generation statistics to the logbook
         record = stats.compile(container) if stats else {}
-        logbook.record(iteration=i, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record)
+        logbook.record(iteration=i, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time , **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
         if verbose:
             print(logbook.stream)
         # Call callback function

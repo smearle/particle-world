@@ -1,4 +1,5 @@
 import sys
+from functools import partial
 from pdb import set_trace as TT
 
 import gym
@@ -64,7 +65,7 @@ class ParticleSwarmEnv(object):
     def step_swarms(self):
         [s.update(scape=self.landscape) for s in self.swarms]
 
-    def render(self, mode='human', pg_delay=1):
+    def render(self, mode='human', pg_delay=100):
         # print('render')
         pg_scale = self.pg_width / self.width
         if not self.screen:
@@ -89,7 +90,7 @@ class ParticleSwarmEnv(object):
         return True
 
     def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=1):
-        pg_delay = 100
+        pg_delay = 50
         self.reset()
         for i in range(n_steps):
             self.step_swarms()
@@ -156,12 +157,13 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
                             for j in range(len(self.swarms))}
         [swarm.update(scape=self.landscape, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
+        # Dones before rewards, in case reward is different e.g. at the last step
+        self.dones = self.get_dones()
         rew = self.get_reward()
-        done = self.get_dones()
         info = {}
         self.n_step += 1
         assert self.landscape is not None
-        return obs, rew, done, info
+        return obs, rew, self.dones, info
 
     def get_dones(self):
         dones = {(i, j): False for i, swarm in enumerate(self.swarms)
@@ -176,26 +178,38 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
                 for j in range(swarm.n_pop)}
 
     def get_reward(self):
-        return {(i, j): swarm.get_rewards(self.landscape)[j] for i, swarm in enumerate(self.swarms)
+        swarm_rewards = [swarm.get_rewards(self.landscape) for swarm in self.swarms]
+        rew = {(i, j): swarm_rewards[i][j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
+        return rew
 
 
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
+        evaluate = cfg.pop("evaluate")
         super().__init__(**cfg)
+        if evaluate:
+            # Agents should be able to reach any tile within the initial neighborhood by a shortest path.
+            self.max_steps = max(self.fovs) * 2
+            self.reset = partial(ParticleEvalEnv.reset, self)
+            self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
         self.world_idx = None
 
-    def set_world(self, worlds, idx_counter):
+    def set_world(self, worlds: dict, idx_counter=None):
         # self.world_idx = 0
-        self.world_idx = ray.get(idx_counter.get.remote(hash(self)))
+        if idx_counter:
+            self.world_idx = ray.get(idx_counter.get.remote(hash(self)))
+        else:
+            self.world_idx = np.random.choice(list(worlds.keys()))
         self.world = worlds[self.world_idx].reshape(self.width, self.width)
         # self.worlds = {idx: worlds[idx]}
         self.fitnesses = {}
         # print('set worlds ', worlds.keys())
 
-    def set_world_eval(self, world, idx):
+    def set_world_eval(self, world: np.array, idx):
         self.world_idx = idx
         self.world = world
+        self.set_landscape(world)
         self.fitnesses = {}
 
     def reset(self):
@@ -219,6 +233,54 @@ class ParticleGymRLlib(ParticleGym):
             self.fitnesses[self.world_idx] = (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
 
         return obs, rew, dones, info
+
+
+# This is a dummy class not currently used, except by its parent ParticleGymRLlib, which borrows its methods when instantiating,
+# if in evaluation mode.
+class ParticleEvalEnv(ParticleGymRLlib):
+    """
+    An environment that assumes that a feed-forward (i.e. memoryless) neural network is "best" at the task of navigating
+    a continuous fitness landscape when it simply greedly moves to the best tile in its field of vision. Randomly generate
+    a map consisting of a neighborhood, and reward 1 when the policy moves to the tile with greatest value, otherwise 0.
+    Episodes last one step.
+    """
+    def __init__(self, **cfg):
+        """
+        :param fovs: The fields of vision of the policies (how far they can see in each direction.
+        """
+        super().__init__(**cfg)
+        raise Exception(f"{type(self)} is a dummy class.")
+
+    def reset(self):
+        """Generate uniform random fitness landscape, then set to 0 all tiles not in the initial field of vision of any agent."""
+        self.fitnesses = {}
+        og_scape = np.random.random((self.width, self.width))
+        # Note that we're calling set_world on ourselves. Normally this is called externally before reset
+        self.set_world_eval(og_scape, hash(self))
+        obs = super(ParticleGymRLlib, self).reset()
+        self.agent_ids = [agent_id for agent_id in obs]
+        # Note that this is weird, allows borrowing by parent class. Will break the
+        self.init_nbs = [swarm.get_observations(og_scape, flatten=False) for swarm in self.swarms]
+        landscape = np.ones(og_scape.shape)
+        for swarm, init_nb, fov in zip(self.swarms, self.init_nbs, self.fovs):
+            for ps, nb in zip(swarm.ps.astype(int), init_nb):
+                # TODO: vectorize this
+                landscape[ps[0] - fov: ps[0] + fov + 1, ps[1] - fov: ps[1] + fov + 1] = nb
+        self.set_landscape(landscape)
+        # obs = [np.reshape(nb, (nb.shape[0], nb.shape[1], -1)) for nb in self.init_nbs]
+        return obs
+
+    def get_eval_reward(self, og_get_reward):
+        """Reward for policies when their agents move the best tile that was in their initial field of vision."""
+        if not self.dones['__all__']:
+            return {agent_id: 0 for agent_id in self.agent_ids}
+        fovs = [int((nb[0].shape[0] - 1) / 2) for nb in self.init_nbs]
+        # nbs = [nb[fov - 1: fov + 2] for nb, fov in zip(self.init_nbs, fovs)]
+        nbs = self.init_nbs
+        # Condition is satisfied when
+        og_rewards = og_get_reward()
+        rewards = {agent_id: int(np.max(nb) == og_rewards[agent_id]) for agent_id, nb in zip(self.agent_ids, self.init_nbs)}
+        return rewards
 
 
 class ParticleMazeEnv(ParticleSwarmEnv):

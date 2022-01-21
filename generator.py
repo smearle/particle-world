@@ -287,7 +287,7 @@ def rastrigin(ps):
         Y ** 2 - 10 * np.cos(2 * np.pi * Y)
     # set mean of zero and std of 1
     Z = (Z - Z.mean()) / Z.std()
-    Z = Z / np.abs(Z).max()
+    Z = - Z / np.abs(Z).max()
     return Z
 
 

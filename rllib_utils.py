@@ -9,22 +9,21 @@ import ray
 from ray.rllib.agents.ppo import ppo
 from ray.rllib.models import MODEL_DEFAULTS
 from ray.rllib.policy.policy import PolicySpec
+from ray.tune.logger import pretty_print
 
-from env import ParticleGymRLlib, gen_policy
+from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv
 
 
-def rllib_evaluate_worlds(trainer, worlds, idx_counter):
+def rllib_evaluate_worlds(trainer, worlds, idx_counter=None):
     idxs = np.random.permutation(list(worlds.keys()))
     workers = trainer.workers
-
     worlds = {k: np.array(world) for k, world in worlds.items()}
-
     world_id = 0
     fitnesses = {}
     all_stats = []
 
-    while len(fitnesses) < len(worlds):
-        print(len(fitnesses), len(worlds))
+    while world_id < len(worlds):
+        # print(len(fitnesses), len(worlds))
         #     envs = []
         #     for (wrk_i, worker) in enumerate([workers.local_worker()] + workers.remote_workers()):
         #         if wrk_i == 0:  # only ever 1 local worker
@@ -39,32 +38,47 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter):
         #
         #     [env.set_world(worlds={i: worlds[i]}) for i, env in zip(idxs[world_id:], envs)]
         #     world_id += len(envs)
-        envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env))
-        envs = [e for we in envs for e in we]
-        sub_idxs = idxs[world_id:min(world_id + len(envs), len(idxs))]
-        idx_counter.set_idxs.remote(sub_idxs)
-        hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
-        hashes = [h for wh in hashes for h in wh]
-        idx_counter.set_hashes.remote(hashes)
 
-        # FIXME: Sometimes hash-to-idx dict is not set by the above call?
-        assert ray.get(idx_counter.scratch.remote())
+        # When running parallel envs, is each env is to evaluate a separate world, map envs to worlds
+        if idx_counter:
+            envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env))
+            envs = [e for we in envs for e in we]
+            sub_idxs = idxs[world_id:min(world_id + len(envs), len(idxs))]
+            idx_counter.set_idxs.remote(sub_idxs)
+            hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+            hashes = [h for wh in hashes for h in wh]
+            idx_counter.set_hashes.remote(hashes)
 
+            # FIXME: Sometimes hash-to-idx dict is not set by the above call?
+            assert ray.get(idx_counter.scratch.remote())
+
+        # Assign envs to worlds
         workers.foreach_worker(
             lambda worker: worker.foreach_env(lambda env: env.set_world(worlds=worlds, idx_counter=idx_counter)))
+
+        # Train/evaluate
         stats = trainer.train()
+        # print(pretty_print(stats))
         all_stats.append(stats)
 
+        # Collect stats
         new_fitnesses = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env.get_fitness()))
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
         [new_fits.update(nf) for nf in new_fitnesses]
-        if not len(new_fits) == len(sub_idxs):
-            TT()
+        # if not len(new_fits) == len(sub_idxs):
+        #     TT()
         fitnesses.update(new_fits)
-        if len(fitnesses) == world_id:
-            TT()
-        world_id = len(fitnesses)
+        # if len(fitnesses) == world_id:
+        #     TT()
+
+        # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
+        # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
+        # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed landscape).
+        if idx_counter:
+            world_id = len(fitnesses)
+        else:
+            world_id += len(new_fitnesses)
 
         # for (wrk_i, worker) in enumerate([workers.local_worker()] + workers.remote_workers()):
         #     world_i = idxs[wrk_i % len(idxs)]
@@ -78,7 +92,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter):
     return all_stats, fitnesses
 
 
-def train_players(n_itr, n_policies, trainer, landscapes, idx_counter, save_dir, n_rllib_envs):
+def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs, idx_counter=None, logbook=None):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     for i in range(n_policies):
         trainer.get_policy(f'policy_{i}').config["explore"] = True
@@ -93,11 +107,18 @@ def train_players(n_itr, n_policies, trainer, landscapes, idx_counter, save_dir,
             print("checkpoint saved at", checkpoint)
         curr_lands = np.array(landscapes)[np.random.choice(np.array(landscapes).shape[0], n_rllib_envs)]
         worlds = {i: l for i, l in enumerate(curr_lands)}
-        all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter)
+        all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds)
+        assert len(all_stats) == 1
+        rllib_stats = all_stats[0]
+        # if logbook:
+        #     logbook.record(iteration=curr_itr, meanAgentReward=rllib_stats["episode_reward_mean"],
+        #                    maxAgentReward=rllib_stats["episode_reward_max"],
+        #                    minAgentReward=rllib_stats["episode_reward_min"])
         keys = ['episode_reward_max', 'episode_reward_mean']
         # TODO: track stats over calls to train (shouldn't be necessary during evolution
-        stats = all_stats[-1]
-        print('\n'.join([f'Training iteration {i}'] + [f'{k}: {stats[k]}' for k in keys]))
+        print('\n'.join([f'Training iteration {i}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
+        if 'evaluation' in rllib_stats:
+            print('\n'.join(['evaluation:'] +[f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
     for i in range(n_policies):
         trainer.get_policy(f'policy_{i}').config["explore"] = False
     trainer.workers.local_worker().set_policies_to_train([])
@@ -165,7 +186,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy):
             # "car2": (None, particle_obs_space, particle_act_space, {"gamma": 0.99}),
             # "traffic_light": (None, tl_obs_space, tl_act_space, {}),
             "policy_mapping_fn":
-                lambda agent_id: f'policy_{agent_id[0]}',
+                lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         },
         "model": MODEL_CONFIG,
         # {
@@ -178,13 +199,22 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy):
             "n_pop": env.swarms[0].n_pop,
             "max_steps": env.max_steps,
             # "pg_width": pg_width,
+            "evaluate": False,
         },
         "num_gpus": 0,
         "num_workers": num_rllib_workers if not enjoy else 0,
         "num_envs_per_worker": math.ceil(n_rllib_envs / workers),
         "framework": "torch",
         "render_env": False if not enjoy else True,
-        # "evaluation_interval": None if not enjoy else 10,
+        "evaluation_interval": 10 if not enjoy else 10,
+        "evaluation_config": {
+            "env_config": {
+                "n_pop" : 1,
+                "evaluate": True,
+            },
+            # "render_env": True,
+            "explore": False,
+        },
         # "explore": False,
         # "lr": 0.1,
         # "log_level": "INFO",

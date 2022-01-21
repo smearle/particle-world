@@ -35,7 +35,7 @@ class Swarm(object):
         # self.landscape = scape
         self.ps, self.vs = init_ps(self.world_width, self.n_pop)
 
-    def get_observations(self, scape):
+    def get_observations(self, scape, flatten=True):
         fov = self.fov
         patch_w = fov * 2 + 1
         # Add new dimensions for patch_w-width patches of the environment around each agent
@@ -48,26 +48,32 @@ class Swarm(object):
         nbs = [landscape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
         nbs = nbs[:, None, ...]
-        nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
+        if flatten:
+            nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
         return nbs
 
     def get_rewards(self, scape):
         ps = self.ps.astype(int)
-        return np.abs(self.trg_scape_val - scape[ps[:, 0], ps[:, 1]])
+        return 1 - np.abs(self.trg_scape_val - scape[ps[:, 0], ps[:, 1]])
 
 
-def init_ps(world_width, npop, ndim=2):
+def init_ps(world_width, n_pop, n_dim=2):
     # velocities between -1 and 1
-    vls = np.zeros((npop, ndim))
-    # vls = (np.random.random(size=(npop, ndim)) - 0.5) * 1
-    # ps = np.random.random(size=(npop, ndim)) * width
-    x = np.linspace(0, 2 * np.pi, npop + 1)[:-1, None]
-    ps = (np.hstack((np.sin(x), np.cos(x))))
-    ps = ps * world_width / 4
-    ps -= world_width / 2
-    # ps = ps / np.sqrt((ps ** 2).sum(axis=-1))[:, None]
-    # ps += width / 2
-    ps = ps % world_width
+    vls = np.zeros((n_pop, n_dim))
+    if n_pop == 1:
+        ps = np.array(
+            [[world_width / 2, world_width / 2]]
+        )
+    else:
+        # vls = (np.random.random(size=(n_pop, n_dim)) - 0.5) * 1
+        # ps = np.random.random(size=(n_pop, n_dim)) * width
+        x = np.linspace(0, 2 * np.pi, n_pop + 1)[:-1, None]
+        ps = (np.hstack((np.sin(x), np.cos(x))))
+        ps = ps * world_width / 4
+        ps -= world_width / 2
+        # ps = ps / np.sqrt((ps ** 2).sum(axis=-1))[:, None]
+        # ps += width / 2
+        ps = ps % world_width
     return ps.astype(np.float64), vls
 
 
