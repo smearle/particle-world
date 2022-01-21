@@ -1,4 +1,7 @@
 ray[rllib]
 qdpy[deap]
+ribs
 neat-python
+pygame
+tqdm
 ./pytorch-neat
