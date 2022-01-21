@@ -213,7 +213,6 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, save_dir)
                 "evaluate": True,
             },
             "evaluation_parallel_to_training": True,
-            "evaluation_interval": 1,
             "evaluation_num_episodes": 10,
             # "render_env": True,
             "explore": False,

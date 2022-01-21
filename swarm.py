@@ -257,6 +257,7 @@ def contrastive_pop(ps, width):
     # dists = np.sqrt(((ps[0][None, ...] - ps[1][:, None, ...]) ** 2).sum(-1))
     # reward distance between population types
     # tor_dists = np.sqrt(((toroidal_distance(ps[0][None,...], ps[1][:, None, ...]))**2).sum(-1))
+    # FIXME: this is wrong
     inter_dist_means = [(toroidal_distance(pi, pj, width) ** 2).sum(-1).mean()
                         for i, pi in enumerate(ps)
                         for j, pj in enumerate(ps) if i != j]
@@ -268,8 +269,8 @@ def contrastive_pop(ps, width):
 
 def contrastive_fitness(fits):
     fits = [np.array(f) for f in fits]
-    intra_dist_means = [np.abs(fi - fj).sum(-1).mean() for i, fi in enumerate(fits) for j, fj in enumerate(fits) if i != j]
-    inter_dist_means = [np.abs(fi - fj).sum(-1).mean() for i, fi in enumerate(fits) for j, fj in enumerate(fits)]
+    inter_dist_means = [np.abs(fi[None, ...] - fj[:, None, ...]).mean() for i, fi in enumerate(fits) for j, fj in enumerate(fits) if i != j]
+    intra_dist_means = [np.abs(fi[None, ...] - fi[:, None, ...]).sum() / (fi.shape[0] * (fi.shape[0] - 1)) for fi in fits]
     return np.mean(inter_dist_means) - np.mean(intra_dist_means)
 
 

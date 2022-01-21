@@ -42,7 +42,7 @@ pg_scale = pg_width / width
 # swarm_type = MemorySwarm
 n_policies = 2
 rllib_eval = True
-num_rllib_workers = 0
+num_rllib_workers = 6
 n_rllib_envs = 30
 
 generator_phase = True  # Do we start by evolving generators, or training players?
@@ -346,12 +346,6 @@ if __name__ == '__main__':
                         )
     args = parser.parse_args()
     generator_cls = globals()[args.generator_class]
-    # generator_cls = Hill
-    # generator_cls = Rastrigin
-    # generator_cls = TileFlipFixedGenerator
-    # generator_cls = NCAGenerator
-    # generator_cls = SinCPPNGenerator
-    # generator_cls = CPPN
 
     swarm_cls = NeuralSwarm
     generator = generator_cls(width=width)
