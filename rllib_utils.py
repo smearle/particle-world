@@ -168,7 +168,7 @@ class IdxCounter:
 
 
 
-def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy):
+def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, save_dir):
     # env is currently a dummy environment that will not be used in actual training
     MODEL_CONFIG = copy.copy(MODEL_DEFAULTS)
     MODEL_CONFIG.update({
@@ -212,8 +212,14 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy):
                 "n_pop" : 1,
                 "evaluate": True,
             },
+            "evaluation_parallel_to_training": True,
+            "evaluation_interval": 1,
+            "evaluation_num_episodes": 10,
             # "render_env": True,
             "explore": False,
+        },
+        "logger_config": {
+            "log_dir": save_dir,
         },
         # "explore": False,
         # "lr": 0.1,

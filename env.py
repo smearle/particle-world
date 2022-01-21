@@ -10,7 +10,7 @@ from ray import rllib
 from ray.rllib.policy.policy import PolicySpec
 
 from generator import render_landscape
-from swarm import NeuralSwarm, GreedySwarm, contrastive_pop
+from swarm import NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness
 
 player_colors = [
     (0, 0, 255),
@@ -228,9 +228,14 @@ class ParticleGymRLlib(ParticleGym):
 
     def step(self, actions):
         obs, rew, dones, info = super().step(actions)
+        # TODO: Don't need to collect fitnesses if we are e.g. training players on fixed maps.
+        # Storing the objective and BCs corresponding mapped to the world_idx, for evolving worlds.
         if dones['__all__']:
             # world_idx = list(self.worlds.keys())[self.world_idx]
-            self.fitnesses[self.world_idx] = (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
+            # self.fitnesses[self.world_idx] = (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
+            n_pop = self.swarms[0].ps.shape[0]
+            swarm_rewards = [[rew[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
+            self.fitnesses[self.world_idx] = (contrastive_fitness(swarm_rewards), ), (0, 0)
 
         return obs, rew, dones, info
 

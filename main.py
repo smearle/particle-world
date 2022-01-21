@@ -42,8 +42,8 @@ pg_scale = pg_width / width
 # swarm_type = MemorySwarm
 n_policies = 2
 rllib_eval = True
-num_rllib_workers = 6
-n_rllib_envs = 12
+num_rllib_workers = 0
+n_rllib_envs = 30
 
 generator_phase = True  # Do we start by evolving generators, or training players?
 gen_phase_len = 100
@@ -380,7 +380,7 @@ if __name__ == '__main__':
     features_domain = [(0., 1.)] * nb_features  # The domain (min/max values) of the features
 
     particle_trainer = init_particle_trainer(env, num_rllib_workers=num_rllib_workers, n_rllib_envs=n_rllib_envs,
-                                             enjoy=args.enjoy)
+                                             enjoy=args.enjoy, save_dir=save_dir)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
