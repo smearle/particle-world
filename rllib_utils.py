@@ -31,19 +31,19 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None):
         #         else:
         #             world_i = idxs[wrk_i % len(idxs)]
         #             TT()
-        #             worker.foreach_env.remote(lambda env: env.set_world(worlds={world_i: worlds[world_i]}))
+        #             worker.foreach_env.remote(lambda env: env.set_worlds(worlds={world_i: worlds[world_i]}))
         #             envs += ray.get(worker.foreach_env.remote(lambda env: env))
         #     if len(worlds) < len(envs):
         #         idxs = idxs * len(envs)
         #
-        #     [env.set_world(worlds={i: worlds[i]}) for i, env in zip(idxs[world_id:], envs)]
+        #     [env.set_worlds(worlds={i: worlds[i]}) for i, env in zip(idxs[world_id:], envs)]
         #     world_id += len(envs)
 
         # When running parallel envs, is each env is to evaluate a separate world, map envs to worlds
         if idx_counter:
-            envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env))
-            envs = [e for we in envs for e in we]
-            sub_idxs = idxs[world_id:min(world_id + len(envs), len(idxs))]
+            n_envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: 1))
+            n_envs = sum([e for we in n_envs for e in we])
+            sub_idxs = idxs[world_id:min(world_id + n_envs, len(idxs))]
             idx_counter.set_idxs.remote(sub_idxs)
             hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
             hashes = [h for wh in hashes for h in wh]
@@ -54,7 +54,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None):
 
         # Assign envs to worlds
         workers.foreach_worker(
-            lambda worker: worker.foreach_env(lambda env: env.set_world(worlds=worlds, idx_counter=idx_counter)))
+            lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter)))
 
         # Train/evaluate
         stats = trainer.train()
@@ -118,7 +118,7 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
         # TODO: track stats over calls to train (shouldn't be necessary during evolution
         print('\n'.join([f'Training iteration {i}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
         if 'evaluation' in rllib_stats:
-            print('\n'.join(['evaluation:'] +[f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
+            print('\n'.join(['evaluation:'] + [f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
     for i in range(n_policies):
         trainer.get_policy(f'policy_{i}').config["explore"] = False
     trainer.workers.local_worker().set_policies_to_train([])
@@ -128,6 +128,7 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
 class IdxCounter:
     ''' When using rllib trainer to train and simulate on evolved maps, this global object will be
     responsible for providing unique indexes to parallel environments.'''
+
     def __init__(self):
         self.count = 0
         self.idxs = None
@@ -137,8 +138,8 @@ class IdxCounter:
 
         # if self.idxs is None:
         #     Then we are doing inference and have set the idx directly
-            #
-            # return self.count
+        #
+        # return self.count
         #
         # idx = self.idxs[self.count % len(self.idxs)]
         # self.count += 1
@@ -167,13 +168,12 @@ class IdxCounter:
         return self.hashes_to_idxs
 
 
-
-def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, save_dir):
-    # env is currently a dummy environment that will not be used in actual training
-    MODEL_CONFIG = copy.copy(MODEL_DEFAULTS)
-    MODEL_CONFIG.update({
-        # "use_lstm": True,
+def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, render, save_dir): # env is currently a dummy environment that will not be used in actual training
+    model_config = copy.copy(MODEL_DEFAULTS)
+    model_config.update({
+        "use_lstm": True,
         # "fcnet_hiddens": [32, 32],
+        "conv_filters": [[16, [4, 4], 1], [32, [4, 4], 1], [512, [7, 7], 1]],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
 
@@ -188,7 +188,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, save_dir)
             "policy_mapping_fn":
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         },
-        "model": MODEL_CONFIG,
+        "model": model_config,
         # {
         # "custom_model": RLlibNN,
         # },
@@ -201,22 +201,24 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, save_dir)
             # "pg_width": pg_width,
             "evaluate": False,
         },
-        "num_gpus": 0,
+        "num_gpus": 1,
         "num_workers": num_rllib_workers if not enjoy else 0,
         "num_envs_per_worker": math.ceil(n_rllib_envs / workers),
         "framework": "torch",
-        "render_env": False if not enjoy else True,
-        "evaluation_interval": 10 if not enjoy else 10,
-        "evaluation_config": {
-            "env_config": {
-                "n_pop" : 1,
-                "evaluate": True,
-            },
-            "evaluation_parallel_to_training": True,
-            "evaluation_num_episodes": 10,
+        "render_env": render if not enjoy else True,
+
+        # "evaluation_interval": 10 if not enjoy else 10,
+        # "evaluation_config": {
+        #     "env_config": {
+        #         "n_pop": 1,
+        #         "evaluate": True,
+        #     },
+        #     "evaluation_parallel_to_training": True,
+        #     "evaluation_num_episodes": 10,
+
             # "render_env": True,
-            "explore": False,
-        },
+            # "explore": False,
+        # },
         "logger_config": {
             "log_dir": save_dir,
         },
@@ -227,7 +229,5 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, save_dir)
         "rollout_fragment_length": env.max_steps,
         "train_batch_size": env.max_steps * n_rllib_envs,
     }
-    trainer = ppo.PPOTrainer(env=ParticleGymRLlib, config=trainer_config)
+    trainer = ppo.PPOTrainer(env=type(env), config=trainer_config)
     return trainer
-
-

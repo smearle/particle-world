@@ -7,10 +7,12 @@ import numpy as np
 import pygame
 import ray
 from ray import rllib
+from ray.rllib import MultiAgentEnv
 from ray.rllib.policy.policy import PolicySpec
 
 from generator import render_landscape
 from swarm import NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness
+from utils import discrete_to_onehot
 
 player_colors = [
     (0, 0, 255),
@@ -20,12 +22,15 @@ player_colors = [
     (255, 255, 0),
     (0, 255, 255),
 ]
+goal_color = (0, 255, 0)
+start_color = (255, 255, 0)
 
 
 class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
     propelling themselves toward desirable regions in the fitness landscape."""
-    def __init__(self, swarm_cls, width, n_policies, n_pop, pg_width=None):
+    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None):
+        self.n_chan = n_chan
         if not pg_width:
             pg_width = width
         self.pg_width=pg_width
@@ -59,13 +64,13 @@ class ParticleSwarmEnv(object):
     def reset(self):
         # assert self.landscape_set
         assert self.landscape is not None
-        assert len(self.landscape.shape) == 2
+        # assert len(self.landscape.shape) == 2
         [swarm.reset(scape=self.landscape) for swarm in self.swarms]
 
     def step_swarms(self):
         [s.update(scape=self.landscape) for s in self.swarms]
 
-    def render(self, mode='human', pg_delay=100):
+    def render(self, mode='human', pg_delay=0):
         # print('render')
         pg_scale = self.pg_width / self.width
         if not self.screen:
@@ -121,24 +126,25 @@ def gen_policy(i, observation_space, action_space, fov):
     return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
 
 
-class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
-    def __init__(self, swarm_cls, width, n_policies, n_pop, max_steps, pg_width=500):
-        n_chan = 1
-        super().__init__(swarm_cls, width, n_policies, n_pop, pg_width=pg_width)
+class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
+    def __init__(self, width, swarm_cls, n_policies, n_pop, max_steps, pg_width=500, n_chan=1):
+        super().__init__(width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width)
         patch_ws = [fov * 2 + 1 for fov in self.fovs]
-        # self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(n_chan, patch_ws[i] * patch_ws[i]))
+
+        # Each agent observes 2D patch around itself. Each cell has multiple channels. 3D observation.
+        # Map policies to agent observations.
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(patch_ws[i], patch_ws[i], n_chan))
                                    for i in range(n_policies)}
+        # self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
         # self.action_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(2,))
         #                       for i in range(n_policies)}
-        self.action_spaces = {i: gym.spaces.MultiDiscrete((3, 3))
+
+        # Can move to one of four adjacent tiles
+        self.action_spaces = {i: gym.spaces.Discrete(4)
                               for i in range(n_policies)}
+
         self.max_steps = max_steps
         self.n_step = 0
-        self.trainer = None
-
-    def set_trainer(self, trainer):
-        self.trainer = trainer
 
 
     def reset(self):
@@ -150,6 +156,7 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
         return obs
 
     def step(self, actions):
+        actions = {k: [(1, 0), (0, 1), (0, -1), (-1, 0), (0, 0)][v] for k, v in actions.items()}
         assert self.landscape is not None
         swarm_acts = {i: {} for i in range(len(self.swarms))}
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
@@ -174,7 +181,7 @@ class ParticleGym(ParticleSwarmEnv, rllib.env.multi_agent_env.MultiAgentEnv):
         return dones
 
     def get_particle_observations(self):
-        return {(i, j): swarm.get_observations(scape=self.landscape)[j] for i, swarm in enumerate(self.swarms)
+        return {(i, j): swarm.get_observations(scape=self.landscape, flatten=False)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
 
     def get_reward(self):
@@ -195,21 +202,24 @@ class ParticleGymRLlib(ParticleGym):
             self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
         self.world_idx = None
 
-    def set_world(self, worlds: dict, idx_counter=None):
+    def set_worlds(self, worlds: dict, idx_counter=None):
         # self.world_idx = 0
         if idx_counter:
             self.world_idx = ray.get(idx_counter.get.remote(hash(self)))
         else:
             self.world_idx = np.random.choice(list(worlds.keys()))
-        self.world = worlds[self.world_idx].reshape(self.width, self.width)
-        # self.worlds = {idx: worlds[idx]}
+        self.set_world(worlds[self.world_idx])
         self.fitnesses = {}
+
+    def set_world(self, world):
+        self.world = world.reshape(self.width, self.width)
+        # self.worlds = {idx: worlds[idx]}
         # print('set worlds ', worlds.keys())
 
     def set_world_eval(self, world: np.array, idx):
         self.world_idx = idx
-        self.world = world
-        self.set_landscape(world)
+        self.set_world(world)
+        self.set_landscape(self.world)
         self.fitnesses = {}
 
     def reset(self):
@@ -288,21 +298,83 @@ class ParticleEvalEnv(ParticleGymRLlib):
         return rewards
 
 
-class ParticleMazeEnv(ParticleSwarmEnv):
-    def __init__(self, width, n_policies, n_pop):
-        super().__init__(width, n_policies, n_pop)
-        self.particle_draw_size = 0.1
+class ParticleMazeEnv(ParticleGymRLlib):
+    def __init__(self, cfg):
+        cfg.update({'n_chan': 3})
+        super().__init__(cfg)
+        n_policies = len(self.swarms)
+        patch_ws = [fov * 2 + 1 for fov in self.fovs]
 
-    def set_landscape(self, landscape):
-        self.landscape = landscape.round().astype(int)
+        # We only ask the generator for 3 chans. 3rd shares goal and start, so we observe a 4-channel onehot encoding
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(patch_ws[i], patch_ws[i], self.n_chan + 1))
+                                   for i in range(n_policies)}
 
-    def reset(self):
-        # TODO: invisible fitness landscape atm!
-        [swarm.reset(self.landscape) for swarm in self.swarms]
+        # Represent empty, wall, and goal as onehot. This attribute is to inform the generator.
+        # self.particle_draw_size = 0.1
+
+    def set_world(self, world):
+        # Convert world from 3D to 2D, collapsing channel axis
+        w = np.empty((self.width, self.width), dtype=np.uint8)
+        v = np.reshape(world, (self.n_chan, self.width, self.width))
+        # Empty and wall tiles
+        w = np.argmax(v[:2], axis=(0))
+        # Goal and start tiles
+        # Cannot end on obstacles
+        vg = v[2] - v[1]
+        goal_idxs = np.argwhere(vg == vg.max())
+        self.goal_idx = goal_idxs[np.random.randint(goal_idxs.shape[0])]
+        # Cannot start on obstacles
+        vs = v[2] + v[1]
+        start_idxs = np.argwhere(vs == vs.min())
+        self.start_idx = start_idxs[np.random.randint(start_idxs.shape[0])]
+        w[self.start_idx[0], self.start_idx[1]] = 2
+        w[self.goal_idx[0], self.goal_idx[1]] = 3
+        self.world_flat = w
+        self.world = discrete_to_onehot(w)
+
+    # def reset(self):
+    #     return super().reset()
+    #     TODO: invisible fitness landscape atm!
+    #     [swarm.reset(self.landscape) for swarm in self.swarms]
+
 
     def step_swarms(self):
         [s.update(scape=self.landscape, obstacles=self.landscape) for s in self.swarms]
 
-    def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=1):
+    def reset(self):
+        # FIXME: redundant observations are being taken here
+        obs = super().reset()
+        for swarm in self.swarms:
+            swarm.ps[:] = self.start_idx
+        obs = self.get_particle_observations()
+        return obs
+
+    def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=100):
         generator.landscape = self.landscape  # just for rendering
         return super().simulate(n_steps=n_steps, generator=generator, render=render, screen=screen, pg_scale=pg_scale, pg_delay=pg_delay)
+
+    def render(self, mode='human', pg_delay=50):
+        # print('render')
+        pg_scale = self.pg_width / self.width
+        if not self.screen:
+            self.screen = pygame.display.set_mode([self.pg_width, self.pg_width])
+        render_landscape(self.screen, -1 * self.landscape[1] + 1)
+        # Did the user click the window close button? Exit if so.
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        pygame.draw.rect(self.screen, goal_color, (self.goal_idx[0] * pg_scale, self.goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        pygame.draw.rect(self.screen, start_color, (self.start_idx[0] * pg_scale, self.start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        for pi, policy_i in enumerate(self.swarms):
+            for agent_pos in policy_i.ps:
+                agent_pos = agent_pos.astype(int) + 0.5
+                pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
+                                   self.particle_draw_size * pg_scale)
+        pygame.display.update()
+        pygame.time.delay(pg_delay)
+        arr = pygame.surfarray.array3d(self.screen)
+        # arr = arr.transpose(2, 0, 1)
+        # arr = arr / 255
+        # return arr
+        return True

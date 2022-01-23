@@ -43,18 +43,20 @@ class Swarm(object):
         # weird edge case, is modulo broken?
         ps_int = np.where(ps_int == self.world_width, 0, ps_int)
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
-        landscape = np.pad(scape, fov, mode='wrap')
+        landscape = np.pad(scape, ((0, 0), (fov, fov), (fov, fov)), mode='wrap')
         # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
-        nbs = [landscape[pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
+        nbs = [landscape[:, pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
-        nbs = nbs[:, None, ...]
+        # (agents, channels, width, height)
+        # nbs = nbs[:, None, ...]
         if flatten:
             nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
-        return nbs
+        # print(nbs.shape)
+        return nbs.transpose(0, 2, 3, 1)
 
     def get_rewards(self, scape):
         ps = self.ps.astype(int)
-        return 1 - np.abs(self.trg_scape_val - scape[ps[:, 0], ps[:, 1]])
+        return 1 - np.abs(self.trg_scape_val - scape[:, ps[:, 0], ps[:, 1]])
 
 
 def init_ps(world_width, n_pop, n_dim=2):
@@ -158,17 +160,30 @@ class NeuralSwarm(Swarm):
             # actions, hid_state = self.nn({'obs': th.Tensor(nbs)})
             actions, hid_state = self.nn(th.Tensor(nbs))
             actions = actions.detach().numpy()
-            accelerations = np.hstack((actions[:, :3].argmax(1)[...,None], actions[:, 3:].argmax(1)[...,None]))
+            accelerations = np.hstack((actions[:, :3].argmax(1)[..., None], actions[:, 3:].argmax(1)[..., None]))
         if obstacles is not None:
-            # TODO: collision detection
-            pass
+            # TODO: proper collision detection (started in standalone function update_with_collision)
+            # For now, we assume agent can only encounter one new wall per step
+            new_ps = (self.ps + accelerations).astype(np.uint8) % self.world_width
+            colls = obstacles[new_ps[:, 0], new_ps[:, 1]]
+            self.ps = np.where(colls == 1, self.ps, new_ps)
         else:
-            self.ps += accelerations - 1
+            self.ps += accelerations
             # self.ps += self.vs
         self.ps = self.ps % self.world_width
         # momentum = 0.5
         # self.vs += (accelerations - 1) * momentum
         # self.vs /= 1 + 0.1 * momentum
+
+
+class MazeSwarm(NeuralSwarm):
+    def get_rewards(self, scape):
+        ps = self.ps.astype(int)
+        rewards = (scape[3, ps[:, 0], ps[:, 1]] == 1).astype(np.uint8)
+        return rewards
+
+    def update(self, scape, accelerations=None, obstacles=None):
+        super().update(scape, accelerations, obstacles=scape[1])
 
 
 class GreedySwarm(Swarm):
@@ -263,13 +278,23 @@ def contrastive_pop(ps, width):
                         for j, pj in enumerate(ps) if i != j]
     # penalize intra-pop distance (want clustered populations)
     intra_dist_means = [(toroidal_distance(p, p, width) ** 2).sum(-1).mean() for p in ps]
+    if len(intra_dist_means) == 0:
+        intra_dist_means = [0]
     n_intra = len(ps)
     assert len(inter_dist_means) == n_intra * (n_intra - 1)
-    return np.mean(inter_dist_means) - np.mean(intra_dist_means)
+    fit = np.mean(inter_dist_means) - np.mean(intra_dist_means)
+    assert fit is not None
+    return fit
+
 
 def contrastive_fitness(fits):
     fits = [np.array(f) for f in fits]
     inter_dist_means = [np.abs(fi[None, ...] - fj[:, None, ...]).mean() for i, fi in enumerate(fits) for j, fj in enumerate(fits) if i != j]
+
+    # If only one agent per population, do not calculate intra-population distance.
+    if fits[0].shape[0] == 1:
+        return np.mean(inter_dist_means)
+
     intra_dist_means = [np.abs(fi[None, ...] - fi[:, None, ...]).sum() / (fi.shape[0] * (fi.shape[0] - 1)) for fi in fits]
     return np.mean(inter_dist_means) - np.mean(intra_dist_means)
 

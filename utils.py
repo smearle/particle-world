@@ -158,3 +158,7 @@ def qdpy_eval(env, generator, weights):
     weights = np.array(weights)
     obj, bcs = simulate(generator, weights, env)
     return (obj,), bcs
+
+def discrete_to_onehot(a):
+    n_val = a.max() + 1
+    return np.eye(n_val)[a].transpose(2, 0, 1)

@@ -11,14 +11,15 @@ from torch import nn
 
 
 class Generator(object):
-    def __init__(self, width):
-        x = np.linspace(0, width - 1, width)
-        y = np.linspace(0, width - 1, width)
-        x, y = np.meshgrid(x, y)
-        xy = (np.stack((x, y), 0)) / width * 2 - 1
+    def __init__(self, width, n_chan):
+        # x = np.linspace(0, width - 1, width)
+        # y = np.linspace(0, width - 1, width)
+        # x, y = np.meshgrid(x, y)
+        # xy = (np.stack((x, y), 0)) / width * 2 - 1
         # xy = (np.sin(4 * np.pi * xy) + 1) / 2
-        self.xy = xy
-        self.landscape = self.xy
+        # self.xy = xy
+        # self.landscape = self.xy
+        self.n_chan = n_chan
         self.width = width
         pass
 
@@ -56,14 +57,14 @@ class FixedGenerator(Generator):
         pass
 
 
-class TileFlipFixedGenerator(FixedGenerator):
-    def __init__(self, width):
-        super().__init__(width)
-        self.landscape = np.random.random((self.width, self.width))
+class TileFlipGenerator(FixedGenerator):
+    def __init__(self, width, n_chan):
+        super().__init__(width, n_chan)
+        self.landscape = np.random.random((n_chan, width, width))
 
     def set_weights(self, w):
         # self.landscape = th.sigmoid(th.Tensor(w.reshape((width, width)))).numpy()
-        self.landscape = w.reshape((self.width, self.width))
+        self.landscape = w.reshape((self.n_chan, self.width, self.width))
 
 
 class Rastrigin(Generator):

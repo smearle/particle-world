@@ -22,17 +22,17 @@ from ribs.emitters import ImprovementEmitter, OptimizingEmitter
 from ribs.optimizers import Optimizer
 from tqdm import tqdm
 
-from env import ParticleGym, ParticleGymRLlib
-from generator import TileFlipFixedGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
+from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv
+from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval
 from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds
-from swarm import NeuralSwarm
+from swarm import NeuralSwarm, MazeSwarm
 from utils import infer, infer_elites, qdpy_eval, simulate, save
 from visualize import visualize_pyribs, plot_fitness_qdpy
 
 seed = None
 ndim = 2
-n_pop = 5
+n_pop = 1
 width = 16
 pg_delay = 50
 n_nca_steps = 10
@@ -42,12 +42,11 @@ pg_scale = pg_width / width
 # swarm_type = MemorySwarm
 n_policies = 2
 rllib_eval = True
-num_rllib_workers = 6
-n_rllib_envs = 30
+n_rllib_envs = 36
 
 generator_phase = True  # Do we start by evolving generators, or training players?
-gen_phase_len = 100
-play_phase_len = 10
+gen_phase_len = -1
+play_phase_len = 1
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
 fitness_weight = -1.0
@@ -55,9 +54,9 @@ creator.create("FitnessMin", base.Fitness, weights=(-fitness_weight,))
 creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 
 
-def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_counter):
+def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_counter, stale):
     # Run a round of player training at fixed intervals
-    if gen_itr > 0 and gen_itr % gen_phase_len == 0:
+    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale):
         train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=container, idx_counter=idx_counter,
                       n_policies=n_policies, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
         # else:
@@ -85,6 +84,7 @@ def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_count
             raise ValueError(
                 "No individual could be added back to the QD container when re-evaluating after player training.")
 
+# class MazeIndividual(creator.Individual, M)
 
 # TODO:
 class CPPNIndividual(creator.Individual, CPPN):
@@ -105,8 +105,9 @@ def run_qdpy():
                     # 'policies': env.swarms,
                 }
                 pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        stale = np.all(np.array(logbook.select('nbUpdated')[-10:]) == 0)
         phase_switch_callback(gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox,
-                              idx_counter=idx_counter)
+                              idx_counter=idx_counter, stale=stale)
 
     save_interval = 100
     if load:
@@ -142,8 +143,10 @@ def run_qdpy():
     init_batch_size = n_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
     batch_size = n_rllib_envs  # The number of evaluations in each subsequent batch
     nb_iterations = total_itrs - curr_iter  # The number of iterations (i.e. times where a new batch is evaluated)
-    if generator_cls == TileFlipFixedGenerator:
-        mutation_pb = 0.01  # The probability of mutating each value of a genome
+
+    # Set the probability of mutating each value of a genome
+    if generator_cls == TileFlipGenerator:
+        mutation_pb = 0.01
     elif generator_cls == SinCPPNGenerator:
         mutation_pb = 0.03
     else:
@@ -286,7 +289,7 @@ def run_pyribs():
 
         # Setup for parallel processing.
         pool = Pool()
-        generators = [generator_cls(width=width) for _ in range(batch_size * n_emitters)]
+        generators = [generator_cls(width=width, n_chan=env.n_chan) for _ in range(batch_size * n_emitters)]
         # generators = [generator for _ in range(batch_size * n_emitters)]
         envs = [ParticleGym(width=width, n_pop=n_pop, n_policies=n_policies) for _ in
                 range(batch_size * n_emitters)]
@@ -330,7 +333,7 @@ if __name__ == '__main__':
                         help="If reloading an experiment, produce plots, etc. "
                              "to visualize progress.")
     # parser.add_argument('-seq', '--sequential', help='not parallel', action='store_true')
-    parser.add_argument('--maxTotalBins', type=int, default=10000, help="Maximum number of bins in the grid")
+    parser.add_argument('--maxTotalBins', type=int, default=1, help="Maximum number of bins in the grid")
     parser.add_argument('-p', '--parallelismType', type=str, default='None',
                         help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
@@ -339,21 +342,26 @@ if __name__ == '__main__':
     parser.add_argument('-exp', '--experimentName', default='test')
     parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
                                                                            "skipping the world-generation phase.")
-    parser.add_argument('-gc', '--generator_class', type=str, default="Rastrigin",
+    parser.add_argument('-g', '--generator_class', type=str, default="Rastrigin",
                         help="Which type of world-generator to use, whether a "
                              "fixed (set of) landscape(s), or a parameterizable "
                              "representation."
                         )
+    parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
+    parser.add_argument('-np', '--num_proc', type=int, default=0, help="Number of RLlib workers. Each uses 1 CPU core.")
     args = parser.parse_args()
     generator_cls = globals()[args.generator_class]
+    num_rllib_workers = args.num_proc
 
-    swarm_cls = NeuralSwarm
-    generator = generator_cls(width=width)
+    # swarm_cls = NeuralSwarm
+    swarm_cls = MazeSwarm
+
     # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
-    # env = ParticleMazeEnv(width=width, n_policies=n_policies, n_pop=n_pop)
-    env = ParticleGymRLlib(
-        {'swarm_cls': swarm_cls, 'width': width, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
+    env = ParticleMazeEnv(
+    # env = ParticleGymRLlib(
+        {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
          'pg_width': pg_width, 'evaluate': False})
+    generator = generator_cls(width=width, n_chan=env.n_chan)
 
     initial_weights = generator.get_init_weights()
 
@@ -374,7 +382,7 @@ if __name__ == '__main__':
     features_domain = [(0., 1.)] * nb_features  # The domain (min/max values) of the features
 
     particle_trainer = init_particle_trainer(env, num_rllib_workers=num_rllib_workers, n_rllib_envs=n_rllib_envs,
-                                             enjoy=args.enjoy, save_dir=save_dir)
+                                             enjoy=args.enjoy, render=args.render, save_dir=save_dir)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
@@ -385,7 +393,7 @@ if __name__ == '__main__':
                 with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
                     model_checkpoint_path = f.read()
             else:
-                model_checkpoint_path = f'runs/{args.experimentName}/checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}'
+                model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}')
             particle_trainer.load_checkpoint(model_checkpoint_path)
 
             # TODO: support multiple fixed worlds
