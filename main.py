@@ -6,6 +6,7 @@ import sys
 import time
 from functools import partial
 from pdb import set_trace as TT
+from PIL import Image
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -52,6 +53,8 @@ play_phase_len = 10
 fitness_weight = -1.0
 creator.create("FitnessMin", base.Fitness, weights=(-fitness_weight,))
 creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
+
+fitness_domain = [(-np.inf, np.inf)]
 
 
 def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_counter, stale):
@@ -124,10 +127,34 @@ def run_qdpy():
         grid = data['container']
         curr_iter = data['current_iteration']
 
-        # Produce plots
+        # Produce plots and visualizations
         if args.visualize:
+
+            # render a grid of all worlds
+            im_pg_width = width * 10
+            im_grid = np.zeros((im_pg_width * nb_bins[0], im_pg_width * nb_bins[1], 3))
+            print(im_grid.shape)
+            gg = sorted(grid, key=lambda i: i.features)
+            for g in gg:
+                i, j = grid.index_grid(g.features)
+                env.set_world(g)
+                env.reset()
+                im = env.render(mode='rgb', pg_width=im_pg_width)
+                im_grid[i * im_pg_width: (i + 1) * im_pg_width, j * im_pg_width: (j + 1) * im_pg_width] = im
+
+            # im_grid = im_grid.T
+            im_grid = np.flip(im_grid, 0)
+            im_grid = Image.fromarray(im_grid.astype(np.uint8))
+            im_grid.save(os.path.join(save_dir, "level_grid.png"))
+
             logbook = data['logbook']
             plot_fitness_qdpy(save_dir, logbook)
+
+            # save fitness qd grid
+            plot_path = os.path.join(save_dir, "performancesGrid.png")
+            plotGridSubplots(grid.quality_array[..., 0], plot_path, plt.get_cmap("magma"), features_domain,
+                             fitness_domain[0], nbTicks=None)
+            print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
             sys.exit()
 
         # Render and observe
@@ -170,7 +197,6 @@ def run_qdpy():
     max_items_per_bin = 1 if args.maxTotalBins != 1 else 100  # The number of items in each bin of the grid
     ind_domain = (0., 1.)  # The domain (min/max values) of the individual genomes
     # fitness_domain = [(0., 1.)]                # The domain (min/max values) of the fitness
-    fitness_domain = [(-np.inf, np.inf)]
     verbose = True
     show_warnings = False  # Display warning and error messages. Set to True if you want to check if some individuals were out-of-bounds
     log_base_path = args.outputDir if args.outputDir is not None else "."

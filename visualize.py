@@ -15,7 +15,6 @@ def visualize_pyribs(archive):
     plt.savefig("fitness.png")
     plt.close()
 
-
 def plot_fitness_qdpy(save_dir, logbook):
     gen = logbook.select("iteration")
     fit_mins = logbook.select("min")

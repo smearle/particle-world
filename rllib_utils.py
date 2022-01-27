@@ -241,7 +241,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         "framework": "torch",
         "render_env": render if not enjoy else True,
 
-        "evaluation_interval": 1 if not enjoy else 10,
+        "evaluation_interval": 10 if not enjoy else 10,
         "evaluation_num_workers": 0 if not (evaluate) else num_rllib_workers,
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number of steps.)
         "evaluation_num_episodes": 1 if not (evaluate or enjoy) else len(eval_mazes) + 1,
@@ -249,7 +249,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             "env_config": {
                 # "n_pop": 1,
                 # TODO: write custom eval scenarios for the Maze environment so this won't break it
-                "evaluate": True,
+                "evaluate": evaluate,
             },
             "evaluation_parallel_to_training": True,
             "render_env": render,

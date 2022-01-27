@@ -475,11 +475,13 @@ class ParticleMazeEnv(ParticleGymRLlib):
         generator.world = self.world  # just for rendering
         return super().simulate(n_steps=n_steps, generator=generator, render=render, screen=screen, pg_scale=pg_scale, pg_delay=pg_delay)
 
-    def render(self, mode='human', pg_delay=0):
+    def render(self, mode='human', pg_delay=0, pg_width=None):
+        if not pg_width:
+            pg_width = self.pg_width
         # print('render')
-        pg_scale = self.pg_width / self.width
+        pg_scale = pg_width / self.width
         if not self.screen:
-            self.screen = pygame.display.set_mode([self.pg_width, self.pg_width])
+            self.screen = pygame.display.set_mode([pg_width, pg_width])
         render_landscape(self.screen, -1 * self.world[1] + 1)
         # Did the user click the window close button? Exit if so.
         for event in pygame.event.get():
@@ -493,10 +495,11 @@ class ParticleMazeEnv(ParticleGymRLlib):
                 agent_pos = agent_pos.astype(int) + 0.5
                 pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
                                    self.particle_draw_size * pg_scale)
-        pygame.display.update()
-        pygame.time.delay(pg_delay)
+        if mode == 'human':
+            pygame.display.update()
+            pygame.time.delay(pg_delay)
+            return True
+
         arr = pygame.surfarray.array3d(self.screen)
-        # arr = arr.transpose(2, 0, 1)
-        # arr = arr / 255
-        # return arr
-        return True
+        if mode == 'rgb':
+            return arr

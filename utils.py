@@ -106,7 +106,7 @@ def infer_elites(env, generator, player_trainer, world_archive, pg_width, pg_del
             all_bcs = np.empty((n_eps, 2))
             for i in range(n_eps):
                 # rllib_evaluate_worlds(trainer=player_trainer, worlds=world_archive, idx_counter=idx_counter)
-                TT()
+                raise Exception
             #     generator.generate(render=True, screen=screen, pg_delay=pg_delay)
             #     env.set_world_eval(generator.world, world_idx)
             #     if rllib_eval:
