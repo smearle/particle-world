@@ -51,15 +51,15 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
 
     if rllib_eval:
         rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter)
-        fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
+        qd_stats = [fitnesses[k] for k in range(len(fitnesses))]
         assert len(rllib_stats) == 1
-        rllib_stats = rllib_stats[0]
+        rl_stats = rllib_stats[0]
 
     else:
-        fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
-    for ind, fit in zip(invalid_ind, fitnesses):
-        ind.fitness.values = fit[0]
-        ind.features = fit[1]
+        qd_stats = toolbox.map(toolbox.evaluate, invalid_ind)
+    for ind, s in zip(invalid_ind, qd_stats):
+        ind.fitness.values = s[0]
+        ind.features = s[1]
 
     if len(invalid_ind) == 0:
         raise ValueError("No valid individual found !")

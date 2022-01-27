@@ -18,7 +18,7 @@ class Generator(object):
         # xy = (np.stack((x, y), 0)) / width * 2 - 1
         # xy = (np.sin(4 * np.pi * xy) + 1) / 2
         # self.xy = xy
-        # self.landscape = self.xy
+        # self.world = self.xy
         self.n_chan = n_chan
         self.width = width
         pass
@@ -63,7 +63,7 @@ class TileFlipGenerator(FixedGenerator):
         self.landscape = np.random.random((n_chan, width, width))
 
     def set_weights(self, w):
-        # self.landscape = th.sigmoid(th.Tensor(w.reshape((width, width)))).numpy()
+        # self.world = th.sigmoid(th.Tensor(w.reshape((width, width)))).numpy()
         self.landscape = w.reshape((self.n_chan, self.width, self.width))
 
 
@@ -92,7 +92,7 @@ class NNGenerator(Generator):
 
     def _update(self):
         self.world = self.nn_model(self.world)
-        #           cv2.imshow("NCA landscape generation", self.landscape)
+        #           cv2.imshow("NCA world generation", self.world)
         self.landscape = self.world[0, 0].numpy()
 
     def get_init_weights(self):

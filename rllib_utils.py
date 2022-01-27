@@ -11,7 +11,7 @@ from ray.rllib.models import MODEL_DEFAULTS
 from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import pretty_print
 
-from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv
+from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv, eval_mazes
 
 
 def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False):
@@ -26,7 +26,10 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     :return:
     """
     idxs = np.random.permutation(list(worlds.keys()))
-    workers = trainer.workers
+    if evaluate_only:
+        workers = trainer.evaluation_workers
+    else:
+        workers = trainer.workers
     worlds = {k: np.array(world) for k, world in worlds.items()}
     world_id = 0
     fitnesses = {}
@@ -68,17 +71,14 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
 
         # Train/evaluate
         if evaluate_only:
-            TT()
             stats = trainer.evaluate()
-            TT()
         else:
             stats = trainer.train()
-            TT()
         # print(pretty_print(stats))
         all_stats.append(stats)
 
         # Collect stats
-        new_fitnesses = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env.get_fitness()))
+        new_fitnesses = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env.get_fitness(evaluate=evaluate_only)))
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
         [new_fits.update(nf) for nf in new_fitnesses]
@@ -90,7 +90,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
 
         # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
-        # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed landscape).
+        # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
             world_id = len(fitnesses)
         else:
@@ -241,18 +241,19 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         "framework": "torch",
         "render_env": render if not enjoy else True,
 
-        "evaluation_interval": 10 if not enjoy else 10,
+        "evaluation_interval": 1 if not enjoy else 10,
         "evaluation_num_workers": 0 if not (evaluate) else num_rllib_workers,
+        # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number of steps.)
+        "evaluation_num_episodes": 1 if not (evaluate or enjoy) else len(eval_mazes) + 1,
         "evaluation_config": {
             "env_config": {
                 # "n_pop": 1,
                 # TODO: write custom eval scenarios for the Maze environment so this won't break it
-                "evaluate": evaluate,
+                "evaluate": True,
             },
             "evaluation_parallel_to_training": True,
-            "evaluation_num_episodes": 1,
-            "render_env": True,
-            "explore": False,
+            "render_env": render,
+            "explore": True if enjoy or evaluate else True,
         },
         "logger_config": {
             "log_dir": save_dir,
@@ -262,7 +263,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         # "record_env": True,
 
         "rollout_fragment_length": env.max_steps,
-        # This guarantees that each call to train() simulates an episode in each environment/world
+        # This guarantees that each call to train() simulates 1 episode in each environment/world.
         "train_batch_size": env.max_steps * n_rllib_envs,
     }
     trainer = ppo.PPOTrainer(env=type(env), config=trainer_config)

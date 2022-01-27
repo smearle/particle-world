@@ -22,7 +22,7 @@ from ribs.emitters import ImprovementEmitter, OptimizingEmitter
 from ribs.optimizers import Optimizer
 from tqdm import tqdm
 
-from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv
+from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv, eval_mazes, eval_mazes_probdists
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval
 from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
@@ -40,12 +40,12 @@ n_sim_steps = 100
 pg_width = 500
 pg_scale = pg_width / width
 # swarm_type = MemorySwarm
-n_policies = 2
+n_policies = 3
 rllib_eval = True
-n_rllib_envs = 2
+n_rllib_envs = 36
 
 generator_phase = True  # Do we start by evolving generators, or training players?
-gen_phase_len = -1
+gen_phase_len = 100
 play_phase_len = 10
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
@@ -95,9 +95,9 @@ class CPPNIndividual(creator.Individual, CPPN):
 
 def run_qdpy():
     def iteration_callback(toolbox, rllib_eval, gen_itr, batch, container, logbook):
-        """qdpy callback function, with custom args first, given with `partial` before tha qdpy algo is instantiated."""
+        """qdpy callback function, with custom args first, given with `partial` before the qdpy algo is instantiated."""
         idx_counter = ray.get_actor('idx_counter')
-        if gen_itr % save_interval == 0:
+        if gen_itr % qdpy_save_interval == 0:
             # qdpy already saves the container, logbook, etc. regularly, so we can save any additional things here.
             with open(f'runs/{args.experimentName}/learn.pickle', 'wb') as handle:
                 dict = {
@@ -105,14 +105,14 @@ def run_qdpy():
                     # 'policies': env.swarms,
                 }
                 pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        stale = np.all(np.array(logbook.select('nbUpdated')[-10:]) == 0)
+        time_until_stale = 10
+        past_updates = np.array(logbook.select('nbUpdated')[-time_until_stale:]) == 0
+        stale = len(past_updates) >= time_until_stale and np.all(past_updates)
         phase_switch_callback(gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox,
                               idx_counter=idx_counter, stale=stale)
 
-    save_interval = 100
+    qdpy_save_interval = 10
     if load:
-        creator.create("FitnessMin", base.Fitness, weights=(1.0,))
-        creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
         fname = f'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
         with open(f"runs/{args.experimentName}/{fname}.p", "rb") as f:
@@ -123,21 +123,29 @@ def run_qdpy():
         # env.set_policies(policies)
         grid = data['container']
         curr_iter = data['current_iteration']
+
+        # Produce plots
         if args.visualize:
             logbook = data['logbook']
             plot_fitness_qdpy(save_dir, logbook)
             sys.exit()
-        if args.enjoy:
+
+        # Render and observe
+        elif args.enjoy:
             # We'll look at each world independently in our single env
             elites = sorted(grid, key=lambda ind: ind.fitness, reverse=True)
-            elites = [np.array(i) for i in elites]
-            for i, elite in enumerate(elites):
+            worlds = [np.array(i) for i in elites]
+            if args.evaluate:
+                worlds = eval_mazes_probdists
+            for i, elite in enumerate(worlds):
                 ret = rllib_evaluate_worlds(particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
                                             evaluate_only=True)
-            TT()
             sys.exit()
-        if args.evaluate:
-            TT()
+
+        # Evaluate
+        elif args.evaluate:
+            ret = rllib_evaluate_worlds(particle_trainer, worlds={i: z for i, z in enumerate(eval_mazes)}, idx_counter=idx_counter,
+                                        evaluate_only=True)
             sys.exit()
     else:
         curr_iter = 0
@@ -153,7 +161,7 @@ def run_qdpy():
 
     # Set the probability of mutating each value of a genome
     if generator_cls == TileFlipGenerator:
-        mutation_pb = 0.01
+        mutation_pb = 0.3
     elif generator_cls == SinCPPNGenerator:
         mutation_pb = 0.03
     else:
@@ -203,6 +211,7 @@ def run_qdpy():
         # Create container
         grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
                                fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
+        print(type(grid))
 
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
         qd_algo = partial(qdRLlibEval, particle_trainer, rllib_eval)
@@ -211,7 +220,7 @@ def run_qdpy():
         algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
                                batch_size=batch_size, niter=nb_iterations,
                                verbose=verbose, show_warnings=show_warnings,
-                               results_infos=results_infos, log_base_path=log_base_path, save_period=save_interval,
+                               results_infos=results_infos, log_base_path=log_base_path, save_period=qdpy_save_interval,
                                iteration_filename=f'{args.experimentName}' + '/latest-{}.p',
                                iteration_callback_fn=callback,
                                ea_fn=qd_algo,
@@ -351,7 +360,7 @@ if __name__ == '__main__':
                                                                            "skipping the world-generation phase.")
     parser.add_argument('-g', '--generator_class', type=str, default="Rastrigin",
                         help="Which type of world-generator to use, whether a "
-                             "fixed (set of) landscape(s), or a parameterizable "
+                             "fixed (set of) world(s), or a parameterizable "
                              "representation."
                         )
     parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
@@ -359,6 +368,7 @@ if __name__ == '__main__':
     parser.add_argument('-gpus', '--num_gpus', type=int, default=1, help="How many GPUs to use for training.")
     parser.add_argument('-ev', '--evaluate', action='store_true', help="Whether to evaluate trained agents/worlds and"
                                                                        "collect relevant stats.")
+    parser.add_argument('-qd', '--quality_diversity', action='store_true', help='Search for a grid of levels with dimensions given by the fitness of each policy.')
     args = parser.parse_args()
     generator_cls = globals()[args.generator_class]
     num_rllib_workers = args.num_proc
@@ -370,7 +380,7 @@ if __name__ == '__main__':
     env = ParticleMazeEnv(
     # env = ParticleGymRLlib(
         {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
-         'pg_width': pg_width, 'evaluate': False})
+         'pg_width': pg_width, 'evaluate': args.evaluate})
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
     initial_weights = generator.get_init_weights()
@@ -383,12 +393,19 @@ if __name__ == '__main__':
     multi_proc = args.parallelismType != 'None'
     n_emitters = 5
     batch_size = 30
-    nb_features = 2  # The number of features to take into account in the container
+
+    if args.quality_diversity:
+        # Define grid in terms of fitness of all policies (save 1, for fitness)
+        nb_features = n_policies - 1
+    else:
+        nb_features = 2  # The number of features to take into account in the container
     bins_per_dim = int(pow(args.maxTotalBins, 1. / nb_features))
     nb_bins = (
                   bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $maxTotalBins^(1/nb_features)$ bins each
     save_interval = 10
-    features_domain = [(0., 1.)] * nb_features  # The domain (min/max values) of the features
+
+    # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
+    features_domain = [(0, env.max_steps - 1)] * nb_features  # The domain (min/max values) of the features
 
     idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
     particle_trainer = init_particle_trainer(env, num_rllib_workers=num_rllib_workers, n_rllib_envs=n_rllib_envs,
@@ -412,7 +429,7 @@ if __name__ == '__main__':
                 particle_trainer.workers.local_worker().set_policies_to_train([])
                 rllib_evaluate_worlds(particle_trainer, {0: generator.landscape})
                 # particle_trainer.evaluation_workers.foreach_worker(
-                #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.landscape)))
+                #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
                 # particle_trainer.evaluate()
                 sys.exit()
 
@@ -426,6 +443,6 @@ if __name__ == '__main__':
             pass
     else:
         # TODO: evolve players?
-        train_players(1000, trainer=particle_trainer, landscapes=[generator.landscape], n_policies=n_policies,
+        train_players(1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
                       n_rllib_envs=n_rllib_envs, save_dir=save_dir)
         # train_players(play_phase_len, particle_trainer)

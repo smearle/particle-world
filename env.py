@@ -17,9 +17,9 @@ from utils import discrete_to_onehot
 player_colors = [
     (0, 0, 255),
     (255, 0, 0),
-    (0, 255, 0),
+    # (0, 255, 0),  # green
     (255, 0, 255),
-    (255, 255, 0),
+    # (255, 255, 0),  # yellow
     (0, 255, 255),
 ]
 goal_color = (0, 255, 0)
@@ -28,13 +28,13 @@ start_color = (255, 255, 0)
 
 class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
-    propelling themselves toward desirable regions in the fitness landscape."""
+    propelling themselves toward desirable regions in the fitness world."""
     def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None):
         self.n_chan = n_chan
         if not pg_width:
             pg_width = width
         self.pg_width=pg_width
-        self.landscape = None
+        self.world = None
         self.landscape_set = False
         self.swarms = None
         self.width = width
@@ -63,19 +63,19 @@ class ParticleSwarmEnv(object):
 
     def reset(self):
         # assert self.landscape_set
-        assert self.landscape is not None
-        # assert len(self.landscape.shape) == 2
-        [swarm.reset(scape=self.landscape) for swarm in self.swarms]
+        assert self.world is not None
+        # assert len(self.world.shape) == 2
+        [swarm.reset(scape=self.world) for swarm in self.swarms]
 
     def step_swarms(self):
-        [s.update(scape=self.landscape) for s in self.swarms]
+        [s.update(scape=self.world) for s in self.swarms]
 
     def render(self, mode='human', pg_delay=0):
         # print('render')
         pg_scale = self.pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([self.pg_width, self.pg_width])
-        render_landscape(self.screen, self.landscape)
+        render_landscape(self.screen, self.world)
         # Did the user click the window close button? Exit if so.
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -94,7 +94,7 @@ class ParticleSwarmEnv(object):
         # return arr
         return True
 
-    def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=1):
+    def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=0):
         pg_delay = 50
         self.reset()
         for i in range(n_steps):
@@ -103,7 +103,7 @@ class ParticleSwarmEnv(object):
                 self.screen = screen
                 self.render(screen, pg_delay)
         # p1, p2 = self.swarms[0], self.swarms[1]
-        # objs = fit_dist([p1, p2], self.landscape)
+        # objs = fit_dist([p1, p2], self.world)
         ps1, ps2 = self.swarms[0].ps, self.swarms[1].ps
         objs = contrastive_pop([swarm.ps for swarm in self.swarms], self.width)
         bcs = ps1.mean(0)
@@ -112,7 +112,7 @@ class ParticleSwarmEnv(object):
     def set_landscape(self, landscape):
         assert landscape is not None
         self.landscape_set = True
-        self.landscape = landscape
+        self.world = landscape
 
 
 def gen_policy(i, observation_space, action_space, fov):
@@ -150,26 +150,26 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     def reset(self):
         # print('reset', self.worlds.keys())
         self.n_step = 0
-        # TODO: reset to a landscape in the archive, via rllib config args?
+        # TODO: reset to a world in the archive, via rllib config args?
         super().reset()
         obs = self.get_particle_observations()
         return obs
 
     def step(self, actions):
         actions = {k: [(1, 0), (0, 1), (0, -1), (-1, 0), (0, 0)][v] for k, v in actions.items()}
-        assert self.landscape is not None
+        assert self.world is not None
         swarm_acts = {i: {} for i in range(len(self.swarms))}
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
         batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] for i in range(self.swarms[j].n_pop)])
                             for j in range(len(self.swarms))}
-        [swarm.update(scape=self.landscape, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
+        [swarm.update(scape=self.world, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
         # Dones before rewards, in case reward is different e.g. at the last step
         self.dones = self.get_dones()
         rew = self.get_reward()
         info = {}
         self.n_step += 1
-        assert self.landscape is not None
+        assert self.world is not None
         return obs, rew, self.dones, info
 
     def get_dones(self):
@@ -181,11 +181,11 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         return dones
 
     def get_particle_observations(self):
-        return {(i, j): swarm.get_observations(scape=self.landscape, flatten=False)[j] for i, swarm in enumerate(self.swarms)
+        return {(i, j): swarm.get_observations(scape=self.world, flatten=False)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
 
     def get_reward(self):
-        swarm_rewards = [swarm.get_rewards(self.landscape) for swarm in self.swarms]
+        swarm_rewards = [swarm.get_rewards(self.world) for swarm in self.swarms]
         rew = {(i, j): swarm_rewards[i][j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
         return rew
@@ -193,6 +193,8 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
+        self.rewards = None
+        self.world = None
         evaluate = cfg.pop("evaluate")
         self.need_world_reset = False
         super().__init__(**cfg)
@@ -202,6 +204,7 @@ class ParticleGymRLlib(ParticleGym):
             # self.reset = partial(ParticleEvalEnv.reset, self)
             # self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
         self.world_idx = None
+        self.next_world = None
 
     def set_worlds(self, worlds: dict, idx_counter=None):
         # self.world_idx = 0
@@ -210,52 +213,68 @@ class ParticleGymRLlib(ParticleGym):
         else:
             self.world_idx = np.random.choice(list(worlds.keys()))
         self.set_world(worlds[self.world_idx])
-        self.fitnesses = {}
 
     def set_world(self, world):
-        self.world = world.reshape(self.width, self.width)
+        """
+        Set the world (from some external process, e.g. world-generator optimization), and set the env to be reset at
+        the next step.
+        """
+        # This will be set as the current world at the next reset
+        self.next_world = world.reshape(self.width, self.width)
+        self.need_world_reset = True
         # self.worlds = {idx: worlds[idx]}
         # print('set worlds ', worlds.keys())
 
     def get_dones(self):
         dones = super().get_dones()
-        if self.need_world_reset:
-            dones['__all__'] = True
+        dones['__all__'] = self.need_world_reset or self.n_step == self.max_steps + 1
         return dones
 
     def set_world_eval(self, world: np.array, idx):
         self.world_idx = idx
         self.set_world(world)
         self.set_landscape(self.world)
-        self.fitnesses = {}
 
     def reset(self):
+        self.world = self.next_world
+        # self.next_world = None
+        self.need_world_reset = False
         # print('reset w/ worlds', self.worlds.keys())
         # world_idx = list(self.worlds.keys())[self.world_idx]
         # world = self.worlds[world_idx]
-        world = self.world
-        self.set_landscape(world)
         # self.set_landscape(np.array(world).reshape(self.width, self.width))
         # self.world_idx = (self.world_idx + 1) % len(self.worlds)
-        self.need_world_reset = False
 
-        return super().reset()
+        obs = super().reset()
+        self.rewards = {agent_id: 0 for agent_id in obs}
 
-    def get_fitness(self):
-        return self.fitnesses
+        return obs
 
-    def step(self, actions):
-        obs, rew, dones, info = super().step(actions)
-        # TODO: Don't need to collect fitnesses if we are e.g. training players on fixed maps.
+    def get_fitness(self, evaluate=False):
+        """
+        Return the fitness (and behavior characteristics) achieved by the world after an episode of simulation. Note
+        that this only returns the fitness of the latest episode.
+        """
+        # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
+        # reset() call occurs on the first step (resulting in max_steps - 1).
+        if not evaluate:
+            assert self.max_steps - 1 <= self.n_step <= self.max_steps
+        n_pop = self.swarms[0].ps.shape[0]
+
+        # Convert agent to policy rewards
+        swarm_rewards = [[self.rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
         # Storing the objective and BCs corresponding mapped to the world_idx, for evolving worlds.
-        if dones['__all__']:
-            # world_idx = list(self.worlds.keys())[self.world_idx]
-            # self.fitnesses[self.world_idx] = (contrastive_pop([swarm.ps for swarm in self.swarms], self.width), ), (0, 0)
-            n_pop = self.swarms[0].ps.shape[0]
-            swarm_rewards = [[rew[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
-            self.fitnesses[self.world_idx] = (contrastive_fitness(swarm_rewards), ), (0, 0)
 
-        return obs, rew, dones, info
+        qd_stats = {self.world_idx: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
+        return qd_stats
+
+    def get_reward(self):
+        rew = super().get_reward()
+        # Store rewards so that we can compute world fitness according to progress over duration of level
+        for k, v in rew.items():
+            self.rewards[k] += v
+
+        return rew
 
 
 # This is a dummy class not currently used, except by its parent ParticleGymRLlib, which borrows its methods when instantiating,
@@ -263,7 +282,7 @@ class ParticleGymRLlib(ParticleGym):
 class ParticleEvalEnv(ParticleGymRLlib):
     """
     An environment that assumes that a feed-forward (i.e. memoryless) neural network is "best" at the task of navigating
-    a continuous fitness landscape when it simply greedly moves to the best tile in its field of vision. Randomly generate
+    a continuous fitness world when it simply greedly moves to the best tile in its field of vision. Randomly generate
     a map consisting of a neighborhood, and reward 1 when the policy moves to the tile with greatest value, otherwise 0.
     Episodes last one step.
     """
@@ -275,7 +294,7 @@ class ParticleEvalEnv(ParticleGymRLlib):
         raise Exception(f"{type(self)} is a dummy class.")
 
     def reset(self):
-        """Generate uniform random fitness landscape, then set to 0 all tiles not in the initial field of vision of any agent."""
+        """Generate uniform random fitness world, then set to 0 all tiles not in the initial field of vision of any agent."""
         self.fitnesses = {}
         og_scape = np.random.random((self.width, self.width))
         # Note that we're calling set_world on ourselves. Normally this is called externally before reset
@@ -304,18 +323,81 @@ class ParticleEvalEnv(ParticleGymRLlib):
         og_rewards = og_get_reward()
         rewards = {agent_id: int(np.max(nb) == og_rewards[agent_id]) for agent_id, nb in zip(self.agent_ids, self.init_nbs)}
         return rewards
+    
+    
+eval_mazes = [
+    np.array([
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    ]),
+    np.array([
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    ]),
+    np.array([
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1],
+        [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0, 1, 2, 1, 0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1],
+        [1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1],
+        [1, 3, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    ]),
+]
+# Convert to 3-channel probability distribution (or agent action)-type representation
+eval_mazes_probdists = []
+for i, y in enumerate(eval_mazes):
+    y = discrete_to_onehot(y)
+    z = np.empty((y.shape[0] - 1, y.shape[1], y.shape[2]))
+    z[:3] = y[:3]
+    z[2] -= y[3]
+    eval_mazes_probdists.append(z)
+
+eval_mazes_onehots = []
+for y in eval_mazes:
+    eval_mazes_onehots.append(discrete_to_onehot(y))
 
 
 class ParticleMazeEnv(ParticleGymRLlib):
     def __init__(self, cfg):
         cfg.update({'n_chan': 3})
-        evaluate = cfg.get('evaluate')
-        if evaluate:
-            width = cfg.get('width')
-            self.world_idx = 0
-            self.world = np.zeros((width, width))
-            self.world[1, 1] = 2
-            self.world[-2 , -2] = 3
+        self.evaluate = cfg.get('evaluate')
+        if self.evaluate:
+            self.eval_maze_i = 0
         super().__init__(cfg)
         # TODO: maze-specific evaluation scenarios (will currently break)
         n_policies = len(self.swarms)
@@ -335,15 +417,19 @@ class ParticleMazeEnv(ParticleGymRLlib):
         """
         # Convert world from 3D to 2D, collapsing channel axis.
         v = np.reshape(world, (self.n_chan, self.width, self.width))
+
         # Empty and wall tiles
         w = np.argmax(v[:2], axis=(0))
+
         # Force the map to include border walls
         w[0] = w[-1] = w[:, 0] = w[:, -1] = 1
+
         # Goal and start tiles
         # Cannot end on obstacles
         vg = v[2] - v[1]
         goal_idxs = np.argwhere(vg == vg.max())
         self.goal_idx = goal_idxs[np.random.randint(goal_idxs.shape[0])]
+
         # Cannot start on obstacles
         vs = v[2] + v[1]
         start_idxs = np.argwhere(vs == vs.min())
@@ -351,40 +437,50 @@ class ParticleMazeEnv(ParticleGymRLlib):
         w[self.start_idx[0], self.start_idx[1]] = 2
         w[self.goal_idx[0], self.goal_idx[1]] = 3
         self.world_flat = w
-        self.world = discrete_to_onehot(w)
+        self.next_world = discrete_to_onehot(w)
         self.need_world_reset = True
 
-    # def reset(self):
-    #     return super().reset()
-    #     TODO: invisible fitness landscape atm!
-    #     [swarm.reset(self.landscape) for swarm in self.swarms]
+
 
     def step(self, actions):
-        print(f"step {self.n_step} world {self.world_idx}")
+        # print(f"step {self.n_step} world {self.world_idx}")
+
         return super().step(actions)
 
     def step_swarms(self):
-        [s.update(scape=self.landscape, obstacles=self.landscape) for s in self.swarms]
+        [s.update(scape=self.world, obstacles=self.world) for s in self.swarms]
 
     def reset(self):
         # FIXME: redundant observations are being taken here
+        # print(f'reset world {self.world_idx} on step {self.n_step}')
+        if self.evaluate:
+            w = eval_mazes_onehots[self.eval_maze_i].astype(int)
+            self.start_idx = np.argwhere(w[2:3] == 1)[0, 1:]
+            self.goal_idx = np.argwhere(w[3:4] == 1)[0, 1:]
+            self.next_world = w
+            
+            # Unfancy,
+            self.eval_maze_i = (self.eval_maze_i + 1) % len(eval_mazes)
+
         obs = super().reset()
+
         for swarm in self.swarms:
             swarm.ps[:] = self.start_idx
+
         obs = self.get_particle_observations()
-        print(f'reset world {self.world_idx}')
+
         return obs
 
-    def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=100):
-        generator.landscape = self.landscape  # just for rendering
+    def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=0):
+        generator.world = self.world  # just for rendering
         return super().simulate(n_steps=n_steps, generator=generator, render=render, screen=screen, pg_scale=pg_scale, pg_delay=pg_delay)
 
-    def render(self, mode='human', pg_delay=50):
+    def render(self, mode='human', pg_delay=0):
         # print('render')
         pg_scale = self.pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([self.pg_width, self.pg_width])
-        render_landscape(self.screen, -1 * self.landscape[1] + 1)
+        render_landscape(self.screen, -1 * self.world[1] + 1)
         # Did the user click the window close button? Exit if so.
         for event in pygame.event.get():
             if event.type == pygame.QUIT:

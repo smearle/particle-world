@@ -1,3 +1,5 @@
+from pdb import set_trace as TT
+
 import numpy as np
 import torch as th
 from ray.rllib.models import ModelV2
@@ -28,14 +30,14 @@ class Swarm(object):
         self.trg_scape_val = trg_scape_val
 
     def reset(self, scape):
-        # self.landscape = scape
+        # self.world = scape
         self.ps, self.vs = init_ps(self.world_width, self.n_pop)
 
     def get_observations(self, scape, flatten=True):
         """
         Return a batch of local observations corresponding to particles in the swarm, of size (n_pop, patch_w, patch_w),
         where patch_w is a square patch allowing the agent to see fov (field of vision)-many tiles in each direction.
-        :param scape: The one-hot encoded and/or discrete landscape observed by the agents, of size (n_chan, width,
+        :param scape: The one-hot encoded and/or discrete world observed by the agents, of size (n_chan, width,
         width)
         :param flatten: If true, return obs of size (n_pop, patch_w ** 2), i.e. for processing by a dense layer.
         :return:
@@ -185,7 +187,7 @@ class NeuralSwarm(Swarm):
 class MazeSwarm(NeuralSwarm):
     def get_rewards(self, scape):
         ps = self.ps.astype(int)
-        rewards = (scape[3, ps[:, 0], ps[:, 1]] == 1).astype(np.uint8)
+        rewards = (scape[3, ps[:, 0], ps[:, 1]] == 1).astype(int)
         return rewards
 
     def update(self, scape, accelerations=None, obstacles=None):
@@ -300,11 +302,13 @@ def contrastive_fitness(fits):
 
     # If only one agent per population, do not calculate intra-population distance.
     if fits[0].shape[0] == 1:
-        return np.mean(inter_dist_means)
+        inter_dist_mean = np.mean(inter_dist_means)
+        return inter_dist_mean
 
     intra_dist_means = [np.abs(fi[None, ...] - fi[:, None, ...]).sum() / (fi.shape[0] * (fi.shape[0] - 1)) for fi in
                         fits]
-    return np.mean(inter_dist_means) - np.mean(intra_dist_means)
+    fit = np.mean(inter_dist_means) - np.mean(intra_dist_means)
+    return fit
 
 
 def toroidal_distance(a, b, width):

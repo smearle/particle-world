@@ -42,7 +42,7 @@ def fit_dist(pops, scape):
 
 
 # def animate_nca(generator):
-#     #   cv2.namedWindow('NCA landscape generation')
+#     #   cv2.namedWindow('NCA world generation')
 #     generator.generate(render=True, pg_delay=pg_delay)
 
 
@@ -52,7 +52,7 @@ def simulate(generator, g_weights, env, n_steps=100, n_eps=1, render=False, scre
     all_bcs = np.empty((n_eps, 2))
     for i in range(n_eps):
         generator.generate(render=render, screen=screen, pg_delay=pg_delay)
-        env.set_landscape(generator.landscape)
+        env.set_landscape(generator.world)
         env.reset()
         fit_difs, bcs = env.simulate(n_steps=n_steps, generator=generator, render=render, screen=screen,
                                      pg_delay=pg_delay, pg_scale=pg_scale)
@@ -61,8 +61,8 @@ def simulate(generator, g_weights, env, n_steps=100, n_eps=1, render=False, scre
     #   obj = -np.std(all_fit_difs)
     #   bcs = np.mean(all_fit_difs)
     obj = np.mean(all_fit_difs)
-    # obj = symmetry(generator.landscape)
-    # bcs = [symmetry(generator.landscape), emptiness(generator.landscape)]
+    # obj = symmetry(generator.world)
+    # bcs = [symmetry(generator.world), emptiness(generator.world)]
     bcs = all_bcs.mean(0) / env.width
     return obj, bcs
 
@@ -108,7 +108,7 @@ def infer_elites(env, generator, player_trainer, world_archive, pg_width, pg_del
                 # rllib_evaluate_worlds(trainer=player_trainer, worlds=world_archive, idx_counter=idx_counter)
                 TT()
             #     generator.generate(render=True, screen=screen, pg_delay=pg_delay)
-            #     env.set_world_eval(generator.landscape, world_idx)
+            #     env.set_world_eval(generator.world, world_idx)
             #     if rllib_eval:
             #         obs = env.reset()
             #         env.render(pg_delay=pg_delay)
@@ -142,8 +142,8 @@ def infer_elites(env, generator, player_trainer, world_archive, pg_width, pg_del
             #   obj = -np.std(all_fit_difs)
             #   bcs = np.mean(all_fit_difs)
             obj = np.mean(all_fit_difs)
-            # obj = symmetry(generator.landscape)
-            # bcs = [symmetry(generator.landscape), emptiness(generator.landscape)]
+            # obj = symmetry(generator.world)
+            # bcs = [symmetry(generator.world), emptiness(generator.world)]
             bcs = all_bcs.mean(0) / env.width
             print(f'obj: {obj}, bcs: {bcs}')
             # Pause on the final frame for analysis/debugging
