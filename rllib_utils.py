@@ -14,7 +14,17 @@ from ray.tune.logger import pretty_print
 from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv
 
 
-def rllib_evaluate_worlds(trainer, worlds, idx_counter=None):
+def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False):
+    """
+    Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
+    train/evaluate functions.
+    :param trainer:
+    :param worlds:
+    :param idx_counter:
+    :param evaluate_only: If True, we are not training, just evaluating some trained players/generators. (Normally,
+    during training, we also evaluate at regular intervals).
+    :return:
+    """
     idxs = np.random.permutation(list(worlds.keys()))
     workers = trainer.workers
     worlds = {k: np.array(world) for k, world in worlds.items()}
@@ -57,7 +67,13 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None):
             lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter)))
 
         # Train/evaluate
-        stats = trainer.train()
+        if evaluate_only:
+            TT()
+            stats = trainer.evaluate()
+            TT()
+        else:
+            stats = trainer.train()
+            TT()
         # print(pretty_print(stats))
         all_stats.append(stats)
 
@@ -168,12 +184,30 @@ class IdxCounter:
         return self.hashes_to_idxs
 
 
-def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, render, save_dir): # env is currently a dummy environment that will not be used in actual training
+def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus):
+    """
+    Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
+    environment.
+    #TODO: abstract this to support training generators as well.
+    :param env: a dummy environment, created in the main script, from which we will draw environment variables. Will not
+    be used in actual training.
+    :param num_rllib_workers: how many RLlib workers to use for training (1 core per worker)
+    :param n_rllib_envs: how many environments to use for training. This determines how many worlds/generators can be
+    evaluated with each call to train. When evolving worlds, the determines the batch size.
+    :param evaluate: if True, then we are evaluating only (no training), and will launch num_rllib_workers-many
+    evaluation workers.
+    :param enjoy: if True, then the trainer is being initialized only to render and observe trained particles, so we
+    will set other rllib parameters accordingly.
+    :param render: whether to render an environment during training.
+    :param save_dir: The directory in which experiment logs and checkpoints are to be saved.
+    :param num_gpus: How many GPUs to use for training.
+    :return: An rllib PPOTrainer object
+    """
     model_config = copy.copy(MODEL_DEFAULTS)
     model_config.update({
         "use_lstm": True,
         # "fcnet_hiddens": [32, 32],
-        "conv_filters": [[16, [4, 4], 1], [32, [4, 4], 1], [512, [7, 7], 1]],
+        "conv_filters": [[16, [4, 4], 1], [32, [4, 4], 1], [512, [5, 5], 1]],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
 
@@ -201,32 +235,34 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, enjoy, render, s
             # "pg_width": pg_width,
             "evaluate": False,
         },
-        "num_gpus": 1,
-        "num_workers": num_rllib_workers if not enjoy else 0,
-        "num_envs_per_worker": math.ceil(n_rllib_envs / workers),
+        "num_gpus": num_gpus,
+        "num_workers": num_rllib_workers if not (enjoy or evaluate) else 0,
+        "num_envs_per_worker": math.ceil(n_rllib_envs / workers) if not enjoy else 1,
         "framework": "torch",
         "render_env": render if not enjoy else True,
 
-        # "evaluation_interval": 10 if not enjoy else 10,
-        # "evaluation_config": {
-        #     "env_config": {
-        #         "n_pop": 1,
-        #         "evaluate": True,
-        #     },
-        #     "evaluation_parallel_to_training": True,
-        #     "evaluation_num_episodes": 10,
-
-            # "render_env": True,
-            # "explore": False,
-        # },
+        "evaluation_interval": 10 if not enjoy else 10,
+        "evaluation_num_workers": 0 if not (evaluate) else num_rllib_workers,
+        "evaluation_config": {
+            "env_config": {
+                # "n_pop": 1,
+                # TODO: write custom eval scenarios for the Maze environment so this won't break it
+                "evaluate": evaluate,
+            },
+            "evaluation_parallel_to_training": True,
+            "evaluation_num_episodes": 1,
+            "render_env": True,
+            "explore": False,
+        },
         "logger_config": {
             "log_dir": save_dir,
         },
-        # "explore": False,
         # "lr": 0.1,
         # "log_level": "INFO",
         # "record_env": True,
+
         "rollout_fragment_length": env.max_steps,
+        # This guarantees that each call to train() simulates an episode in each environment/world
         "train_batch_size": env.max_steps * n_rllib_envs,
     }
     trainer = ppo.PPOTrainer(env=type(env), config=trainer_config)

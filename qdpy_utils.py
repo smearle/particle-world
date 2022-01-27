@@ -33,7 +33,7 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
 
     TODO
     """
-    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
+    idx_counter = ray.get_actor("idx_counter")
     rllib_trainer.workers.local_worker().set_policies_to_train([])
     if start_time == None:
         start_time = timer()

@@ -46,7 +46,7 @@ def render_landscape(screen, landscape):
     bg = pygame.surfarray.make_surface(bg * 255)
     bg = pygame.transform.scale(bg, (screen.get_width(), screen.get_height()))
     screen.blit(bg, (0, 0))
-    pygame.display.update()
+    # pygame.display.update()
 
 
 class FixedGenerator(Generator):

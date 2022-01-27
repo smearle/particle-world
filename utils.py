@@ -4,6 +4,7 @@ import pickle
 
 import numpy as np
 import pygame
+import ray
 from matplotlib import pyplot as plt
 from pygame.constants import KEYDOWN
 from ribs.visualize import grid_archive_heatmap
@@ -75,50 +76,69 @@ def infer(env, generator, archive, pg_width, pg_delay, trainer, rllib_eval):
     return infer_elites(env, generator, trainer, elites, pg_width, pg_delay, rllib_eval)
 
 
-def infer_elites(env, generator, trainer, elites, pg_width, pg_delay, rllib_eval):
+def infer_elites(env, generator, player_trainer, world_archive, pg_width, pg_delay, rllib_eval):
+    """
+    Observe the performance of trained player-agents on an archive of generator-worlds.
+    :param env:
+    :param generator:
+    :param player_trainer:
+    :param world_archive:
+    :param pg_width:
+    :param pg_delay:
+    :param rllib_eval:
+    :return:
+    """
+    # TODO: adapt this function for evaluating agents after training (and logging corresponding stats), without
+    #  necessarily rendering.
+    # More episodes over which to collect stats will only be necessary once evaluation involves some randomness. (For
+    # now, we are setting exploration to False in our policies, and the environment itself is deterministic).
     n_eps = 1
     pygame.init()
-    screen = pygame.display.set_mode([pg_width, pg_width])
-    pg_scale = pg_width / env.width
+    # screen = pygame.display.set_mode([pg_width, pg_width])
+    # pg_scale = pg_width / env.width
     running = True
+    idx_counter = ray.get_actor('idx_counter')
     while running:
-        for world_idx, g_weights in enumerate(elites):
-            generator.set_weights(g_weights)
+        fitnesses = {}
+        for world_idx, g_weights in enumerate(world_archive):
+            # generator.set_weights(g_weights)
             all_fit_difs = np.empty((n_eps))
             all_bcs = np.empty((n_eps, 2))
             for i in range(n_eps):
-                generator.generate(render=True, screen=screen, pg_delay=pg_delay)
-                env.set_world_eval(generator.landscape, world_idx)
-                if rllib_eval:
-                    obs = env.reset()
-                    env.render(pg_delay=pg_delay)
-                    done = False
-                    while not done:
-                        agent_obs = {}
-                        agent_ids = obs.keys()
-                        for k in agent_ids:
-                            n_pol = k[0]
-                            if n_pol not in agent_obs:
-                                agent_obs[n_pol] = {k: obs[k]}
-                            else:
-                                agent_obs[n_pol].update({k: obs[k]})
-                        actions = {}
-                        for k in agent_obs:
-                            actions.update(trainer.compute_actions(agent_obs[k], policy_id=f'policy_{k}', explore=False))
-                        obs, rew, dones, info = env.step(actions)
-                        env.render(pg_delay=pg_delay)
-                        done = dones['__all__']
-                    fitnesses = env.get_fitness()
-                    assert len(fitnesses) == 1
-                    obj, bcs = env.get_fitness()[world_idx]
-                    assert len(obj) == 1
-                    all_fit_difs[i] = obj[0]
-                    all_bcs[i] = bcs
-                else:
-                    fit_difs, bcs = env.simulate(n_steps=env.max_steps, generator=generator, render=True, screen=screen,
-                                                 pg_delay=pg_delay, pg_scale=pg_scale)
-                    all_fit_difs[i] = fit_difs
-                    all_bcs[i] = bcs
+                # rllib_evaluate_worlds(trainer=player_trainer, worlds=world_archive, idx_counter=idx_counter)
+                TT()
+            #     generator.generate(render=True, screen=screen, pg_delay=pg_delay)
+            #     env.set_world_eval(generator.landscape, world_idx)
+            #     if rllib_eval:
+            #         obs = env.reset()
+            #         env.render(pg_delay=pg_delay)
+            #         done = False
+            #         while not done:
+            #             agent_obs = {}
+            #             agent_ids = obs.keys()
+            #             for k in agent_ids:
+            #                 n_pol = k[0]
+            #                 if n_pol not in agent_obs:
+            #                     agent_obs[n_pol] = {k: obs[k]}
+            #                 else:
+            #                     agent_obs[n_pol].update({k: obs[k]})
+            #             actions = {}
+            #             for k in agent_obs:
+            #                 actions.update(player_trainer.compute_actions(agent_obs[k], policy_id=f'policy_{k}', explore=False))
+            #             obs, rew, dones, info = env.step(actions)
+            #             env.render(pg_delay=pg_delay)
+            #             done = dones['__all__']
+            #         fitnesses = env.get_fitness()
+            #         assert len(fitnesses) == 1
+            #         obj, bcs = env.get_fitness()[world_idx]
+            #         assert len(obj) == 1
+            #         all_fit_difs[i] = obj[0]
+            #         all_bcs[i] = bcs
+            #     else:
+            #         fit_difs, bcs = env.simulate(n_steps=env.max_steps, generator=generator, render=True, screen=screen,
+            #                                      pg_delay=pg_delay, pg_scale=pg_scale)
+            #         all_fit_difs[i] = fit_difs
+            #         all_bcs[i] = bcs
             #   obj = -np.std(all_fit_difs)
             #   bcs = np.mean(all_fit_difs)
             obj = np.mean(all_fit_difs)

@@ -25,7 +25,7 @@ from tqdm import tqdm
 from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval
-from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds
+from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
 from swarm import NeuralSwarm, MazeSwarm
 from utils import infer, infer_elites, qdpy_eval, simulate, save
 from visualize import visualize_pyribs, plot_fitness_qdpy
@@ -33,7 +33,7 @@ from visualize import visualize_pyribs, plot_fitness_qdpy
 seed = None
 ndim = 2
 n_pop = 1
-width = 16
+width = 15
 pg_delay = 50
 n_nca_steps = 10
 n_sim_steps = 100
@@ -42,11 +42,11 @@ pg_scale = pg_width / width
 # swarm_type = MemorySwarm
 n_policies = 2
 rllib_eval = True
-n_rllib_envs = 36
+n_rllib_envs = 2
 
 generator_phase = True  # Do we start by evolving generators, or training players?
 gen_phase_len = -1
-play_phase_len = 1
+play_phase_len = 10
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
 fitness_weight = -1.0
@@ -127,10 +127,17 @@ def run_qdpy():
             logbook = data['logbook']
             plot_fitness_qdpy(save_dir, logbook)
             sys.exit()
-        if enjoy:
+        if args.enjoy:
+            # We'll look at each world independently in our single env
             elites = sorted(grid, key=lambda ind: ind.fitness, reverse=True)
             elites = [np.array(i) for i in elites]
-            infer_elites(env, generator, particle_trainer, elites, pg_width, pg_delay, rllib_eval)
+            for i, elite in enumerate(elites):
+                ret = rllib_evaluate_worlds(particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
+                                            evaluate_only=True)
+            TT()
+            sys.exit()
+        if args.evaluate:
+            TT()
             sys.exit()
     else:
         curr_iter = 0
@@ -239,7 +246,7 @@ def run_pyribs():
             stats = dict['stats']
             policies = dict['policies']
         visualize_pyribs(archive)
-        if enjoy:
+        if args.enjoy:
             # env.set_policies(policies)
             infer(env, generator, particle_trainer, archive, pg_width, pg_delay, rllib_eval)
     else:
@@ -349,6 +356,9 @@ if __name__ == '__main__':
                         )
     parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
     parser.add_argument('-np', '--num_proc', type=int, default=0, help="Number of RLlib workers. Each uses 1 CPU core.")
+    parser.add_argument('-gpus', '--num_gpus', type=int, default=1, help="How many GPUs to use for training.")
+    parser.add_argument('-ev', '--evaluate', action='store_true', help="Whether to evaluate trained agents/worlds and"
+                                                                       "collect relevant stats.")
     args = parser.parse_args()
     generator_cls = globals()[args.generator_class]
     num_rllib_workers = args.num_proc
@@ -369,7 +379,6 @@ if __name__ == '__main__':
     if not os.path.isdir(save_dir):
         os.mkdir(save_dir)
     load = args.load
-    enjoy = args.enjoy
     total_itrs = 50000
     multi_proc = args.parallelismType != 'None'
     n_emitters = 5
@@ -381,8 +390,10 @@ if __name__ == '__main__':
     save_interval = 10
     features_domain = [(0., 1.)] * nb_features  # The domain (min/max values) of the features
 
+    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
     particle_trainer = init_particle_trainer(env, num_rllib_workers=num_rllib_workers, n_rllib_envs=n_rllib_envs,
-                                             enjoy=args.enjoy, render=args.render, save_dir=save_dir)
+                                             enjoy=args.enjoy, render=args.render, save_dir=save_dir,
+                                             num_gpus=args.num_gpus, evaluate=args.evaluate)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)

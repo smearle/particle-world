@@ -39,7 +39,7 @@ class ParticleSwarmEnv(object):
         self.swarms = None
         self.width = width
         # self.fovs = [si+1 for si in range(n_policies)]
-        self.fovs = [3 for si in range(n_policies)]
+        self.fovs = [2 for si in range(n_policies)]
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
         self.n_steps = None
@@ -194,12 +194,13 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
         evaluate = cfg.pop("evaluate")
+        self.need_world_reset = False
         super().__init__(**cfg)
-        if evaluate:
+        # if evaluate:
             # Agents should be able to reach any tile within the initial neighborhood by a shortest path.
-            self.max_steps = max(self.fovs) * 2
-            self.reset = partial(ParticleEvalEnv.reset, self)
-            self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
+            # self.max_steps = max(self.fovs) * 2
+            # self.reset = partial(ParticleEvalEnv.reset, self)
+            # self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
         self.world_idx = None
 
     def set_worlds(self, worlds: dict, idx_counter=None):
@@ -216,6 +217,12 @@ class ParticleGymRLlib(ParticleGym):
         # self.worlds = {idx: worlds[idx]}
         # print('set worlds ', worlds.keys())
 
+    def get_dones(self):
+        dones = super().get_dones()
+        if self.need_world_reset:
+            dones['__all__'] = True
+        return dones
+
     def set_world_eval(self, world: np.array, idx):
         self.world_idx = idx
         self.set_world(world)
@@ -230,6 +237,7 @@ class ParticleGymRLlib(ParticleGym):
         self.set_landscape(world)
         # self.set_landscape(np.array(world).reshape(self.width, self.width))
         # self.world_idx = (self.world_idx + 1) % len(self.worlds)
+        self.need_world_reset = False
 
         return super().reset()
 
@@ -301,7 +309,15 @@ class ParticleEvalEnv(ParticleGymRLlib):
 class ParticleMazeEnv(ParticleGymRLlib):
     def __init__(self, cfg):
         cfg.update({'n_chan': 3})
+        evaluate = cfg.get('evaluate')
+        if evaluate:
+            width = cfg.get('width')
+            self.world_idx = 0
+            self.world = np.zeros((width, width))
+            self.world[1, 1] = 2
+            self.world[-2 , -2] = 3
         super().__init__(cfg)
+        # TODO: maze-specific evaluation scenarios (will currently break)
         n_policies = len(self.swarms)
         patch_ws = [fov * 2 + 1 for fov in self.fovs]
 
@@ -313,11 +329,16 @@ class ParticleMazeEnv(ParticleGymRLlib):
         # self.particle_draw_size = 0.1
 
     def set_world(self, world):
-        # Convert world from 3D to 2D, collapsing channel axis
-        w = np.empty((self.width, self.width), dtype=np.uint8)
+        """
+        Convert an encoding produced by the generator into a world map. The encoding has channels (empty, wall, starg/goal)
+        :param world: Encoding, optimized directly or produced by a world-generator.
+        """
+        # Convert world from 3D to 2D, collapsing channel axis.
         v = np.reshape(world, (self.n_chan, self.width, self.width))
         # Empty and wall tiles
         w = np.argmax(v[:2], axis=(0))
+        # Force the map to include border walls
+        w[0] = w[-1] = w[:, 0] = w[:, -1] = 1
         # Goal and start tiles
         # Cannot end on obstacles
         vg = v[2] - v[1]
@@ -331,12 +352,16 @@ class ParticleMazeEnv(ParticleGymRLlib):
         w[self.goal_idx[0], self.goal_idx[1]] = 3
         self.world_flat = w
         self.world = discrete_to_onehot(w)
+        self.need_world_reset = True
 
     # def reset(self):
     #     return super().reset()
     #     TODO: invisible fitness landscape atm!
     #     [swarm.reset(self.landscape) for swarm in self.swarms]
 
+    def step(self, actions):
+        print(f"step {self.n_step} world {self.world_idx}")
+        return super().step(actions)
 
     def step_swarms(self):
         [s.update(scape=self.landscape, obstacles=self.landscape) for s in self.swarms]
@@ -347,6 +372,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         for swarm in self.swarms:
             swarm.ps[:] = self.start_idx
         obs = self.get_particle_observations()
+        print(f'reset world {self.world_idx}')
         return obs
 
     def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=100):

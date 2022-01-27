@@ -1,14 +1,10 @@
-import copy
-
 import numpy as np
 import torch as th
-from ray.rllib.agents.ppo import PPOTorchPolicy
 from ray.rllib.models import ModelV2
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.utils.typing import TensorType
 from torch import nn
-from pdb import set_trace as TT
 
 
 def gen_policy(i, observation_space, action_space, fov):
@@ -36,6 +32,14 @@ class Swarm(object):
         self.ps, self.vs = init_ps(self.world_width, self.n_pop)
 
     def get_observations(self, scape, flatten=True):
+        """
+        Return a batch of local observations corresponding to particles in the swarm, of size (n_pop, patch_w, patch_w),
+        where patch_w is a square patch allowing the agent to see fov (field of vision)-many tiles in each direction.
+        :param scape: The one-hot encoded and/or discrete landscape observed by the agents, of size (n_chan, width,
+        width)
+        :param flatten: If true, return obs of size (n_pop, patch_w ** 2), i.e. for processing by a dense layer.
+        :return:
+        """
         fov = self.fov
         patch_w = fov * 2 + 1
         # Add new dimensions for patch_w-width patches of the environment around each agent
@@ -45,7 +49,8 @@ class Swarm(object):
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
         landscape = np.pad(scape, ((0, 0), (fov, fov), (fov, fov)), mode='wrap')
         # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
-        nbs = [landscape[:, pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in zip(ps_int[:, 0], ps_int[:, 1])]
+        nbs = [landscape[:, pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in
+               zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
         # (agents, channels, width, height)
         # nbs = nbs[:, None, ...]
@@ -95,7 +100,7 @@ class NN(nn.Module):
         self.l1 = nn.Conv2d(1, 32, kernel_width, 1, padding=0)
         self.l2 = nn.Linear(256, 256)
         self.l3 = nn.Linear(32, 6)  # double length of actual output because TorchDiagGaussian computes mean and std
-                                    # https://github.com/ray-project/ray/issues/17934
+        # https://github.com/ray-project/ray/issues/17934
         self.l4 = nn.Linear(32, 1)
         # self.apply(init_weights)
 
@@ -136,7 +141,8 @@ class NeuralSwarm(Swarm):
 
     def set_nn(self, nn, policy_id, obs_space, act_space, trainer_config):
         # self.nn = type(nn)(obs_space, act_space, trainer_config['model'])
-        self.nn.model = type(nn.model)(obs_space, act_space, nn.model.num_outputs, trainer_config['model'], f'policy_{policy_id}')
+        self.nn.model = type(nn.model)(obs_space, act_space, nn.model.num_outputs, trainer_config['model'],
+                                       f'policy_{policy_id}')
         # self.nn.set_state(copy.deepcopy(nn.get_state()))
         # self.nn.set_weights(copy.deepcopy(nn.get_weights()))
         # self.nn.model.load_state_dict(copy.copy(nn.model.state_dict()))
@@ -146,9 +152,9 @@ class NeuralSwarm(Swarm):
         # for k in self.nn.__dict__:
         #
         # for attr in attrs:
-            # at = getattr(self.nn, k)
-            # print('at', k, at)
-            # copy.deepcopy(at)
+        # at = getattr(self.nn, k)
+        # print('at', k, at)
+        # copy.deepcopy(at)
         return
 
     def update(self, scape, accelerations=None, obstacles=None):
@@ -289,13 +295,15 @@ def contrastive_pop(ps, width):
 
 def contrastive_fitness(fits):
     fits = [np.array(f) for f in fits]
-    inter_dist_means = [np.abs(fi[None, ...] - fj[:, None, ...]).mean() for i, fi in enumerate(fits) for j, fj in enumerate(fits) if i != j]
+    inter_dist_means = [np.abs(fi[None, ...] - fj[:, None, ...]).mean() for i, fi in enumerate(fits) for j, fj in
+                        enumerate(fits) if i != j]
 
     # If only one agent per population, do not calculate intra-population distance.
     if fits[0].shape[0] == 1:
         return np.mean(inter_dist_means)
 
-    intra_dist_means = [np.abs(fi[None, ...] - fi[:, None, ...]).sum() / (fi.shape[0] * (fi.shape[0] - 1)) for fi in fits]
+    intra_dist_means = [np.abs(fi[None, ...] - fi[:, None, ...]).sum() / (fi.shape[0] * (fi.shape[0] - 1)) for fi in
+                        fits]
     return np.mean(inter_dist_means) - np.mean(intra_dist_means)
 
 
