@@ -15,7 +15,7 @@ def visualize_pyribs(archive):
     plt.savefig("fitness.png")
     plt.close()
 
-def plot_fitness_qdpy(save_dir, logbook):
+def plot_fitness_qdpy(save_dir, logbook, qd=True):
     gen = logbook.select("iteration")
     fit_mins = logbook.select("min")
     fit_avgs = logbook.select("avg")
@@ -36,7 +36,7 @@ def plot_fitness_qdpy(save_dir, logbook):
     ax1.set_ylabel("Fitness")
     # FIXME: figure out from logbook if we've got all-1 bin sizes so we don't plot size
     # if not np.all(self.config.ME_BIN_SIZES == 1):
-    if False:
+    if qd:
         # plot the size of the archive
         containerSize_avgs = logbook.select('containerSize')
         for tl in ax1.get_yticklabels():

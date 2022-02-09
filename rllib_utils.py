@@ -22,7 +22,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     :param worlds:
     :param idx_counter:
     :param evaluate_only: If True, we are not training, just evaluating some trained players/generators. (Normally,
-    during training, we also evaluate at regular intervals).
+    during training, we also evaluate at regular intervals). If True, we do not collect stats about generator fitness.
     :return:
     """
     idxs = np.random.permutation(list(worlds.keys()))
@@ -77,7 +77,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         # print(pretty_print(stats))
         all_stats.append(stats)
 
-        # Collect stats
+        # Collect stats for generator
         new_fitnesses = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env.get_fitness(evaluate=evaluate_only)))
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
@@ -210,6 +210,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         "conv_filters": [[16, [4, 4], 1], [32, [4, 4], 1], [512, [5, 5], 1]],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
+    num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
 
     trainer_config = {
         "multiagent": {
@@ -237,23 +238,24 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         },
         "num_gpus": num_gpus,
         "num_workers": num_rllib_workers if not (enjoy or evaluate) else 0,
-        "num_envs_per_worker": math.ceil(n_rllib_envs / workers) if not enjoy else 1,
+        "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
         "render_env": render if not enjoy else True,
 
         "evaluation_interval": 10 if not enjoy else 10,
         "evaluation_num_workers": 0 if not (evaluate) else num_rllib_workers,
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number of steps.)
-        "evaluation_num_episodes": 1 if not (evaluate or enjoy) else len(eval_mazes) + 1,
+        "evaluation_num_episodes": len(eval_mazes * num_envs_per_worker) if not (evaluate or enjoy) else len(eval_mazes) + 1,
         "evaluation_config": {
             "env_config": {
                 # "n_pop": 1,
-                # TODO: write custom eval scenarios for the Maze environment so this won't break it
-                "evaluate": evaluate,
+
+                # If enjoying, then we look at generated levels instead of eval levels. (Because we user trainer.evaluate() when enjoying.)
+                "evaluate": True if not enjoy else evaluate,
             },
             "evaluation_parallel_to_training": True,
             "render_env": render,
-            "explore": True if enjoy or evaluate else True,
+            "explore": False if enjoy or evaluate else True,
         },
         "logger_config": {
             "log_dir": save_dir,

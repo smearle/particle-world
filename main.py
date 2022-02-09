@@ -28,7 +28,7 @@ from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval
 from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
 from swarm import NeuralSwarm, MazeSwarm
-from utils import infer, infer_elites, qdpy_eval, simulate, save
+from utils import infer, infer_elites, qdpy_eval, simulate, save, discrete_to_onehot
 from visualize import visualize_pyribs, plot_fitness_qdpy
 
 seed = None
@@ -46,8 +46,8 @@ rllib_eval = True
 n_rllib_envs = 36
 
 generator_phase = True  # Do we start by evolving generators, or training players?
-gen_phase_len = 100
-play_phase_len = 10
+gen_phase_len = -1
+play_phase_len = 1
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
 fitness_weight = -1.0
@@ -58,7 +58,7 @@ fitness_domain = [(-np.inf, np.inf)]
 
 
 def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_counter, stale):
-    # Run a round of player training at fixed intervals
+    # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale):
         train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=container, idx_counter=idx_counter,
                       n_policies=n_policies, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
@@ -171,8 +171,21 @@ def run_qdpy():
 
         # Evaluate
         elif args.evaluate:
-            ret = rllib_evaluate_worlds(particle_trainer, worlds={i: z for i, z in enumerate(eval_mazes)}, idx_counter=idx_counter,
-                                        evaluate_only=True)
+
+            # If rendering, we evaluate one world at a time so we end up rendering them all (as we only render one
+            # environment at a time)
+            if args.render:
+                for i, z in enumerate(eval_mazes_probdists):
+                    print(i)
+                    worlds = {i: z}
+                    ret = rllib_evaluate_worlds(particle_trainer, worlds=worlds, idx_counter=idx_counter,
+                                                evaluate_only=True)
+
+            # Otherwise, we evaluate worlds in parallel
+            else:
+                worlds = {i: z for i, z in enumerate(eval_mazes_probdists)}
+                ret = rllib_evaluate_worlds(particle_trainer, worlds=worlds, idx_counter=idx_counter,
+                                            evaluate_only=True)
             sys.exit()
     else:
         curr_iter = 0

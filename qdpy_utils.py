@@ -70,8 +70,8 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
 
     # Store batch in container
     nb_updated = container.update(init_batch, issue_warning=show_warnings)
-    if nb_updated == 0:
-        raise ValueError("No individual could be added to the container !")
+    # if nb_updated == 0:
+    #     raise ValueError("No individual could be added to the container !")
 
     # Compile stats and update logs
     record = stats.compile(container) if stats else {}
