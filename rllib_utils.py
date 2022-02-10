@@ -212,8 +212,11 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     model_config = copy.copy(MODEL_DEFAULTS)
     model_config.update({
         "use_lstm": True,
-        # "fcnet_hiddens": [32, 32],
-        "conv_filters": [[16, [5, 5], 1], [16, [3, 3], 1]],
+        "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
+        "lstm_cell_size": 32,
+
+        # Arranging the second concolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
+        "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
@@ -283,7 +286,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         n_params = 0
         param_dict = trainer.get_weights()[f'policy_{i}']
         for v in param_dict.values():
-            n_params += sum(v.shape)
+            n_params += np.prod(v.shape)
         print(f'policy_{i} has {n_params} parameters.')
     return trainer
 
