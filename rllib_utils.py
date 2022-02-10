@@ -200,7 +200,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     :param num_rllib_workers: how many RLlib workers to use for training (1 core per worker)
     :param n_rllib_envs: how many environments to use for training. This determines how many worlds/generators can be
     evaluated with each call to train. When evolving worlds, the determines the batch size.
-    :param evaluate: if True, then we are evaluating only (no training), and will launch num_rllib_workers-many
+    :param evaluate: if True, then we are evaluating only (no training), and will launch n_rllib_workers-many
     evaluation workers.
     :param enjoy: if True, then the trainer is being initialized only to render and observe trained particles, so we
     will set other rllib parameters accordingly.
@@ -264,7 +264,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             },
             "evaluation_parallel_to_training": True,
             "render_env": render,
-            "explore": False if enjoy or evaluate else True,
+            "explore": True if enjoy or evaluate else True,
         },
         "logger_config": {
             "log_dir": save_dir,
@@ -296,7 +296,8 @@ def rllib_save_model(trainer, save_dir):
         with open(ckp_path_file, 'r') as f:
             ckp_path = Path(f.read())
             ckp_path = ckp_path.parent.absolute()
-            shutil.rmtree(ckp_path)
+            if os.path.isdir(ckp_path):
+                shutil.rmtree(ckp_path)
     # Record latest checkpoint path in case of re-loading
     with open(ckp_path_file, 'w') as f:
         f.write(checkpoint)

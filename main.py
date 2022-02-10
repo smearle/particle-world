@@ -45,7 +45,6 @@ pg_width = 500
 pg_scale = pg_width / width
 # swarm_type = MemorySwarm
 rllib_eval = True
-n_rllib_envs = 36
 
 generator_phase = True  # Do we start by evolving generators, or training players?
 gen_phase_len = -1
@@ -134,10 +133,8 @@ def run_qdpy():
         #     supp_data = pickle.load(f)
         #     policies = supp_data['policies']
         # env.set_policies(policies)
-        grid = data
-        curr_iter = 0
-        # grid = data['container']
-        # curr_iter = data['current_iteration']
+        grid = data['container']
+        curr_iter = data['current_iteration']
 
         # Produce plots and visualizations
         if args.visualize:
@@ -433,7 +430,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     n_policies = args.n_policies
     generator_cls = globals()[args.generator_class]
-    num_rllib_workers = args.num_proc
+    n_rllib_workers = args.num_proc
+    n_rllib_envs = n_rllib_workers * 6 if n_rllib_workers > 0 else 36
 
     if args.quality_diversity:
         # If using QD, objective score is determined by the fitness of an additional policy.
@@ -479,7 +477,7 @@ if __name__ == '__main__':
     features_domain = [(0, env.max_steps - 1)] * nb_features  # The domain (min/max values) of the features
 
     idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
-    particle_trainer = init_particle_trainer(env, num_rllib_workers=num_rllib_workers, n_rllib_envs=n_rllib_envs,
+    particle_trainer = init_particle_trainer(env, num_rllib_workers=n_rllib_workers, n_rllib_envs=n_rllib_envs,
                                              enjoy=args.enjoy, render=args.render, save_dir=save_dir,
                                              num_gpus=args.num_gpus, evaluate=args.evaluate)
 

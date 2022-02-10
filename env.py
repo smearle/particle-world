@@ -267,7 +267,7 @@ class ParticleGymRLlib(ParticleGym):
         # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
         # reset() call occurs on the first step (resulting in max_steps - 1).
         if not evaluate:
-            assert self.max_steps - 1 <= self.n_step <= self.max_steps
+            assert self.max_steps - 1 <= self.n_step <= self.max_steps + 1
         n_pop = self.swarms[0].ps.shape[0]
 
         # Convert agent to policy rewards
