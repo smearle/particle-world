@@ -197,8 +197,8 @@ class ParticleGymRLlib(ParticleGym):
         self.world = None
         evaluate = cfg.pop("evaluate")
         self.need_world_reset = False
+        self.obj_fn_str = cfg.pop('objective_function')
         super().__init__(**cfg)
-        self.obj_fn_str = cfg.get('objective_function')
         obj_fn = globals()[self.obj_fn_str + '_fitness']
         if obj_fn == min_solvable_fitness:
             # TODO: this is specific to the maze subclass

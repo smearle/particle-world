@@ -37,7 +37,6 @@ n_pop = 1
 
 # Base number of policies among which to differentiate. (If using QD to differentiate explicitly, we'll need 1 more,
 # which we'll add later.)
-n_policies = 2
 width = 15
 pg_delay = 50
 n_nca_steps = 10
@@ -430,13 +429,15 @@ if __name__ == '__main__':
     parser.add_argument('-obj', '--objective_function', type=str, default=None,
                         help='If not using quality diversity, the name of the fitness function that will compute world'
                              'fitness based on population-wise rewards.')
+    parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
     args = parser.parse_args()
+    n_policies = args.n_policies
     generator_cls = globals()[args.generator_class]
     num_rllib_workers = args.num_proc
 
     if args.quality_diversity:
         # If using QD, objective score is determined by the fitness of an additional policy.
-        n_policies += 1
+        assert n_policies > 1
         # Fitness function is fixed for QD experiments.
         assert args.objective_function is None
     else:

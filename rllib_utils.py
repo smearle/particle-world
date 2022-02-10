@@ -2,6 +2,8 @@
 import copy
 import math
 import os
+import shutil
+from pathlib import Path
 from pdb import set_trace as TT
 
 import numpy as np
@@ -276,16 +278,27 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         "train_batch_size": env.max_steps * n_rllib_envs,
     }
     trainer = ppo.PPOTrainer(env=type(env), config=trainer_config)
+    n_policies = len(env.swarms)
+    for i in range(n_policies):
+        n_params = 0
+        param_dict = trainer.get_weights()[f'policy_{i}']
+        for v in param_dict.values():
+            n_params += sum(v.shape)
+        print(f'policy_{i} has {n_params} parameters.')
     return trainer
 
 
 def rllib_save_model(trainer, save_dir):
     checkpoint = trainer.save(save_dir)
     # Delete previous checkpoint
-    with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
-        os.remove(f.read())
+    ckp_path_file = os.path.join(save_dir, 'model_checkpoint_path.txt')
+    if os.path.isfile(ckp_path_file):
+        with open(ckp_path_file, 'r') as f:
+            ckp_path = Path(f.read())
+            ckp_path = ckp_path.parent.absolute()
+            shutil.rmtree(ckp_path)
     # Record latest checkpoint path in case of re-loading
-    with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'w') as f:
+    with open(ckp_path_file, 'w') as f:
         f.write(checkpoint)
     print("checkpoint saved at", checkpoint)
 
