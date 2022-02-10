@@ -13,9 +13,11 @@ from qdpy.containers import *
 from rllib_utils import IdxCounter, rllib_evaluate_worlds
 
 
-def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container, batch_size, niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, start_time = None, iteration_callback = None):
+def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_batch, toolbox, container, batch_size, niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, start_time = None, iteration_callback = None):
     """The simplest QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
+    :param rllib_eval: #TODO
+    :param quality_diversity: If this is False, we are reducing this to a vanilla evolutionary strategy.
     :param init_batch: Sequence of individuals used as initial batch.
     :param toolbox: A :class:`~deap.base.Toolbox` that contains the evolution operators.
     :param batch_size: The number of individuals in a batch.
@@ -50,7 +52,9 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
     invalid_ind = init_batch
 
     if rllib_eval:
-        rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter)
+        rllib_stats, fitnesses = rllib_evaluate_worlds(
+            rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter,
+            quality_diversity=quality_diversity)
         qd_stats = [fitnesses[k] for k in range(len(fitnesses))]
         assert len(rllib_stats) == 1
         rl_stats = rllib_stats[0]
@@ -131,4 +135,12 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, init_batch, toolbox, container,
 
     return batch, logbook
 
+
+def qdpy_save_archive(container, current_iteration, save_dir):
+    with open(os.path.join(save_dir, 'latest-0.p'), 'wb') as f:
+        pickle.dump(
+            {
+                'container': container,
+                'current_iteration': current_iteration},
+            f)
 

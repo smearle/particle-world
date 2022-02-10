@@ -10,11 +10,12 @@ from ray.rllib.agents.ppo import ppo
 from ray.rllib.models import MODEL_DEFAULTS
 from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import pretty_print
+from timeit import default_timer as timer
 
 from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv, eval_mazes
 
 
-def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False):
+def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False, quality_diversity=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -22,7 +23,12 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     :param worlds:
     :param idx_counter:
     :param evaluate_only: If True, we are not training, just evaluating some trained players/generators. (Normally,
-    during training, we also evaluate at regular intervals). If True, we do not collect stats about generator fitness.
+    during training, we also evaluate at regular intervals. This won't happen here.) If True, we do not collect stats
+    about generator fitness.
+    :param quality_diversity: Whether we are running a QD experiment, in which case we'll return measures corresponding
+    to fitnesses of distinct populations, and an objective corresponding to fitness of an additional "protagonist"
+    population. Otherwise, return placeholder measures, and an objective corresponding to a contrastive measure of
+    population fitnesses.
     :return:
     """
     idxs = np.random.permutation(list(worlds.keys()))
@@ -78,7 +84,9 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         all_stats.append(stats)
 
         # Collect stats for generator
-        new_fitnesses = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env.get_fitness(evaluate=evaluate_only)))
+        new_fitnesses = workers.foreach_worker(
+            lambda worker: worker.foreach_env(
+                lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
         [new_fits.update(nf) for nf in new_fitnesses]
@@ -110,17 +118,14 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
 
 def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs, idx_counter=None, logbook=None):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
-    for i in range(n_policies):
-        trainer.get_policy(f'policy_{i}').config["explore"] = True
+    toggle_exploration(trainer, explore=True, n_policies=n_policies)
     for i in range(n_itr):
+        start_time = timer()
 
         # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
         # weights start changing.
         if i % 10 == 0:
-            checkpoint = trainer.save(save_dir)
-            with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'w') as f:
-                f.write(checkpoint)
-            print("checkpoint saved at", checkpoint)
+            rllib_save_model(trainer, save_dir)
         curr_lands = np.array(landscapes)[np.random.choice(np.array(landscapes).shape[0], n_rllib_envs)]
         worlds = {i: l for i, l in enumerate(curr_lands)}
         all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds)
@@ -132,11 +137,10 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
         #                    minAgentReward=rllib_stats["episode_reward_min"])
         keys = ['episode_reward_max', 'episode_reward_mean']
         # TODO: track stats over calls to train (shouldn't be necessary during evolution
-        print('\n'.join([f'Training iteration {i}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
+        print('\n'.join([f'Training iteration {i}, time elapsed: {timer() - start_time}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
         if 'evaluation' in rllib_stats:
             print('\n'.join(['evaluation:'] + [f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
-    for i in range(n_policies):
-        trainer.get_policy(f'policy_{i}').config["explore"] = False
+    toggle_exploration(trainer, explore=False, n_policies=n_policies)
     trainer.workers.local_worker().set_policies_to_train([])
 
 
@@ -207,7 +211,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     model_config.update({
         "use_lstm": True,
         # "fcnet_hiddens": [32, 32],
-        "conv_filters": [[16, [4, 4], 1], [32, [4, 4], 1], [512, [5, 5], 1]],
+        "conv_filters": [[16, [5, 5], 1], [16, [3, 3], 1]],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
@@ -235,6 +239,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             "max_steps": env.max_steps,
             # "pg_width": pg_width,
             "evaluate": False,
+            "objective_function": env.obj_fn_str,
         },
         "num_gpus": num_gpus,
         "num_workers": num_rllib_workers if not (enjoy or evaluate) else 0,
@@ -242,7 +247,9 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         "framework": "torch",
         "render_env": render if not enjoy else True,
 
-        "evaluation_interval": 10 if not enjoy else 10,
+        # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
+        "evaluation_interval": 100 if not enjoy else 10,
+
         "evaluation_num_workers": 0 if not (evaluate) else num_rllib_workers,
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number of steps.)
         "evaluation_num_episodes": len(eval_mazes * num_envs_per_worker) if not (evaluate or enjoy) else len(eval_mazes) + 1,
@@ -270,3 +277,20 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     }
     trainer = ppo.PPOTrainer(env=type(env), config=trainer_config)
     return trainer
+
+
+def rllib_save_model(trainer, save_dir):
+    checkpoint = trainer.save(save_dir)
+    # Delete previous checkpoint
+    with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
+        os.remove(f.read())
+    # Record latest checkpoint path in case of re-loading
+    with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'w') as f:
+        f.write(checkpoint)
+    print("checkpoint saved at", checkpoint)
+
+def toggle_exploration(trainer, explore: bool, n_policies: int):
+    for i in range(n_policies):
+        trainer.get_policy(f'policy_{i}').config["explore"] = explore
+        # Need to update each remote training worker as well (if they exist)
+        trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))

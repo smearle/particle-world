@@ -11,7 +11,7 @@ from ray.rllib import MultiAgentEnv
 from ray.rllib.policy.policy import PolicySpec
 
 from generator import render_landscape
-from swarm import NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness
+from swarm import NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
 from utils import discrete_to_onehot
 
 player_colors = [
@@ -198,6 +198,15 @@ class ParticleGymRLlib(ParticleGym):
         evaluate = cfg.pop("evaluate")
         self.need_world_reset = False
         super().__init__(**cfg)
+        self.obj_fn_str = cfg.get('objective_function')
+        obj_fn = globals()[self.obj_fn_str + '_fitness']
+        if obj_fn == min_solvable_fitness:
+            # TODO: this is specific to the maze subclass
+            # The maximum reward
+            max_rew = self.max_steps - 1
+            obj_fn = partial(obj_fn, max_rew=max_rew)
+        self.objective_function = obj_fn
+
         # if evaluate:
             # Agents should be able to reach any tile within the initial neighborhood by a shortest path.
             # self.max_steps = max(self.fovs) * 2
@@ -250,7 +259,7 @@ class ParticleGymRLlib(ParticleGym):
 
         return obs
 
-    def get_fitness(self, evaluate=False):
+    def get_world_stats(self, evaluate=False, quality_diversity=False):
         """
         Return the fitness (and behavior characteristics) achieved by the world after an episode of simulation. Note
         that this only returns the fitness of the latest episode.
@@ -263,10 +272,15 @@ class ParticleGymRLlib(ParticleGym):
 
         # Convert agent to policy rewards
         swarm_rewards = [[self.rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
-        # Storing the objective and BCs corresponding mapped to the world_idx, for evolving worlds.
 
-        qd_stats = {self.world_idx: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
-        return qd_stats
+        # Return a mapping of world_idx to a tuple of stats in a format that is compatible with qdpy
+        if quality_diversity:
+            # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
+            stats = {self.world_idx: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
+        else:
+            # Objective and placeholder measures
+            stats = {self.world_idx: ((self.objective_function(swarm_rewards),), [0, 0])}
+        return stats
 
     def get_reward(self):
         rew = super().get_reward()

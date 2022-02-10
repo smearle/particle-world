@@ -311,6 +311,19 @@ def contrastive_fitness(fits):
     return fit
 
 
+def min_solvable_fitness(rews, max_rew):
+    """ A fitness function rewarding levels that result in the least non-zero reward.
+    :param rews: a list of rewards achieved by distinct populations (length 1 or greater)
+    :param max_rew: the maximum reward achievable by a given population
+    :return: a fitness value
+    """
+    assert len(rews) >= 1
+    if np.all(rews == 0):
+        return 0
+    else:
+        return max_rew - np.mean(rews)
+
+
 def toroidal_distance(a, b, width):
     dist = a[None, ...] - b[:, None, ...]
     shift = -np.sign(dist) * width

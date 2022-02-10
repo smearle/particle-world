@@ -25,8 +25,8 @@ from tqdm import tqdm
 
 from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv, eval_mazes, eval_mazes_probdists
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
-from qdpy_utils import qdRLlibEval
-from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
+from qdpy_utils import qdRLlibEval, qdpy_save_archive
+from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter, toggle_exploration
 from swarm import NeuralSwarm, MazeSwarm
 from utils import infer, infer_elites, qdpy_eval, simulate, save, discrete_to_onehot
 from visualize import visualize_pyribs, plot_fitness_qdpy
@@ -34,6 +34,10 @@ from visualize import visualize_pyribs, plot_fitness_qdpy
 seed = None
 ndim = 2
 n_pop = 1
+
+# Base number of policies among which to differentiate. (If using QD to differentiate explicitly, we'll need 1 more,
+# which we'll add later.)
+n_policies = 2
 width = 15
 pg_delay = 50
 n_nca_steps = 10
@@ -41,7 +45,6 @@ n_sim_steps = 100
 pg_width = 500
 pg_scale = pg_width / width
 # swarm_type = MemorySwarm
-n_policies = 3
 rllib_eval = True
 n_rllib_envs = 36
 
@@ -57,9 +60,10 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 fitness_domain = [(-np.inf, np.inf)]
 
 
-def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_counter, stale):
+def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_counter, stale, save_dir):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale):
+        qdpy_save_archive(container, gen_itr, save_dir)
         train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=container, idx_counter=idx_counter,
                       n_policies=n_policies, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
         # else:
@@ -97,24 +101,31 @@ class CPPNIndividual(creator.Individual, CPPN):
 
 
 def run_qdpy():
-    def iteration_callback(toolbox, rllib_eval, gen_itr, batch, container, logbook):
+    def iteration_callback(toolbox, rllib_eval, staleness_counter, save_dir, gen_itr, batch, container, logbook):
         """qdpy callback function, with custom args first, given with `partial` before the qdpy algo is instantiated."""
         idx_counter = ray.get_actor('idx_counter')
         if gen_itr % qdpy_save_interval == 0:
+            pass
             # qdpy already saves the container, logbook, etc. regularly, so we can save any additional things here.
-            with open(f'runs/{args.experimentName}/learn.pickle', 'wb') as handle:
-                dict = {
+            # with open(f'runs/{args.experimentName}/learn.pickle', 'wb') as handle:
+            #     dict = {
                     # 'logbook': logbook,
                     # 'policies': env.swarms,
-                }
-                pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                # }
+                # pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
         time_until_stale = 10
-        past_updates = np.array(logbook.select('nbUpdated')[-time_until_stale:]) == 0
-        stale = len(past_updates) >= time_until_stale and np.all(past_updates)
+        no_update = np.array(logbook.select('nbUpdated')[-1:]) == 0
+        if no_update:
+            staleness_counter[0] += 1
+        else:
+            staleness_counter[0] = 0
+        stale = staleness_counter[0] >= time_until_stale
+        if stale:
+            staleness_counter[0] = 0
         phase_switch_callback(gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox,
-                              idx_counter=idx_counter, stale=stale)
+                              idx_counter=idx_counter, stale=stale, save_dir=save_dir)
 
-    qdpy_save_interval = 10
+    qdpy_save_interval = 100
     if load:
         fname = f'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
@@ -124,8 +135,10 @@ def run_qdpy():
         #     supp_data = pickle.load(f)
         #     policies = supp_data['policies']
         # env.set_policies(policies)
-        grid = data['container']
-        curr_iter = data['current_iteration']
+        grid = data
+        curr_iter = 0
+        # grid = data['container']
+        # curr_iter = data['current_iteration']
 
         # Produce plots and visualizations
         if args.visualize:
@@ -148,7 +161,7 @@ def run_qdpy():
             im_grid.save(os.path.join(save_dir, "level_grid.png"))
 
             logbook = data['logbook']
-            plot_fitness_qdpy(save_dir, logbook)
+            plot_fitness_qdpy(save_dir, logbook, quality_diversity=args.quality_diversity)
 
             # save fitness qd grid
             plot_path = os.path.join(save_dir, "performancesGrid.png")
@@ -244,18 +257,22 @@ def run_qdpy():
     results_infos['batch_size'] = batch_size
     results_infos['mutation_pb'] = mutation_pb
     results_infos['eta'] = eta
+
+    # Turn off exploration before evolving. Henceforth toggled before/after player training.
+    toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
     if not load:
-        for i in range(n_policies):
-            particle_trainer.get_policy(f'policy_{i}').config["explore"] = False
         # Create container
         grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
                                fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
-        print(type(grid))
 
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
-        qd_algo = partial(qdRLlibEval, particle_trainer, rllib_eval)
+        qd_algo = partial(qdRLlibEval, particle_trainer, rllib_eval, args.quality_diversity)
+        # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
+        # the archive. (Crucially, it is mutable.)
+        staleness_counter = [0]
+        callback = partial(iteration_callback, toolbox, rllib_eval, staleness_counter,
+                           os.path.join('runs', args.experimentName))
         # Create a QD algorithm
-        callback = partial(iteration_callback, toolbox, rllib_eval)
         algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
                                batch_size=batch_size, niter=nb_iterations,
                                verbose=verbose, show_warnings=show_warnings,
@@ -383,7 +400,7 @@ def run_pyribs():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-l', '--load', action='store_true')
-    parser.add_argument('-e', '--enjoy', action='store_true')
+    parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-v', '--visualize', action='store_true',
                         help="If reloading an experiment, produce plots, etc. "
                              "to visualize progress.")
@@ -407,10 +424,24 @@ if __name__ == '__main__':
     parser.add_argument('-gpus', '--num_gpus', type=int, default=1, help="How many GPUs to use for training.")
     parser.add_argument('-ev', '--evaluate', action='store_true', help="Whether to evaluate trained agents/worlds and"
                                                                        "collect relevant stats.")
-    parser.add_argument('-qd', '--quality_diversity', action='store_true', help='Search for a grid of levels with dimensions given by the fitness of each policy.')
+    parser.add_argument('-qd', '--quality_diversity', action='store_true',
+                        help='Search for a grid of levels with dimensions (measures) given by the fitness of distinct '
+                             'policies, and objective score given by the inverse fitness of an additional policy.')
+    parser.add_argument('-obj', '--objective_function', type=str, default=None,
+                        help='If not using quality diversity, the name of the fitness function that will compute world'
+                             'fitness based on population-wise rewards.')
     args = parser.parse_args()
     generator_cls = globals()[args.generator_class]
     num_rllib_workers = args.num_proc
+
+    if args.quality_diversity:
+        # If using QD, objective score is determined by the fitness of an additional policy.
+        n_policies += 1
+        # Fitness function is fixed for QD experiments.
+        assert args.objective_function is None
+    else:
+        # If not running a QD experiment, we must specify an objective function.
+        assert args.objective_function is not None
 
     # swarm_cls = NeuralSwarm
     swarm_cls = MazeSwarm
@@ -419,7 +450,7 @@ if __name__ == '__main__':
     env = ParticleMazeEnv(
     # env = ParticleGymRLlib(
         {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
-         'pg_width': pg_width, 'evaluate': args.evaluate})
+         'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function})
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
     initial_weights = generator.get_init_weights()
