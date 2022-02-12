@@ -44,23 +44,8 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     all_stats = []
 
     while world_id < len(worlds):
-        # print(len(fitnesses), len(worlds))
-        #     envs = []
-        #     for (wrk_i, worker) in enumerate([workers.local_worker()] + workers.remote_workers()):
-        #         if wrk_i == 0:  # only ever 1 local worker
-        #             envs += worker.foreach_env(lambda env: env)
-        #         else:
-        #             world_i = idxs[wrk_i % len(idxs)]
-        #             TT()
-        #             worker.foreach_env.remote(lambda env: env.set_worlds(worlds={world_i: worlds[world_i]}))
-        #             envs += ray.get(worker.foreach_env.remote(lambda env: env))
-        #     if len(worlds) < len(envs):
-        #         idxs = idxs * len(envs)
-        #
-        #     [env.set_worlds(worlds={i: worlds[i]}) for i, env in zip(idxs[world_id:], envs)]
-        #     world_id += len(envs)
 
-        # When running parallel envs, is each env is to evaluate a separate world, map envs to worlds
+        # When running parallel envs, if each env is to evaluate a separate world, map envs to worlds
         if idx_counter:
             n_envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: 1))
             n_envs = sum([e for we in n_envs for e in we])
@@ -92,11 +77,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
         [new_fits.update(nf) for nf in new_fitnesses]
-        # if not len(new_fits) == len(sub_idxs):
-        #     TT()
         fitnesses.update(new_fits)
-        # if len(fitnesses) == world_id:
-        #     TT()
 
         # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
@@ -106,24 +87,19 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         else:
             world_id += len(new_fitnesses)
 
-        # for (wrk_i, worker) in enumerate([workers.local_worker()] + workers.remote_workers()):
-        #     world_i = idxs[wrk_i % len(idxs)]
-        #     if wrk_i == 0:  # only ever 1 local worker
-        #         new_fitnesses = worker.foreach_env(lambda env: env.get_fitness())
-        #     else:
-        #         new_fitnesses = worker.foreach_env.remote(lambda env: env.get_fitness())
-        #     for nf in new_fitnesses:
-        #         fitnesses.update(nf)
-
     return all_stats, fitnesses
+
 
 
 def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs, idx_counter=None, logbook=None):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     toggle_exploration(trainer, explore=True, n_policies=n_policies)
-    for i in range(n_itr):
+    i = 0
+    staleness_window = 10
+    done_training = False
+    recent_rewards = np.empty(staleness_window)
+    while not done_training:
         start_time = timer()
-
         # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
         # weights start changing.
         if i % 10 == 0:
@@ -138,10 +114,22 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
         #                    maxAgentReward=rllib_stats["episode_reward_max"],
         #                    minAgentReward=rllib_stats["episode_reward_min"])
         keys = ['episode_reward_max', 'episode_reward_mean']
-        # TODO: track stats over calls to train (shouldn't be necessary during evolution
+        # TODO: track stats over calls to train (shouldn't be necessary during evolution)
         print('\n'.join([f'Training iteration {i}, time elapsed: {timer() - start_time}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
         if 'evaluation' in rllib_stats:
             print('\n'.join(['evaluation:'] + [f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
+        recent_rewards[:-1] = recent_rewards[1:]
+        recent_rewards[-1] = rllib_stats['episode_reward_mean']
+        if n_itr == -1:
+            if i >= staleness_window:
+                running_std = np.std(recent_rewards)
+                print(f'Running reward std dev: {running_std}')
+                done_training = running_std < 0.7
+            else:
+                done_training = False
+        else:
+            done_training = i >= n_itr
+        i += 1
     toggle_exploration(trainer, explore=False, n_policies=n_policies)
     trainer.workers.local_worker().set_policies_to_train([])
 
@@ -212,11 +200,12 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     model_config = copy.copy(MODEL_DEFAULTS)
     model_config.update({
         "use_lstm": True,
-        "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
-        "lstm_cell_size": 32,
+        # "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
+        "lstm_cell_size": 16,
 
-        # Arranging the second concolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
+        # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
         "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
+        # "post_fcnet_hiddens": [36],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
@@ -288,6 +277,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         for v in param_dict.values():
             n_params += np.prod(v.shape)
         print(f'policy_{i} has {n_params} parameters.')
+        print('model overview: \n', trainer.get_policy(f'policy_{i}').model)
     return trainer
 
 

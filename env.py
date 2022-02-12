@@ -203,7 +203,7 @@ class ParticleGymRLlib(ParticleGym):
         if obj_fn == min_solvable_fitness:
             # TODO: this is specific to the maze subclass
             # The maximum reward
-            max_rew = self.max_steps - 1
+            max_rew = self.max_steps
             obj_fn = partial(obj_fn, max_rew=max_rew)
         self.objective_function = obj_fn
 
