@@ -124,7 +124,7 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
             if i >= staleness_window:
                 running_std = np.std(recent_rewards)
                 print(f'Running reward std dev: {running_std}')
-                done_training = running_std < 0.7
+                done_training = running_std < 0.7 or i >= 100
             else:
                 done_training = False
         else:
@@ -200,12 +200,12 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     model_config = copy.copy(MODEL_DEFAULTS)
     model_config.update({
         "use_lstm": True,
+        "lstm_cell_size": 32,
         # "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
-        "lstm_cell_size": 16,
 
         # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
         "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
-        # "post_fcnet_hiddens": [36],
+        # "post_fcnet_hiddens": [32, 4],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1

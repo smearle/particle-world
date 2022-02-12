@@ -59,7 +59,7 @@ class Swarm(object):
         if flatten:
             nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
         # print(nbs.shape)
-        return nbs.transpose(0, 2, 3, 1)
+        return nbs.transpose(0, 1, 2, 3)
 
     def get_rewards(self, scape):
         ps = self.ps.astype(int)

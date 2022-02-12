@@ -55,7 +55,7 @@ class ParticleSwarmEnv(object):
                 fov=fovs[si],
                 # trg_scape_val=trg)
                 trg_scape_val=1.0)
-            for si, trg in zip(range(n_policies), np.arange(n_policies) / (n_policies - 1))]
+            for si, trg in zip(range(n_policies), np.arange(n_policies) / max(1, (n_policies - 1)))]
 
     def set_policies(self, policies, trainer_config):
         # self.swarms = policies
@@ -133,7 +133,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 
         # Each agent observes 2D patch around itself. Each cell has multiple channels. 3D observation.
         # Map policies to agent observations.
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(patch_ws[i], patch_ws[i], n_chan))
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
                                    for i in range(n_policies)}
         # self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
         # self.action_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(2,))
@@ -439,7 +439,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         patch_ws = [fov * 2 + 1 for fov in self.fovs]
 
         # We only ask the generator for 3 chans. 3rd shares goal and start, so we observe a 4-channel onehot encoding
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(patch_ws[i], patch_ws[i], self.n_chan + 1))
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(self.n_chan + 1, patch_ws[i], patch_ws[i]))
                                    for i in range(n_policies)}
 
         # Represent empty, wall, and goal as onehot. This attribute is to inform the generator.

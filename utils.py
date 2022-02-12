@@ -204,3 +204,7 @@ class RunningMean(object):
         self.sum += val
         self.mean = self.sum / self.i
 
+
+def get_path_length(arr, src=2, trg=3, passable=[0]):
+    np.where(arr in p)
+    pass
