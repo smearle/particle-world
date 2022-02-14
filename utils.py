@@ -8,6 +8,7 @@ import ray
 from matplotlib import pyplot as plt
 from pygame.constants import KEYDOWN
 from ribs.visualize import grid_archive_heatmap
+from timeit import default_timer as timer
 
 from swarm import eval_fit
 
@@ -205,6 +206,47 @@ class RunningMean(object):
         self.mean = self.sum / self.i
 
 
-def get_path_length(arr, src=2, trg=3, passable=[0]):
-    np.where(arr in p)
-    pass
+adj_coords_2d = np.array([
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+    [0, -1]
+])
+
+
+def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
+    width = arr.shape[0]
+    assert width == arr.shape[1]
+    srcs = np.argwhere(arr == src)
+    assert srcs.shape[0] == 1
+    src = tuple(srcs[0])
+    frontier = [src]
+    back_paths = {}
+    visited = set({})
+    while frontier:
+        curr = frontier.pop(0)
+        if arr[curr[0], curr[1]] == trg:
+            path = []
+            path.append(curr)
+            while curr in back_paths:
+                curr = back_paths[curr]
+                path.append(curr)
+            return path[::-1]
+        visited.add(curr)
+        adjs = [tuple((np.array(curr) + move) % width) for move in adj_coords_2d]
+        for adj in adjs:
+            if adj in visited or arr[adj[0], adj[1]] == impassable:
+                continue
+            frontier.append(adj)
+            back_paths.update({adj: curr})
+    return None
+
+# start_time = timer()
+# print(get_solution(np.array([
+#     [1, 1, 1, 0, 1],
+#     [1, 2, 0, 0, 1],
+#     [1, 1, 1, 0, 1],
+#     [1, 3, 0, 0, 1],
+#     [1, 1, 1, 0, 1],
+# ])))
+# print(timer() - start_time)

@@ -174,7 +174,7 @@ class NeuralSwarm(Swarm):
             # For now, we assume agent can only encounter one new wall per step
             new_ps = (self.ps + accelerations).astype(np.uint8) % self.world_width
             colls = obstacles[new_ps[:, 0], new_ps[:, 1]]
-            self.ps = np.where(colls == 1, self.ps, new_ps)
+            self.ps = np.where(colls[..., None] == 1, self.ps, new_ps)
         else:
             self.ps += accelerations
             # self.ps += self.vs

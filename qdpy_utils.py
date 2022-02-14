@@ -54,9 +54,9 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
     if rllib_eval:
         rllib_stats, fitnesses = rllib_evaluate_worlds(
             rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter,
-            quality_diversity=quality_diversity)
+            quality_diversity=quality_diversity, n_trials=1)
         qd_stats = [fitnesses[k] for k in range(len(fitnesses))]
-        assert len(rllib_stats) == 1
+        # assert len(rllib_stats) == 1
         rl_stats = rllib_stats[0]
 
     else:
@@ -105,10 +105,11 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
         if rllib_eval:
-            rllib_stats, fitnesses = rllib_evaluate_worlds(rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter)
+            rllib_stats, fitnesses = rllib_evaluate_worlds(
+                rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter, n_trials=1)
             fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
-            assert len(rllib_stats) == 1
-            rllib_stats = rllib_stats[0]
+            # assert len(rllib_stats) == 1
+            # rllib_stats = rllib_stats[0]
 
         else:
             fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)

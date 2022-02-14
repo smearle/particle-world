@@ -15,9 +15,10 @@ from ray.tune.logger import pretty_print
 from timeit import default_timer as timer
 
 from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv, eval_mazes
+from utils import get_solution
 
 
-def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False, quality_diversity=False):
+def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False, quality_diversity=False, n_trials=1):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -39,10 +40,15 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     else:
         workers = trainer.workers
     worlds = {k: np.array(world) for k, world in worlds.items()}
-    world_id = 0
-    fitnesses = {}
+    # fitnesses = {k: [] for k in worlds}
     all_stats = []
 
+    # Train/evaluate on all worlds n_trials many times each
+    # for i in range(n_trials):
+    trial_fitnesses = {}
+    world_id = 0
+
+    # Train/evaluate until we have simulated in all worlds
     while world_id < len(worlds):
 
         # When running parallel envs, if each env is to evaluate a separate world, map envs to worlds
@@ -77,17 +83,21 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
         [new_fits.update(nf) for nf in new_fitnesses]
-        fitnesses.update(new_fits)
+        trial_fitnesses.update(new_fits)
 
         # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
         # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
-            world_id = len(fitnesses)
+            world_id = len(trial_fitnesses)
         else:
             world_id += len(new_fitnesses)
 
-    return all_stats, fitnesses
+        # [fitnesses[k].append(v) for k, v in trial_fitnesses.items()]
+    # fitnesses = {k: ([np.mean([vi[0][fi] for vi in v]) for fi in range(len(v[0][0]))],
+    #         [np.mean([vi[1][mi] for vi in v]) for mi in range(len(v[0][1]))]) for k, v in fitnesses.items()}
+
+    return all_stats, trial_fitnesses
 
 
 
@@ -104,9 +114,13 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
         # weights start changing.
         if i % 10 == 0:
             rllib_save_model(trainer, save_dir)
-        curr_lands = np.array(landscapes)[np.random.choice(np.array(landscapes).shape[0], n_rllib_envs)]
+        world_idxs = np.random.choice(np.array(landscapes).shape[0], n_rllib_envs, replace=False)
+        curr_lands = np.array(landscapes)[world_idxs]
         worlds = {i: l for i, l in enumerate(curr_lands)}
         all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds)
+        path_lengths = trainer.workers.foreach_worker(lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
+        path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
+        print(f'Mean path length: {np.mean(path_lengths)}')
         assert len(all_stats) == 1
         rllib_stats = all_stats[0]
         # if logbook:
@@ -124,13 +138,13 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
             if i >= staleness_window:
                 running_std = np.std(recent_rewards)
                 print(f'Running reward std dev: {running_std}')
-                done_training = running_std < 0.7 or i >= 100
+                done_training = running_std < 1.0 or i >= 100
             else:
                 done_training = False
         else:
             done_training = i >= n_itr
         i += 1
-    toggle_exploration(trainer, explore=False, n_policies=n_policies)
+    # toggle_exploration(trainer, explore=False, n_policies=n_policies)
     trainer.workers.local_worker().set_policies_to_train([])
 
 

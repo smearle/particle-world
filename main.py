@@ -17,6 +17,7 @@ from deap import tools
 from qdpy import containers
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 from qdpy.base import ParallelismManager
+from qdpy.phenotype import Individual
 from qdpy.plots import plotGridSubplots
 from ribs.archives import GridArchive
 from ribs.emitters import ImprovementEmitter, OptimizingEmitter
@@ -33,7 +34,7 @@ from visualize import visualize_pyribs, plot_fitness_qdpy
 
 seed = None
 ndim = 2
-n_pop = 1
+n_pop = 5
 
 # Base number of policies among which to differentiate. (If using QD to differentiate explicitly, we'll need 1 more,
 # which we'll add later.)
@@ -62,8 +63,9 @@ def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_count
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale):
         qdpy_save_archive(container, gen_itr, save_dir)
-        train_players(n_itr=play_phase_len, trainer=player_trainer, landscapes=container, idx_counter=idx_counter,
-                      n_policies=n_policies, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
+        train_players(n_itr=play_phase_len, trainer=player_trainer,
+                      landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:n_rllib_envs],
+                      idx_counter=idx_counter, n_policies=n_policies, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
         # else:
         #     if itr % play_phase_len:
         # pass
@@ -89,13 +91,21 @@ def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_count
             raise ValueError(
                 "No individual could be added back to the QD container when re-evaluating after player training.")
 
-# class MazeIndividual(creator.Individual, M)
 
 # TODO:
-class CPPNIndividual(creator.Individual, CPPN):
-    def __init__(self):
-        CPPN.__init__(self, width)
-        creator.Individual.__init__(self)
+# class CPPNIndividual(creator.Individual, CPPN):
+#     def __init__(self):
+#         CPPN.__init__(self, width)
+#         creator.Individual.__init__(self)
+
+
+# class OnehotIndividual(Individual, width, n_chan):
+#     def __init__(self, *args, **kwargs):
+#         self.dist = np.random.random((n_chan, width, width))
+#         TT()
+#
+#     def __eq__(self, other):
+#         return np.all(self.discrete == other.discrete)
 
 
 def run_qdpy():
@@ -202,7 +212,7 @@ def run_qdpy():
     dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
     assert (dimension >= 2)
     assert (nb_features >= 1)
-    bins_per_dim = int(pow(args.maxTotalBins, 1. / nb_features))
+    bins_per_dim = int(pow(args.max_total_bins, 1. / nb_features))
 
     init_batch_size = n_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
     batch_size = n_rllib_envs  # The number of evaluations in each subsequent batch
@@ -216,7 +226,7 @@ def run_qdpy():
     else:
         mutation_pb = 0.1
     eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
-    max_items_per_bin = 1 if args.maxTotalBins != 1 else 100  # The number of items in each bin of the grid
+    max_items_per_bin = 1 if args.max_total_bins != 1 else n_rllib_envs  # The number of items in each bin of the grid
     ind_domain = (0., 1.)  # The domain (min/max values) of the individual genomes
     # fitness_domain = [(0., 1.)]                # The domain (min/max values) of the fitness
     verbose = True
@@ -232,6 +242,7 @@ def run_qdpy():
     toolbox = base.Toolbox()
     toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
     toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
+    # toolbox.register("individual", OnehotIndividual, width=env.width, n_chan=env.n_chan)
     # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
@@ -255,7 +266,7 @@ def run_qdpy():
     results_infos['eta'] = eta
 
     # Turn off exploration before evolving. Henceforth toggled before/after player training.
-    toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
+    # toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
     if not load:
         # Create container
         grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
@@ -324,7 +335,7 @@ def run_pyribs():
         )
         seeds = ([None] * n_emitters
                  if seed is None else [seed + i for i in range(n_emitters)])
-        if args.maxTotalBins == 1:
+        if args.max_total_bins == 1:
             n_opt_emitters = len(seeds)
             n_imp_emitters = 0
         else:
@@ -401,7 +412,7 @@ if __name__ == '__main__':
                         help="If reloading an experiment, produce plots, etc. "
                              "to visualize progress.")
     # parser.add_argument('-seq', '--sequential', help='not parallel', action='store_true')
-    parser.add_argument('--maxTotalBins', type=int, default=1, help="Maximum number of bins in the grid")
+    parser.add_argument('--max_total_bins', type=int, default=1, help="Maximum number of bins in the grid")
     parser.add_argument('-p', '--parallelismType', type=str, default='None',
                         help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
@@ -410,7 +421,7 @@ if __name__ == '__main__':
     parser.add_argument('-exp', '--experimentName', default='test')
     parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
                                                                            "skipping the world-generation phase.")
-    parser.add_argument('-g', '--generator_class', type=str, default="Rastrigin",
+    parser.add_argument('-g', '--generator_class', type=str, default="TileFlipGenerator",
                         help="Which type of world-generator to use, whether a "
                              "fixed (set of) world(s), or a parameterizable "
                              "representation."
@@ -468,9 +479,9 @@ if __name__ == '__main__':
         nb_features = n_policies - 1
     else:
         nb_features = 2  # The number of features to take into account in the container
-    bins_per_dim = int(pow(args.maxTotalBins, 1. / nb_features))
+    bins_per_dim = int(pow(args.max_total_bins, 1. / nb_features))
     nb_bins = (
-                  bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $maxTotalBins^(1/nb_features)$ bins each
+                  bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
     save_interval = 10
 
     # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps

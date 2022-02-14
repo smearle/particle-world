@@ -463,12 +463,15 @@ class ParticleMazeEnv(ParticleGymRLlib):
         # Cannot end on obstacles
         vg = v[2] - v[1]
         goal_idxs = np.argwhere(vg == vg.max())
-        self.goal_idx = goal_idxs[np.random.randint(goal_idxs.shape[0])]
+        # FIXME: by not selecting start/goal locations randomly, we bias their positions
+        # self.goal_idx = goal_idxs[np.random.randint(goal_idxs.shape[0])]
+        self.goal_idx = goal_idxs[0]
 
         # Cannot start on obstacles
         vs = v[2] + v[1]
         start_idxs = np.argwhere(vs == vs.min())
-        self.start_idx = start_idxs[np.random.randint(start_idxs.shape[0])]
+        # self.start_idx = start_idxs[np.random.randint(start_idxs.shape[0])]
+        self.start_idx = start_idxs[0]
         w[self.start_idx[0], self.start_idx[1]] = 2
         w[self.goal_idx[0], self.goal_idx[1]] = 3
         self.world_flat = w
