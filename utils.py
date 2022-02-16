@@ -239,7 +239,7 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
                 continue
             frontier.append(adj)
             back_paths.update({adj: curr})
-    return None
+    return []
 
 # start_time = timer()
 # print(get_solution(np.array([

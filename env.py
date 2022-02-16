@@ -479,7 +479,6 @@ class ParticleMazeEnv(ParticleGymRLlib):
         self.need_world_reset = True
 
 
-
     def step(self, actions):
         # print(f"step {self.n_step} world {self.world_idx}")
 

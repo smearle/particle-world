@@ -100,7 +100,6 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     return all_stats, trial_fitnesses
 
 
-
 def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs, idx_counter=None, logbook=None):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     toggle_exploration(trainer, explore=True, n_policies=n_policies)
@@ -117,11 +116,11 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
         world_idxs = np.random.choice(np.array(landscapes).shape[0], n_rllib_envs, replace=False)
         curr_lands = np.array(landscapes)[world_idxs]
         worlds = {i: l for i, l in enumerate(curr_lands)}
-        all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds)
+        all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter=idx_counter)
+        assert len(all_stats) == 1
         path_lengths = trainer.workers.foreach_worker(lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
         path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
         print(f'Mean path length: {np.mean(path_lengths)}')
-        assert len(all_stats) == 1
         rllib_stats = all_stats[0]
         # if logbook:
         #     logbook.record(iteration=curr_itr, meanAgentReward=rllib_stats["episode_reward_mean"],
