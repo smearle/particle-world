@@ -100,7 +100,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     return all_stats, trial_fitnesses
 
 
-def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs, idx_counter=None, logbook=None):
+def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, idx_counter=None, logbook=None):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
@@ -117,10 +117,14 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
         curr_lands = np.array(landscapes)[world_idxs]
         worlds = {i: l for i, l in enumerate(curr_lands)}
         all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter=idx_counter)
+        if i == 0:
+            path_lengths = trainer.workers.foreach_worker(
+                lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
+            path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
+            mean_path_length = np.mean(path_lengths)
+            max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
+            print(f'Mean path length: {mean_path_length}\nMax mean reward: {max_mean_reward}')
         assert len(all_stats) == 1
-        path_lengths = trainer.workers.foreach_worker(lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
-        path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
-        print(f'Mean path length: {np.mean(path_lengths)}')
         rllib_stats = all_stats[0]
         # if logbook:
         #     logbook.record(iteration=curr_itr, meanAgentReward=rllib_stats["episode_reward_mean"],
@@ -133,15 +137,16 @@ def train_players(n_itr, n_policies, trainer, landscapes, save_dir, n_rllib_envs
             print('\n'.join(['evaluation:'] + [f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rllib_stats['episode_reward_mean']
-        if n_itr == -1:
-            if i >= staleness_window:
-                running_std = np.std(recent_rewards)
-                print(f'Running reward std dev: {running_std}')
-                done_training = running_std < 1.0 or i >= 100
-            else:
-                done_training = False
+        if play_phase_len == -1:
+            done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
+            # if i >= staleness_window:
+                # running_std = np.std(recent_rewards)
+                # print(f'Running reward std dev: {running_std}')
+                # done_training = running_std < 1.0 or i >= 100
+            # else:
+                # done_training = False
         else:
-            done_training = i >= n_itr
+            done_training = i >= play_phase_len
         i += 1
     # toggle_exploration(trainer, explore=False, n_policies=n_policies)
     trainer.workers.local_worker().set_policies_to_train([])

@@ -63,9 +63,9 @@ def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_count
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale):
         qdpy_save_archive(container, gen_itr, save_dir)
-        train_players(n_itr=play_phase_len, trainer=player_trainer,
+        train_players(play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:n_rllib_envs],
-                      idx_counter=idx_counter, n_policies=n_policies, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
+                      idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
         # else:
         #     if itr % play_phase_len:
         # pass
@@ -524,5 +524,4 @@ if __name__ == '__main__':
     else:
         # TODO: evolve players?
         train_players(1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
-                      n_rllib_envs=n_rllib_envs, save_dir=save_dir)
-        # train_players(play_phase_len, particle_trainer)
+                      n_rllib_envs=n_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps)
