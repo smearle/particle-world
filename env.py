@@ -39,7 +39,7 @@ class ParticleSwarmEnv(object):
         self.swarms = None
         self.width = width
         # self.fovs = [si+1 for si in range(n_policies)]
-        self.fovs = [2 for si in range(n_policies)]
+        self.fovs = [width for si in range(n_policies)]
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
         self.n_steps = None

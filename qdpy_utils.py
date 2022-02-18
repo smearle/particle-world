@@ -137,11 +137,12 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
     return batch, logbook
 
 
-def qdpy_save_archive(container, current_iteration, save_dir):
+def qdpy_save_archive(container, current_iteration, logbook, save_dir):
     with open(os.path.join(save_dir, 'latest-0.p'), 'wb') as f:
         pickle.dump(
             {
                 'container': container,
-                'current_iteration': current_iteration},
-            f)
+                'current_iteration': current_iteration,
+                'logbook': logbook,
+            }, f)
 

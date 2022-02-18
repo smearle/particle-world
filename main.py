@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import pickle
 import random
@@ -59,10 +60,10 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 fitness_domain = [(-np.inf, np.inf)]
 
 
-def phase_switch_callback(gen_itr, player_trainer, container, toolbox, idx_counter, stale, save_dir):
+def phase_switch_callback(gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale, save_dir):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale):
-        qdpy_save_archive(container, gen_itr, save_dir)
+        qdpy_save_archive(container, gen_itr, logbook, save_dir)
         train_players(play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:n_rllib_envs],
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
@@ -130,10 +131,12 @@ def run_qdpy():
         stale = staleness_counter[0] >= time_until_stale
         if stale:
             staleness_counter[0] = 0
-        phase_switch_callback(gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox,
-                              idx_counter=idx_counter, stale=stale, save_dir=save_dir)
+        phase_switch_callback(gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
+                              logbook=logbook, idx_counter=idx_counter, stale=stale, save_dir=save_dir)
 
     qdpy_save_interval = 100
+    max_items_per_bin = 1 if args.max_total_bins != 1 else n_rllib_envs  # The number of items in each bin of the grid
+
     if load:
         fname = f'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
@@ -149,20 +152,36 @@ def run_qdpy():
         # Produce plots and visualizations
         if args.visualize:
 
-            # render a grid of all worlds
-            im_pg_width = width * 10
-            im_grid = np.zeros((im_pg_width * nb_bins[0], im_pg_width * nb_bins[1], 3))
-            print(im_grid.shape)
+            # visualize current worlds
             gg = sorted(grid, key=lambda i: i.features)
-            for g in gg:
-                i, j = grid.index_grid(g.features)
-                env.set_world(g)
-                env.reset()
-                im = env.render(mode='rgb', pg_width=im_pg_width)
-                im_grid[i * im_pg_width: (i + 1) * im_pg_width, j * im_pg_width: (j + 1) * im_pg_width] = im
+            world_im_width = width * 10
 
-            # im_grid = im_grid.T
-            im_grid = np.flip(im_grid, 0)
+            # if doing QD, render a grid of 1 world per cell in archive
+            if args.quality_diversity:
+                world_im_width = width * 10
+                im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
+                for g in gg:
+                    i, j = grid.index_grid(g.features)
+                    env.set_world(g)
+                    env.reset()
+                    im = env.render(mode='rgb', pg_width=world_im_width)
+                    im_grid[i * world_im_width: (i + 1) * world_im_width, j * world_im_width: (j + 1) * world_im_width] = im
+
+            # otherwise, render a grid of elite levels
+            else:
+                assert nb_bins == (1, 1)
+                n_world_width = math.ceil(math.sqrt(max_items_per_bin))
+                im_grid = np.zeros((world_im_width * n_world_width, world_im_width * n_world_width, 3))
+                for gi, g in enumerate(gg):
+                    i, j = gi // n_world_width, gi % n_world_width
+                    env.set_world(g)
+                    env.reset()
+                    im = env.render(mode='rgb', pg_width=world_im_width)
+                    im_grid[j * world_im_width: (j + 1) * world_im_width, i * world_im_width: (i + 1) * world_im_width] = im
+
+            im_grid = im_grid.transpose(1, 0, 2)
+            # im_grid = np.flip(im_grid, 0)
+            # im_grid = np.flip(im_grid, 1)
             im_grid = Image.fromarray(im_grid.astype(np.uint8))
             im_grid.save(os.path.join(save_dir, "level_grid.png"))
 
@@ -226,7 +245,6 @@ def run_qdpy():
     else:
         mutation_pb = 0.1
     eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
-    max_items_per_bin = 1 if args.max_total_bins != 1 else n_rllib_envs  # The number of items in each bin of the grid
     ind_domain = (0., 1.)  # The domain (min/max values) of the individual genomes
     # fitness_domain = [(0., 1.)]                # The domain (min/max values) of the fitness
     verbose = True
