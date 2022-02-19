@@ -13,7 +13,9 @@ from qdpy.containers import *
 from rllib_utils import IdxCounter, rllib_evaluate_worlds
 
 
-def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_batch, toolbox, container, batch_size, niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, start_time = None, iteration_callback = None):
+def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_batch, toolbox, container, batch_size, 
+                niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, 
+                start_time = None, iteration_callback = None):
     """The simplest QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
     :param rllib_eval: #TODO

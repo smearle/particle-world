@@ -1,3 +1,4 @@
+import math
 import sys
 from functools import partial
 from pdb import set_trace as TT
@@ -11,7 +12,7 @@ from ray.rllib import MultiAgentEnv
 from ray.rllib.policy.policy import PolicySpec
 
 from generator import render_landscape
-from swarm import NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
+from swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
 from utils import discrete_to_onehot
 
 player_colors = [
@@ -39,7 +40,10 @@ class ParticleSwarmEnv(object):
         self.swarms = None
         self.width = width
         # self.fovs = [si+1 for si in range(n_policies)]
-        self.fovs = [width for si in range(n_policies)]
+        
+        # Fully observable map (given wrapping)
+        self.fovs = [math.floor(width/2) for si in range(n_policies)]
+
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
         self.n_steps = None
@@ -129,7 +133,7 @@ def gen_policy(i, observation_space, action_space, fov):
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     def __init__(self, width, swarm_cls, n_policies, n_pop, max_steps, pg_width=500, n_chan=1):
         super().__init__(width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width)
-        patch_ws = [fov * 2 + 1 for fov in self.fovs]
+        patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
         # Each agent observes 2D patch around itself. Each cell has multiple channels. 3D observation.
         # Map policies to agent observations.
@@ -199,7 +203,8 @@ class ParticleGymRLlib(ParticleGym):
         self.need_world_reset = False
         self.obj_fn_str = cfg.pop('objective_function')
         super().__init__(**cfg)
-        obj_fn = globals()[self.obj_fn_str + '_fitness']
+        obj_fn = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
+        
         if obj_fn == min_solvable_fitness:
             # TODO: this is specific to the maze subclass
             # The maximum reward
@@ -430,13 +435,14 @@ for y in eval_mazes:
 class ParticleMazeEnv(ParticleGymRLlib):
     def __init__(self, cfg):
         cfg.update({'n_chan': 3})
+        cfg['swarm_cls'] = cfg.get('swarm_cls', MazeSwarm)
         self.evaluate = cfg.get('evaluate')
         if self.evaluate:
             self.eval_maze_i = 0
         super().__init__(cfg)
         # TODO: maze-specific evaluation scenarios (will currently break)
         n_policies = len(self.swarms)
-        patch_ws = [fov * 2 + 1 for fov in self.fovs]
+        patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
         # We only ask the generator for 3 chans. 3rd shares goal and start, so we observe a 4-channel onehot encoding
         self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(self.n_chan + 1, patch_ws[i], patch_ws[i]))

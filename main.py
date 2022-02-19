@@ -37,8 +37,6 @@ seed = None
 ndim = 2
 n_pop = 5
 
-# Base number of policies among which to differentiate. (If using QD to differentiate explicitly, we'll need 1 more,
-# which we'll add later.)
 width = 15
 pg_delay = 50
 n_nca_steps = 10
@@ -50,7 +48,7 @@ rllib_eval = True
 
 generator_phase = True  # Do we start by evolving generators, or training players?
 gen_phase_len = -1
-play_phase_len = -1
+play_phase_len = 100
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
 fitness_weight = -1.0
@@ -60,9 +58,9 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 fitness_domain = [(-np.inf, np.inf)]
 
 
-def phase_switch_callback(gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale, save_dir):
+def phase_switch_callback(gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, save_dir):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
-    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale):
+    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators):
         qdpy_save_archive(container, gen_itr, logbook, save_dir)
         train_players(play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:n_rllib_envs],
@@ -132,7 +130,7 @@ def run_qdpy():
         if stale:
             staleness_counter[0] = 0
         phase_switch_callback(gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
-                              logbook=logbook, idx_counter=idx_counter, stale=stale, save_dir=save_dir)
+                              logbook=logbook, idx_counter=idx_counter, stale_generators=stale, save_dir=save_dir)
 
     qdpy_save_interval = 100
     max_items_per_bin = 1 if args.max_total_bins != 1 else n_rllib_envs  # The number of items in each bin of the grid
@@ -475,8 +473,8 @@ if __name__ == '__main__':
     swarm_cls = MazeSwarm
 
     # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
-    env = ParticleMazeEnv(
     # env = ParticleGymRLlib(
+    env = ParticleMazeEnv(
         {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
          'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function})
     generator = generator_cls(width=width, n_chan=env.n_chan)

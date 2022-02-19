@@ -1,3 +1,4 @@
+import math
 from pdb import set_trace as TT
 
 import numpy as np
@@ -43,7 +44,7 @@ class Swarm(object):
         :return:
         """
         fov = self.fov
-        patch_w = fov * 2 + 1
+        patch_w = int(fov * 2 + 1)
         # Add new dimensions for patch_w-width patches of the environment around each agent
         ps_int = np.floor(self.ps).astype(int)
         # weird edge case, is modulo broken?
@@ -134,12 +135,14 @@ class RLlibNN(NN, TorchModelV2):
 
 
 class NeuralSwarm(Swarm):
+    """ Handles actions as might be output by a neural network, but assumes the neurla network is defined outside the
+    environment/swarm."""
     def __init__(self, world_width, n_pop: int, fov: int = 4, trg_scape_val=1.0):
         super().__init__(n_pop, fov, trg_scape_val=trg_scape_val)
         self.world_width = world_width
 
-        self.nn = NN(fov=fov)
-        # self.nn = None
+        # self.nn = NN(fov=fov)
+        self.nn = None
 
     def set_nn(self, nn, policy_id, obs_space, act_space, trainer_config):
         # self.nn = type(nn)(obs_space, act_space, trainer_config['model'])

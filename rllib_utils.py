@@ -100,7 +100,8 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     return all_stats, trial_fitnesses
 
 
-def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, idx_counter=None, logbook=None):
+def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
+                  idx_counter=None, logbook=None):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
@@ -118,10 +119,7 @@ def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_d
         worlds = {i: l for i, l in enumerate(curr_lands)}
         all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter=idx_counter)
         if i == 0:
-            path_lengths = trainer.workers.foreach_worker(
-                lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
-            path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
-            mean_path_length = np.mean(path_lengths)
+            mean_path_length = get_mean_env_path_length(trainer)
             max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
             print(f'Mean path length: {mean_path_length}\nMax mean reward: {max_mean_reward}')
         assert len(all_stats) == 1
@@ -137,16 +135,19 @@ def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_d
             print('\n'.join(['evaluation:'] + [f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rllib_stats['episode_reward_mean']
-        if play_phase_len == -1:
-            done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
+
+        # End training if within a certain margin of optimal performance
+        done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
+
+        if play_phase_len != -1:
+            done_training = done_training or i >= play_phase_len
+        # if play_phase_len == -1:
             # if i >= staleness_window:
                 # running_std = np.std(recent_rewards)
                 # print(f'Running reward std dev: {running_std}')
                 # done_training = running_std < 1.0 or i >= 100
             # else:
                 # done_training = False
-        else:
-            done_training = i >= play_phase_len
         i += 1
     # toggle_exploration(trainer, explore=False, n_policies=n_policies)
     trainer.workers.local_worker().set_policies_to_train([])
@@ -219,7 +220,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     model_config.update({
         "use_lstm": True,
         "lstm_cell_size": 32,
-        # "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
+        "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
 
         # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
         "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
@@ -319,3 +320,11 @@ def toggle_exploration(trainer, explore: bool, n_policies: int):
         trainer.get_policy(f'policy_{i}').config["explore"] = explore
         # Need to update each remote training worker as well (if they exist)
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
+
+
+def get_mean_env_path_length(trainer, n_policies: int):
+    path_lengths = trainer.workers.foreach_worker(
+        lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
+    path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
+    mean_path_length = np.mean(path_lengths)
+    return mean_path_length
