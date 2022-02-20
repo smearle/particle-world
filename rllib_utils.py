@@ -14,13 +14,13 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import pretty_print
 from timeit import default_timer as timer
 
-from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv, eval_mazes
-from model import FloodModel
+from env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
+from model import OraclePolicy
 from utils import get_solution
 
-ModelCatalog.register_custom_model('flood_model', FloodModel)
 
-def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False, quality_diversity=False, n_trials=1):
+def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False, quality_diversity=False, n_trials=1, 
+                          oracle_policy=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -70,18 +70,34 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         workers.foreach_worker(
             lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter)))
 
-        # Train/evaluate
-        if evaluate_only:
-            stats = trainer.evaluate()
-        else:
-            stats = trainer.train()
-        # print(pretty_print(stats))
-        all_stats.append(stats)
+        # If using oracle, manually load the world
+        if oracle_policy:
+            workers.foreach_worker(
+                lambda worker: worker.foreach_env(lambda env: env.reset()))
 
-        # Collect stats for generator
-        new_fitnesses = workers.foreach_worker(
-            lambda worker: worker.foreach_env(
-                lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
+            # Hardcoded rendering
+            envs = workers.foreach_worker(
+                lambda worker: worker.foreach_env(lambda env: env))
+            envs[0][0].render()
+
+            new_fitnesses = workers.foreach_worker(
+                lambda worker: worker.foreach_env(
+                    lambda env: {env.world_idx: ((len(get_solution(env.world_flat)),), (0,0))}))
+            all_stats.append([])
+
+        else:
+            # Train/evaluate
+            if evaluate_only:
+                stats = trainer.evaluate()
+            else:
+                stats = trainer.train()
+            # print(pretty_print(stats))
+            all_stats.append(stats)
+
+            # Collect stats for generator
+            new_fitnesses = workers.foreach_worker(
+                lambda worker: worker.foreach_env(
+                    lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
         [new_fits.update(nf) for nf in new_fitnesses]
@@ -199,7 +215,8 @@ class IdxCounter:
         return self.hashes_to_idxs
 
 
-def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus):
+def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
+                          oracle_policy):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -218,23 +235,32 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     :param num_gpus: How many GPUs to use for training.
     :return: An rllib PPOTrainer object
     """
-    model_config = copy.copy(MODEL_DEFAULTS)
-    model_config.update({
-        "use_lstm": True,
-        "lstm_cell_size": 32,
-        "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
 
-        # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
-        "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
-        "post_fcnet_hiddens": [32, 4],
-    })
+    # ModelCatalog.register_custom_model('flood_model', FloodModel)
+    if oracle_policy:
+        policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
+                                                     action_space=env.action_spaces[i], config={        })
+                            for i, _ in enumerate(env.swarms)}
+        model_config = {}
+    else:
+        policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
+                         for i, swarm in enumerate(env.swarms)}
+        model_config = copy.copy(MODEL_DEFAULTS)
+        model_config.update({
+            "use_lstm": True,
+            "lstm_cell_size": 32,
+            "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
+
+            # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
+            "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
+            "post_fcnet_hiddens": [32, 4],
+        })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
 
     trainer_config = {
         "multiagent": {
-            "policies": {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
-                         for i, swarm in enumerate(env.swarms)},
+            "policies": policies_dict,
             # the first tuple value is None -> uses default policy
             # "car1": (None, particle_obs_space, particle_act_space, {"gamma": 0.85}),
             # "car2": (None, particle_obs_space, particle_act_space, {"gamma": 0.99}),
@@ -280,7 +306,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             },
             "evaluation_parallel_to_training": True,
             "render_env": render,
-            "explore": True if enjoy or evaluate else True,
+            "explore": False if oracle_policy else True,
         },
         "logger_config": {
             "log_dir": save_dir,
@@ -303,6 +329,17 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         print(f'policy_{i} has {n_params} parameters.')
         print('model overview: \n', trainer.get_policy(f'policy_{i}').model)
     return trainer
+
+
+def gen_policy(i, observation_space, action_space, fov):
+    config = {
+        "model": {
+            "custom_model_config": {
+                "fov": fov,
+            }
+        }
+    }
+    return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
 
 
 def rllib_save_model(trainer, save_dir):

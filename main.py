@@ -35,7 +35,6 @@ from visualize import visualize_pyribs, plot_fitness_qdpy
 
 seed = None
 ndim = 2
-n_pop = 5
 
 width = 15
 pg_delay = 50
@@ -47,8 +46,6 @@ pg_scale = pg_width / width
 rllib_eval = True
 
 generator_phase = True  # Do we start by evolving generators, or training players?
-gen_phase_len = -1
-play_phase_len = 1
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
 fitness_weight = -1.0
@@ -60,7 +57,11 @@ fitness_domain = [(-np.inf, np.inf)]
 
 def phase_switch_callback(gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, save_dir):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
-    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators):
+    max_possible_generator_fitness = n_sim_steps - 1 / n_pop
+    optimal_generators = logbook.select("avg")[-1] == max_possible_generator_fitness
+    if args.oracle_policy:
+        return
+    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
         qdpy_save_archive(container, gen_itr, logbook, save_dir)
         train_players(play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:n_rllib_envs],
@@ -108,7 +109,8 @@ def phase_switch_callback(gen_itr, player_trainer, container, toolbox, logbook, 
 
 
 def run_qdpy():
-    def iteration_callback(toolbox, rllib_eval, staleness_counter, save_dir, gen_itr, batch, container, logbook):
+    def iteration_callback(toolbox, rllib_eval, staleness_counter, save_dir, gen_itr, batch, container, logbook, 
+                           oracle_policy=False):
         """qdpy callback function, with custom args first, given with `partial` before the qdpy algo is instantiated."""
         idx_counter = ray.get_actor('idx_counter')
         if gen_itr % qdpy_save_interval == 0:
@@ -237,7 +239,7 @@ def run_qdpy():
 
     # Set the probability of mutating each value of a genome
     if generator_cls == TileFlipGenerator:
-        mutation_pb = 0.3
+        mutation_pb = 0.03
     elif generator_cls == SinCPPNGenerator:
         mutation_pb = 0.03
     else:
@@ -289,7 +291,7 @@ def run_qdpy():
                                fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
 
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
-        qd_algo = partial(qdRLlibEval, particle_trainer, rllib_eval, args.quality_diversity)
+        qd_algo = partial(qdRLlibEval, particle_trainer, rllib_eval, args.quality_diversity, oracle_policy=args.oracle_policy)
         # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
         # the archive. (Crucially, it is mutable.)
         staleness_counter = [0]
@@ -432,7 +434,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--parallelismType', type=str, default='None',
                         help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
-    parser.add_argument('-li', '--loadIteration', default=-1, type=int)
+    # parser.add_argument('-li', '--loadIteration', default=-1, type=int)
     parser.add_argument('-a', '--algo', default='me')
     parser.add_argument('-exp', '--experimentName', default='test')
     parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
@@ -454,7 +456,16 @@ if __name__ == '__main__':
                         help='If not using quality diversity, the name of the fitness function that will compute world'
                              'fitness based on population-wise rewards.')
     parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
+    parser.add_argument('--oracle_policy', action='store_true', help="Whether to use the oracle (optimal) policy, and"
+                                                                      "thereby focus on validating generator-evolution.")
     args = parser.parse_args()
+    gen_phase_len = -1
+    if args.oracle_policy:
+        play_phase_len = 0
+        n_pop = 1
+    else:
+        play_phase_len = 1
+        n_pop = 5
     n_policies = args.n_policies
     generator_cls = globals()[args.generator_class]
     n_rllib_workers = args.num_proc
@@ -507,19 +518,21 @@ if __name__ == '__main__':
     idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
     particle_trainer = init_particle_trainer(env, num_rllib_workers=n_rllib_workers, n_rllib_envs=n_rllib_envs,
                                              enjoy=args.enjoy, render=args.render, save_dir=save_dir,
-                                             num_gpus=args.num_gpus, evaluate=args.evaluate)
+                                             num_gpus=args.num_gpus, evaluate=args.evaluate, 
+                                             oracle_policy=args.oracle_policy)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
 
     if args.load:
         if isinstance(env.swarms[0], NeuralSwarm) and rllib_eval:
-            if args.loadIteration == -1:
-                with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
-                    model_checkpoint_path = f.read()
-            else:
-                model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}')
+            # if args.loadIteration == -1:
+            with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
+                model_checkpoint_path = f.read()
+            # else:
+                # model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}')
             particle_trainer.load_checkpoint(model_checkpoint_path)
+            print(f'Loaded model checkopint at {model_checkpoint_path}')
 
             # TODO: support multiple fixed worlds
             if args.enjoy and args.fixed_worlds:

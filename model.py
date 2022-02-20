@@ -1,14 +1,20 @@
+import random
 from typing import Dict, List
+
 import cv2
 import gym
 import numpy as np
 import pygame
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.utils.typing import ModelConfigDict
 import torch as th
+from pdb import set_trace as TT
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.policy.policy import Policy
+from ray.rllib.utils import override
+from ray.rllib.utils.typing import ModelConfigDict, ModelWeights
 from torch import Tensor, TensorType, nn
 
 from env import ParticleMazeEnv, eval_mazes
+
 
 th.set_printoptions(profile='full')
 
@@ -16,7 +22,7 @@ th.set_printoptions(profile='full')
 adjs = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
 
 adjs_to_acts = {adj: i for i, adj in enumerate(adjs)}
-
+RENDER = False
 
 class FloodFill(nn.Module):
     def __init__(self, empty_chan=0, wall_chan=1, src_chan=3, trg_chan=2):
@@ -63,7 +69,8 @@ class FloodFill(nn.Module):
             agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
             x = self.conv_0(input)
             batch_dones = self.get_dones(x, agent_pos)
-            while not batch_dones.all():
+            i = 0
+            while not batch_dones.all() and i < 129:
                 x = self.flood(input, x)
                 if RENDER:
                     im = x[0, self.flood_chan].cpu().numpy()
@@ -75,13 +82,19 @@ class FloodFill(nn.Module):
                     cv2.waitKey(1)
 
                 batch_dones = self.get_dones(x, agent_pos)
+                i += 1
             diag_neighb = x[:, self.age_chan, agent_pos[0] - 1: agent_pos[0] + 2, agent_pos[1] - 1: agent_pos[1] + 2]
             neighb = th.zeros_like(diag_neighb)
             for adj in adjs:
                 neighb[:, adj[0], adj[1]] = diag_neighb[:, adj[0], adj[1]]
-            next_pos = neighb.reshape(n_batches, -1).argmax()
-            next_pos = th.cat(((next_pos % neighb.shape[1]).view(-1), (next_pos // neighb.shape[2]).view(-1)), dim=0)
-        act = adjs_to_acts[tuple(next_pos.cpu().numpy())]
+            next_pos = neighb.reshape(n_batches, -1).argmax(dim=1)
+            next_pos = th.cat(((next_pos % neighb.shape[1]).view(n_batches, -1), (next_pos // neighb.shape[2]).view(n_batches, -1)), dim=1)
+            next_pos = next_pos.cpu().numpy()
+
+            # If no path found, stay put
+            next_pos = np.where(next_pos == (0, 0), (1, 1), next_pos)
+
+            act = [adjs_to_acts[tuple(pos)] for pos in next_pos]
         return act
 
     def get_dones(self, x, agent_pos):
@@ -95,10 +108,54 @@ class FloodFill(nn.Module):
         return x
 
 
+
+class OraclePolicy(Policy):
+    """Hand-coded policy that returns random actions."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model = FloodFill()
+
+    @override(Policy)
+    def compute_actions(self,
+                        obs_batch,
+                        state_batches=None,
+                        prev_action_batch=None,
+                        prev_reward_batch=None,
+                        **kwargs):
+        self.n_batches = obs_batch.shape[0]
+        act = self.model(th.Tensor(obs_batch))
+        return act, \
+               [], {}
+
+    @override(Policy)
+    def learn_on_batch(self, samples):
+        """No learning."""
+        return {}
+
+    @override(Policy)
+    def compute_log_likelihoods(self,
+                                actions,
+                                obs_batch,
+                                state_batches=None,
+                                prev_action_batch=None,
+                                prev_reward_batch=None):
+        return np.array([random.random()] * len(obs_batch))
+
+    @override(Policy)
+    def get_weights(self) -> ModelWeights:
+        """No weights to save."""
+        return {}
+
+    @override(Policy)
+    def set_weights(self, weights: ModelWeights) -> None:
+        """No weights to set."""
+        pass
+
+
 class FloodModel(TorchModelV2, nn.Module):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
                 model_config: ModelConfigDict, name: str):
-        # All these args are for rllib compatibility. We're not only partially using them at the moment.
         TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
                                              model_config=model_config, name=name)
         nn.Module.__init__(self)
@@ -134,10 +191,7 @@ class FloodModel(TorchModelV2, nn.Module):
 
 
 
-
-
 if __name__ == '__main__':
-    RENDER = False
     n_policies = 1
     n_pop = 1
     width = 15

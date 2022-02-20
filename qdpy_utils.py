@@ -15,7 +15,7 @@ from rllib_utils import IdxCounter, rllib_evaluate_worlds
 
 def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_batch, toolbox, container, batch_size, 
                 niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, 
-                start_time = None, iteration_callback = None):
+                start_time = None, iteration_callback = None, oracle_policy=False):
     """The simplest QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
     :param rllib_eval: #TODO
@@ -56,7 +56,7 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
     if rllib_eval:
         rllib_stats, fitnesses = rllib_evaluate_worlds(
             rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter,
-            quality_diversity=quality_diversity, n_trials=1)
+            quality_diversity=quality_diversity, n_trials=1, oracle_policy=oracle_policy)
         qd_stats = [fitnesses[k] for k in range(len(fitnesses))]
         # assert len(rllib_stats) == 1
         rl_stats = rllib_stats[0]
@@ -108,7 +108,8 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
 
         if rllib_eval:
             rllib_stats, fitnesses = rllib_evaluate_worlds(
-                rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter, n_trials=1)
+                rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter, n_trials=1, 
+                oracle_policy=oracle_policy)
             fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
             # assert len(rllib_stats) == 1
             # rllib_stats = rllib_stats[0]

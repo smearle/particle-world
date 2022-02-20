@@ -9,7 +9,6 @@ import pygame
 import ray
 from ray import rllib
 from ray.rllib import MultiAgentEnv
-from ray.rllib.policy.policy import PolicySpec
 
 from generator import render_landscape
 from swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
@@ -121,21 +120,11 @@ class ParticleSwarmEnv(object):
         self.world = landscape
 
 
-def gen_policy(i, observation_space, action_space, fov):
-    config = {
-        "model": {
-            "custom_model_config": {
-                "fov": fov,
-            }
-        }
-    }
-    return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
-
-
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     def __init__(self, width, swarm_cls, n_policies, n_pop, max_steps, pg_width=500, n_chan=1):
         super().__init__(width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width)
         patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
+        self.actions = [(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1)]
 
         # Each agent observes 2D patch around itself. Each cell has multiple channels. 3D observation.
         # Map policies to agent observations.
@@ -146,7 +135,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         #                       for i in range(n_policies)}
 
         # Can move to one of four adjacent tiles
-        self.action_spaces = {i: gym.spaces.Discrete(4)
+        self.action_spaces = {i: gym.spaces.Discrete(len(self.actions))
                               for i in range(n_policies)}
 
         self.max_steps = max_steps
@@ -162,7 +151,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         return obs
 
     def step(self, actions):
-        actions = {k: [(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1)][v] for k, v in actions.items()}
+        actions = {k: self.actions[v] for k, v in actions.items()}
         assert self.world is not None
         swarm_acts = {i: {} for i in range(len(self.swarms))}
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
@@ -593,7 +582,7 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
     def reset(self):
         obs_map = super().reset()
         self.n_plan_step = 0
-        return obs
+        return obs_map
     
     def step(self, actions):
         if self.n_plan_step < self.max_plan_steps:
