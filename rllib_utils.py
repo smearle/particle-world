@@ -9,14 +9,16 @@ from pdb import set_trace as TT
 import numpy as np
 import ray
 from ray.rllib.agents.ppo import ppo
-from ray.rllib.models import MODEL_DEFAULTS
+from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
 from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import pretty_print
 from timeit import default_timer as timer
 
 from env import ParticleGymRLlib, gen_policy, ParticleEvalEnv, eval_mazes
+from model import FloodModel
 from utils import get_solution
 
+ModelCatalog.register_custom_model('flood_model', FloodModel)
 
 def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False, quality_diversity=False, n_trials=1):
     """
@@ -240,7 +242,10 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             "policy_mapping_fn":
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         },
-        "model": model_config,
+        # "model": model_config,
+        "model": {
+            "custom_model": "flood_model",
+        },
         # {
         # "custom_model": RLlibNN,
         # },

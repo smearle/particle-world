@@ -1,11 +1,16 @@
+from typing import Dict, List
 import cv2
+import gym
 import numpy as np
 import pygame
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.utils.typing import ModelConfigDict
 import torch as th
-th.set_printoptions(profile='full')
-from torch import nn
+from torch import Tensor, TensorType, nn
 
 from env import ParticleMazeEnv, eval_mazes
+
+th.set_printoptions(profile='full')
 
 # indices of weights capturing adjacency in 3x3 kernel (left to right, top to bottom)
 adjs = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
@@ -25,22 +30,21 @@ class FloodFill(nn.Module):
             # input: (empty, wall, src, trg)
             # weight: (out_chan, in_chan, w, h)
 
-            # this convolution copies the input
+            # this convolution copies the input (empty, wall, src, trg) to the hidden layer...
             self.conv_0.weight = nn.Parameter(th.zeros_like(self.conv_0.weight), requires_grad=False)
             for i in range(n_in_chans):
                 self.conv_0.weight[i, i, 0, 0] = 1
+
+            # ... and copies the source to a flood tile
+            self.flood_chan = flood_chan = n_in_chans
+            self.conv_0.weight[flood_chan, src_chan, 0, 0] = 1
 
             # this convolution handles the flood
             self.conv_1.weight = nn.Parameter(th.zeros_like(self.conv_1.weight), requires_grad=False)
 
             # the first n_in_chans channels will hold the actual map (via additive skip connections)
 
-            # the next channel will contain the (binary) flood, with activation flowing from source...
-            self.flood_chan = flood_chan = n_in_chans
-            for adj in adjs:
-                self.conv_1.weight[flood_chan, src_chan, adj[0], adj[1]] = 1.
-
-            # ...and flooded tiles...
+            # the next channel will contain the (binary) flood, with activation flowing from flooded tiles...
             for adj in adjs:
                 self.conv_1.weight[flood_chan, flood_chan, adj[0], adj[1]] = 1.
 
@@ -58,7 +62,7 @@ class FloodFill(nn.Module):
         with th.no_grad():
             agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
             x = self.conv_0(input)
-            batch_dones = x[:, self.flood_chan, agent_pos[0], agent_pos[1]] > 0.1
+            batch_dones = self.get_dones(x, agent_pos)
             while not batch_dones.all():
                 x = self.flood(input, x)
                 if RENDER:
@@ -69,16 +73,20 @@ class FloodFill(nn.Module):
                     # im = cv2.resize(im, (600, 600), interpolation=None)
                     cv2.imshow("FloodFill", im)
                     cv2.waitKey(1)
-                
 
-                batch_dones = x[:, self.flood_chan, agent_pos[0], agent_pos[1]] > 0.1
+                batch_dones = self.get_dones(x, agent_pos)
             diag_neighb = x[:, self.age_chan, agent_pos[0] - 1: agent_pos[0] + 2, agent_pos[1] - 1: agent_pos[1] + 2]
             neighb = th.zeros_like(diag_neighb)
             for adj in adjs:
                 neighb[:, adj[0], adj[1]] = diag_neighb[:, adj[0], adj[1]]
             next_pos = neighb.reshape(n_batches, -1).argmax()
-            next_pos = th.cat(((next_pos // neighb.shape[1]).view(-1), (next_pos % neighb.shape[2]).view(-1)), dim=0)
-        return adjs_to_acts[tuple(next_pos.cpu().numpy())]
+            next_pos = th.cat(((next_pos % neighb.shape[1]).view(-1), (next_pos // neighb.shape[2]).view(-1)), dim=0)
+        act = adjs_to_acts[tuple(next_pos.cpu().numpy())]
+        return act
+
+    def get_dones(self, x, agent_pos):
+        batch_dones = x[:, self.age_chan, agent_pos[0], agent_pos[1]] > 0.1
+        return batch_dones
 
     def flood(self, input, x):
         x = self.conv_1(x)
@@ -87,9 +95,49 @@ class FloodFill(nn.Module):
         return x
 
 
+class FloodModel(TorchModelV2, nn.Module):
+    def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
+                model_config: ModelConfigDict, name: str):
+        # All these args are for rllib compatibility. We're not only partially using them at the moment.
+        TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
+                                             model_config=model_config, name=name)
+        nn.Module.__init__(self)
+        self.n_hid_chans = n_hid_chans = 16
+        self.n_in_chans = n_in_chans = obs_space.shape[0]
+        self.conv_0 = nn.Conv2d(n_in_chans, n_hid_chans, 1, 1, padding=0, bias=True)
+        self.conv_1 = nn.Conv2d(n_hid_chans, n_hid_chans, 3, 1, padding=1, padding_mode='circular', bias=True)
+        self.act_dense = nn.Linear(3 * 3, num_outputs)
+        self.val_dense = nn.Linear(3 * 3, 1)
+        self.hid_neighb = None
+
+    def forward(self, input_dict: Dict[str, TensorType], state: List[TensorType], seq_lens: TensorType):
+        input = input_dict['obs']
+        n_batches = input.shape[0]
+        agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
+        x = self.conv_0(input)
+        # batch_dones = self.get_dones(x, agent_pos)
+        # while not batch_dones.all():
+        for i in range(100):
+            x = self.conv_1(x)
+            x[:self.n_hid_chans//2] = th.sigmoid(x[:self.n_hid_chans//2])
+            x[self.n_hid_chans//2:] = th.relu(x[self.n_hid_chans//2:])
+            x[:, :self.n_in_chans] += input
+        self.hid_neighb = neighb = x[:, -1, agent_pos[0] - 1: agent_pos[0] + 2, agent_pos[1] - 1: agent_pos[1] + 2]
+        act = self.act_dense(neighb.reshape(n_batches, -1))
+        # Return model output and RNN hidden state (not used)
+        return act, []
+
+    def value_function(self):
+        val = self.val_dense(self.hid_neighb.reshape(self.hid_neighb.shape[0], -1))
+        val = val.reshape(val.shape[0])
+        return val
+
+
+
+
 
 if __name__ == '__main__':
-    RENDER = True
+    RENDER = False
     n_policies = 1
     n_pop = 1
     width = 15
@@ -105,8 +153,8 @@ if __name__ == '__main__':
     for i in range(len(eval_mazes)):
         obs = env.reset()
         env.render()
-        done = {(0, 0): False}
-        while not done[(0, 0)]:
+        done = {'__all__': False}
+        while not done['__all__']:
             obs = th.Tensor(obs[(0, 0)]).unsqueeze(0)
             act = model(obs)
             obs, rew, done, info = env.step({(0, 0): act})

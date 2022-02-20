@@ -40,7 +40,7 @@ n_pop = 5
 width = 15
 pg_delay = 50
 n_nca_steps = 10
-n_sim_steps = 100
+# n_sim_steps = 100
 pg_width = 500
 pg_scale = pg_width / width
 # swarm_type = MemorySwarm
@@ -136,7 +136,7 @@ def run_qdpy():
     max_items_per_bin = 1 if args.max_total_bins != 1 else n_rllib_envs  # The number of items in each bin of the grid
 
     if load:
-        fname = f'latest-0'
+        fname = 'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
         with open(f"runs/{args.experimentName}/{fname}.p", "rb") as f:
             data = pickle.load(f)
@@ -471,6 +471,7 @@ if __name__ == '__main__':
 
     # swarm_cls = NeuralSwarm
     swarm_cls = MazeSwarm
+    n_sim_steps = ParticleMazeEnv.get_max_steps(width=width)
 
     # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
     # env = ParticleGymRLlib(
