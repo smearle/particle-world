@@ -102,7 +102,7 @@ class FloodModel(TorchModelV2, nn.Module):
         TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
                                              model_config=model_config, name=name)
         nn.Module.__init__(self)
-        self.n_hid_chans = n_hid_chans = 16
+        self.n_hid_chans = n_hid_chans = 8
         self.n_in_chans = n_in_chans = obs_space.shape[0]
         self.conv_0 = nn.Conv2d(n_in_chans, n_hid_chans, 1, 1, padding=0, bias=True)
         self.conv_1 = nn.Conv2d(n_hid_chans, n_hid_chans, 3, 1, padding=1, padding_mode='circular', bias=True)

@@ -48,7 +48,7 @@ rllib_eval = True
 
 generator_phase = True  # Do we start by evolving generators, or training players?
 gen_phase_len = -1
-play_phase_len = 100
+play_phase_len = 1
 
 # Create fitness classes (must NOT be initialised in __main__ if you want to use scoop)
 fitness_weight = -1.0

@@ -42,7 +42,9 @@ class ParticleSwarmEnv(object):
         # self.fovs = [si+1 for si in range(n_policies)]
         
         # Fully observable map (given wrapping)
-        self.fovs = [math.floor(width/2) for si in range(n_policies)]
+        # self.fovs = [math.floor(width/2) for si in range(n_policies)]
+
+        self.fovs = [4 for si in range(n_policies)]
 
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
@@ -466,8 +468,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(self.n_chan + 1, patch_ws[i], patch_ws[i]))
                                    for i in range(n_policies)}
 
-        # Represent empty, wall, and goal as onehot. This attribute is to inform the generator.
-        # self.particle_draw_size = 0.1
+        self.max_steps = ParticleMazeEnv.get_max_steps(self.width)
 
     def set_world(self, world):
         """
@@ -568,3 +569,32 @@ class ParticleMazeEnv(ParticleGymRLlib):
     def get_max_steps(width=15):
         # optimal zig-zag + hanging tile if width is odd
         return width * width // 2 + width % 2
+
+
+# TODO: ...
+class MazeEnvForNCAgents(ParticleMazeEnv):
+    def __init__(self, *args, **kwargs):
+        ParticleMazeEnv.__init__(self, *args, **kwargs)
+        # steps where the agent plans, and does not act
+        self.n_plan_step = 0
+        self.max_plan_steps = self.max_steps // 2
+        # auxiliary channels where the agent can plan its moves across the map. In theory we need only 2 to solve a 
+        # maze: one for flooding a path, another for counting the age of the path (so that a shortest path can be
+        # reconstructed).
+        n_aux_chans = 16
+        self.aux_maps = np.zeros((n_aux_chans, self.width, self.width))
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(self.n_chan + 1 + n_aux_chans, 
+                                   self.patch_ws[i], self.patch_ws[i])) for i in range(self.n_policies)}
+
+    def get_max_steps(width=15):
+        # max. path length times 2: first the agent computes, then traverses it
+        return super().get_max_steps(width=width) * 2
+
+    def reset(self):
+        obs_map = super().reset()
+        self.n_plan_step = 0
+        return obs
+    
+    def step(self, actions):
+        if self.n_plan_step < self.max_plan_steps:
+            self.aux_map += actions

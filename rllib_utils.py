@@ -121,7 +121,7 @@ def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_d
         worlds = {i: l for i, l in enumerate(curr_lands)}
         all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter=idx_counter)
         if i == 0:
-            mean_path_length = get_mean_env_path_length(trainer)
+            mean_path_length = get_mean_env_path_length(trainer, n_policies)
             max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
             print(f'Mean path length: {mean_path_length}\nMax mean reward: {max_mean_reward}')
         assert len(all_stats) == 1
@@ -226,7 +226,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
 
         # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
         "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
-        # "post_fcnet_hiddens": [32, 4],
+        "post_fcnet_hiddens": [32, 4],
     })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
@@ -242,10 +242,10 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             "policy_mapping_fn":
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         },
-        # "model": model_config,
-        "model": {
-            "custom_model": "flood_model",
-        },
+        "model": model_config,
+        # "model": {
+            # "custom_model": "flood_model",
+        # },
         # {
         # "custom_model": RLlibNN,
         # },
