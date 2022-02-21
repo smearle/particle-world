@@ -29,7 +29,7 @@ start_color = (255, 255, 0)
 class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
     propelling themselves toward desirable regions in the fitness world."""
-    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None):
+    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False):
         self.n_chan = n_chan
         if not pg_width:
             pg_width = width
@@ -40,10 +40,13 @@ class ParticleSwarmEnv(object):
         self.width = width
         # self.fovs = [si+1 for si in range(n_policies)]
 
-        # Fully observable map (given wrapping)
-        # self.fovs = [math.floor(width/2) for si in range(n_policies)]
+        if fully_observable:
+            # Fully observable map (given wrapping)
+            self.fovs = [math.floor(width/2) for si in range(n_policies)]
 
-        self.fovs = [4 for si in range(n_policies)]
+        else:
+        # Partially observable map
+            self.fovs = [4 for si in range(n_policies)]
 
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
@@ -192,6 +195,7 @@ class ParticleGymRLlib(ParticleGym):
         evaluate = cfg.pop("evaluate")
         self.need_world_reset = False
         self.obj_fn_str = cfg.pop('objective_function')
+        self.fully_observable = cfg.pop('fully_observable')
         super().__init__(**cfg)
         obj_fn = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
         
@@ -449,6 +453,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         cfg.update({'n_chan': 4})
         cfg['swarm_cls'] = cfg.get('swarm_cls', MazeSwarm)
         self.evaluate = cfg.get('evaluate')
+        self.fully_observable = cfg.get('fully_observable')
         if self.evaluate:
             self.eval_maze_i = 0
         super().__init__(cfg)
@@ -457,15 +462,26 @@ class ParticleMazeEnv(ParticleGymRLlib):
         patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
         # Observe empty, wall, and goal tiles (not start tiles)
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(patch_ws[i], patch_ws[i], self.n_chan-1))
+        if self.fully_observable:
+            n_chan = self.n_chan  # visible player
+        else:
+            n_chan = self.n_chan - 1
+        self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(patch_ws[i], patch_ws[i], n_chan))
                                    for i in range(n_policies)}
 
         self.max_steps = ParticleMazeEnv.get_max_steps(self.width)
 
 
     def get_particle_observations(self):
-        obs = {(i, j): swarm.get_observations(scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
-                                               flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
+        if self.fully_observable:
+            obs = {(i, j): swarm.get_full_observations(
+                                    scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
+                                    flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
+                for j in range(swarm.n_pop)}
+        else:
+            obs = {(i, j): swarm.get_observations(
+                                    scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
+                                    flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
         return obs
 
@@ -517,7 +533,8 @@ class ParticleMazeEnv(ParticleGymRLlib):
     def step(self, actions):
         # print(f"step {self.n_step} world {self.world_idx}")
 
-        return super().step(actions)
+        obs, rew, info, done = super().step(actions)
+        return obs, rew, info, done
 
     def step_swarms(self):
         [s.update(scape=self.world, obstacles=self.world) for s in self.swarms]

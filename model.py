@@ -164,6 +164,7 @@ class OraclePolicy(Policy):
         pass
 
 
+# This is prohibitively slow
 class FloodModel(TorchModelV2, nn.Module):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
                 model_config: ModelConfigDict, name: str):
@@ -199,28 +200,3 @@ class FloodModel(TorchModelV2, nn.Module):
         val = self.val_dense(self.hid_neighb.reshape(self.hid_neighb.shape[0], -1))
         val = val.reshape(val.shape[0])
         return val
-
-
-
-if __name__ == '__main__':
-    n_policies = 1
-    n_pop = 1
-    width = 15
-    n_sim_steps = 128
-    pg_width = 600
-    model = FloodFill()
-    env = ParticleMazeEnv(
-        {'width': width, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
-         'pg_width': pg_width, 'evaluate': True, 'objective_function': None})
-    cv2.namedWindow("FloodFill")
-
-
-    for i in range(len(eval_mazes)):
-        obs = env.reset()
-        env.render()
-        done = {'__all__': False}
-        while not done['__all__']:
-            obs = th.Tensor(obs[(0, 0)]).unsqueeze(0)
-            act = model(obs)
-            obs, rew, done, info = env.step({(0, 0): act})
-            env.render()

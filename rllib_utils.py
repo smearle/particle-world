@@ -42,7 +42,8 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         workers = trainer.evaluation_workers
     else:
         workers = trainer.workers
-    worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
+    if not isinstance(list(worlds.values())[0], np.ndarray):
+        worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
     # fitnesses = {k: [] for k in worlds}
     all_stats = []
 
@@ -226,7 +227,7 @@ class IdxCounter:
 
 
 def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
-                          oracle_policy):
+                          oracle_policy, fully_observable):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -256,15 +257,24 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
                          for i, swarm in enumerate(env.swarms)}
         # ModelCatalog.register_custom_model('flood_model', NavNet)
         model_config = copy.copy(MODEL_DEFAULTS)
-        model_config.update({
-            "use_lstm": True,
-            "lstm_cell_size": 32,
-            "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
-
-            # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
-            "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
-            "post_fcnet_hiddens": [32, 4],
-        })
+        if fully_observable:
+            model_config.update({
+            # Fully observable, non-translated map
+            "conv_filters": [
+                [64, [3, 3], 1], 
+                [64, [3, 3], 2], 
+                [64, [3, 3], 2], 
+                [64, [3, 3], 2]
+            ],
+            })
+        else:
+            model_config.update({
+                "use_lstm": True,
+                "lstm_cell_size": 32,
+                # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+                "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
+                # "post_fcnet_hiddens": [32, 32],
+            })
     workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
 
@@ -297,6 +307,7 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             # "pg_width": pg_width,
             "evaluate": False,
             "objective_function": env.obj_fn_str,
+            "fully_observable": fully_observable,
         },
         "num_gpus": num_gpus,
         "num_workers": num_rllib_workers if not (enjoy or evaluate) else 0,

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from matplotlib import pyplot as plt
+from pdb import set_trace as TT
 from ribs.visualize import grid_archive_heatmap
 
 
@@ -17,10 +18,10 @@ def visualize_pyribs(archive):
 
 def plot_fitness_qdpy(save_dir, logbook, quality_diversity=True):
     gen = logbook.select("iteration")
-    fit_mins = logbook.select("min")
-    fit_avgs = logbook.select("avg")
-    fit_stds = logbook.select("std")
-    fit_maxs = logbook.select("max")
+    fit_mins = remove_nones(logbook.select("min"))
+    fit_avgs = remove_nones(logbook.select("avg"))
+    fit_stds = remove_nones(logbook.select("std"))
+    fit_maxs = remove_nones(logbook.select("max"))
 
     fig, ax1 = plt.subplots()
     line0 = ax1.plot(gen, fit_mins, "b--")
@@ -30,7 +31,7 @@ def plot_fitness_qdpy(save_dir, logbook, quality_diversity=True):
     #                           alpha=min(0.9, 100 / len(gen)),
     #                           # alpha=0.9,
     #                           )
-    line1 = ax1.plot(gen, fit_avgs, 'b-', label='Average Fitness')
+    line1 = ax1.plot(gen, fit_avgs, 'b-', label='Mean Fitness')
     line2 = ax1.plot(gen, fit_maxs, "b--")
     ax1.set_xlabel("Generation")
     ax1.set_ylabel("Fitness")
@@ -38,24 +39,56 @@ def plot_fitness_qdpy(save_dir, logbook, quality_diversity=True):
     # if not np.all(self.config.ME_BIN_SIZES == 1):
     if quality_diversity:
         # plot the size of the archive
-        containerSize_avgs = logbook.select('containerSize')
+        containerSize_avgs = remove_nones(logbook.select('containerSize'))
         for tl in ax1.get_yticklabels():
             tl.set_color("b")
         ax2 = ax1.twinx()
-        line2 = ax2.plot(gen, containerSize_avgs, "r-", label="Archive Size")
+        line3 = ax2.plot(gen, containerSize_avgs, "r-", label="Archive Size")
         ax2.set_ylabel("Size", color="r")
         # ax2_ticks = ax2.get_yticklabels()
         start, end = ax2.get_ylim()
         ax2.yaxis.set_ticks(np.arange(start, end, (end - start) / 10))
         for tl in ax2.get_yticklabels():
             tl.set_color("r")
-        lns = line1 + line2
+        lns = line1 + line3
     else:
         lns = line1
     labs = [l.get_label() for l in lns]
     ax1.legend(lns, labs, loc="best")
-
     plt.tight_layout()
     # plt.show()
     plt.savefig(os.path.join(save_dir, 'fitness.png'))
 
+    fig, ax1 = plt.subplots()
+    path_means = remove_nones(logbook.select("meanPath"))
+    line0 = ax1.plot(gen, path_means, "b-", label="Mean Path Length")
+    ax1.set_xlabel("Generation")
+    ax1.set_ylabel("Path Length")
+    mean_rews = remove_nones(logbook.select("meanRew"))
+    min_rews = remove_nones(logbook.select("minRew"))
+    max_rews = remove_nones(logbook.select("maxRew"))
+    ax2 = ax1.twinx()
+    line1 = ax2.plot(gen, min_rews, "r--")
+    line2 = ax2.plot(gen, mean_rews, "r-", label="Mean Reward")
+    line3 = ax2.plot(gen, max_rews, "r--")
+    start, end = ax2.get_ylim()
+    ax2.set_ylabel("Agent Reward", color="r")
+    ax2.yaxis.set_ticks(np.arange(start, end, (end - start) / 10))
+    for tl in ax2.get_yticklabels():
+        tl.set_color("r")
+    lns = line0 + line2
+    labs = [l.get_label() for l in lns]
+    ax1.legend(lns, labs, loc="best")
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'path_length.png'))
+
+def remove_nones(l):
+    iv = 0
+    nl = []
+    for li in l:
+        if li is not None:
+            nl.append(li)
+            iv = li
+        else:
+            nl.append(iv)
+    return nl

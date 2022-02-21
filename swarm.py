@@ -34,6 +34,13 @@ class Swarm(object):
         # self.world = scape
         self.ps, self.vs = init_ps(self.world_width, self.n_pop)
 
+    def get_full_observations(self, scape, flatten=False):
+        # Add a 4th channel for player positions
+        scape = np.vstack((scape, np.zeros_like(scape)[0:1]))
+        obs = np.tile(scape[None,...], (self.n_pop, 1, 1, 1))
+        obs[:, -1, self.ps[:, 0].astype(int), self.ps[:, 1].astype(int)] = 1
+        return obs
+
     def get_observations(self, scape, flatten=True):
         """
         Return a batch of local observations corresponding to particles in the swarm, of size (n_pop, patch_w, patch_w),

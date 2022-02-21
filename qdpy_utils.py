@@ -13,9 +13,10 @@ from qdpy.containers import *
 from rllib_utils import IdxCounter, rllib_evaluate_worlds
 
 
-def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_batch, toolbox, container, batch_size, 
-                niter, cxpb = 0.0, mutpb = 1.0, stats = None, halloffame = None, verbose = False, show_warnings = False, 
-                start_time = None, iteration_callback = None, oracle_policy=False):
+def qdRLlibEval(init_batch, toolbox, container, batch_size, niter, 
+                rllib_trainer, rllib_eval: bool, quality_diversity: bool, oracle_policy: bool, net_itr: int, gen_itr: int, 
+                cxpb: float=0.0, mutpb:float=1.0, stats=None, 
+                halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None):
     """The simplest QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
     :param rllib_eval: #TODO
@@ -31,13 +32,13 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
     :param show_warnings: Whether or not to show warnings and errors. Useful to check if some individuals were out-of-bounds.
     :param start_time: Starting time of the illumination process, or None to take the current time.
     :param iteration_callback: Optional callback funtion called when a new batch is generated. The callback function parameters are (iteration, batch, container, logbook).
+    :param gen_itr: The current generator iteration if reloading.
+    :param net_itr: The current net iteration if reloading (sum of generator and player iterations).
     :returns: The final batch
     :returns: A class:`~deap.tools.Logbook` with the statistics of the
               evolution
     """
-    # The co-learning loop1 will always start here, with at least a single round of world-generation
-    net_itr = 0
-    gen_itr = 0
+    # The co-learning loop will always start here, with at least a single round of world-generation
     idx_counter = ray.get_actor("idx_counter")
     rllib_trainer.workers.local_worker().set_policies_to_train([])
     if start_time == None:
@@ -83,7 +84,7 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
 
     # Compile stats and update logs
     record = stats.compile(container) if stats else {}
-    logbook.record(iteration=0, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
+    logbook.record(iteration=net_itr, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
     if verbose:
         print(logbook.stream)
     # Call callback function
@@ -144,12 +145,13 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
     return batch, logbook
 
 
-def qdpy_save_archive(container, current_iteration, logbook, save_dir):
+def qdpy_save_archive(container, gen_itr, net_itr, logbook, save_dir):
     with open(os.path.join(save_dir, 'latest-0.p'), 'wb') as f:
         pickle.dump(
             {
                 'container': container,
-                'current_iteration': current_iteration,
+                'net_itr': net_itr,
+                'gen_itr': gen_itr,
                 'logbook': logbook,
             }, f)
 

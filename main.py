@@ -63,7 +63,7 @@ def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, 
         return
     if gen_itr > 0 and container.free == 0 and \
         (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
-        qdpy_save_archive(container, gen_itr, logbook, save_dir)
+        qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
         train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:n_rllib_envs],
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
@@ -151,15 +151,8 @@ def run_qdpy():
                            logbook, oracle_policy=False):
         gen_itr = iteration
         idx_counter = ray.get_actor('idx_counter')
-        if gen_itr % qdpy_save_interval == 0:
-            pass
-            # qdpy already saves the container, logbook, etc. regularly, so we can save any additional things here.
-            # with open(f'runs/{args.experimentName}/learn.pickle', 'wb') as handle:
-            #     dict = {
-                    # 'logbook': logbook,
-                    # 'policies': env.swarms,
-                # }
-                # pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if net_itr % qdpy_save_interval == 0:
+            qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
         time_until_stale = 10
         no_update = np.array(logbook.select('nbUpdated')[-1:]) == 0
         if no_update:
@@ -185,7 +178,9 @@ def run_qdpy():
         #     policies = supp_data['policies']
         # env.set_policies(policies)
         grid = data['container']
-        curr_iter = data['current_iteration']
+        gen_itr = data['gen_itr']
+        net_itr = data['net_itr']
+        logbook = data['logbook']
 
         # Produce plots and visualizations
         if args.visualize:
@@ -200,7 +195,7 @@ def run_qdpy():
                 im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
                 for g in gg:
                     i, j = grid.index_grid(g.features)
-                    env.set_world(g)
+                    env.set_world(g.discrete)
                     env.reset()
                     im = env.render(mode='rgb', pg_width=world_im_width)
                     im_grid[i * world_im_width: (i + 1) * world_im_width, j * world_im_width: (j + 1) * world_im_width] = im
@@ -212,7 +207,7 @@ def run_qdpy():
                 im_grid = np.zeros((world_im_width * n_world_width, world_im_width * n_world_width, 3))
                 for gi, g in enumerate(gg):
                     i, j = gi // n_world_width, gi % n_world_width
-                    env.set_world(g)
+                    env.set_world(g.discrete)
                     env.reset()
                     im = env.render(mode='rgb', pg_width=world_im_width)
                     im_grid[j * world_im_width: (j + 1) * world_im_width, i * world_im_width: (i + 1) * world_im_width] = im
@@ -223,7 +218,6 @@ def run_qdpy():
             im_grid = Image.fromarray(im_grid.astype(np.uint8))
             im_grid.save(os.path.join(save_dir, "level_grid.png"))
 
-            logbook = data['logbook']
             plot_fitness_qdpy(save_dir, logbook, quality_diversity=args.quality_diversity)
 
             # save fitness qd grid
@@ -237,9 +231,9 @@ def run_qdpy():
         elif args.enjoy:
             # We'll look at each world independently in our single env
             elites = sorted(grid, key=lambda ind: ind.fitness, reverse=True)
-            worlds = [np.array(i) for i in elites]
+            worlds = [i for i in elites]
             if args.evaluate:
-                worlds = eval_mazes_probdists
+                worlds = eval_mazes
             for i, elite in enumerate(worlds):
                 ret = rllib_evaluate_worlds(particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
                                             evaluate_only=True)
@@ -264,7 +258,8 @@ def run_qdpy():
                                             evaluate_only=True)
             sys.exit()
     else:
-        curr_iter = 0
+        net_itr = 0
+        gen_itr = 0
     # Algorithm parameters
     dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
     assert (dimension >= 2)
@@ -273,7 +268,7 @@ def run_qdpy():
 
     init_batch_size = n_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
     batch_size = n_rllib_envs  # The number of evaluations in each subsequent batch
-    nb_iterations = total_itrs - curr_iter  # The number of iterations (i.e. times where a new batch is evaluated)
+    nb_iterations = total_itrs - gen_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome
     if generator_cls == TileFlipGenerator:
@@ -330,7 +325,8 @@ def run_qdpy():
                                fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
 
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
-        qd_algo = partial(qdRLlibEval, particle_trainer, rllib_eval, args.quality_diversity, oracle_policy=args.oracle_policy)
+        qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, rllib_eval=rllib_eval, net_itr=net_itr,
+                          quality_diversity=args.quality_diversity, oracle_policy=args.oracle_policy, gen_itr=gen_itr)
         # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
         # the archive. (Crucially, it is mutable.)
         staleness_counter = [0]
@@ -340,7 +336,7 @@ def run_qdpy():
         algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
                                batch_size=batch_size, niter=nb_iterations,
                                verbose=verbose, show_warnings=show_warnings,
-                               results_infos=results_infos, log_base_path=log_base_path, save_period=qdpy_save_interval,
+                               results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                                iteration_filename=f'{args.experimentName}' + '/latest-{}.p',
                                iteration_callback_fn=callback,
                                ea_fn=qd_algo,
@@ -451,7 +447,7 @@ def run_pyribs():
             print(f"  - Archive Size: {len(archive)}")
             print(f"  - Max Score: {archive.stats.obj_max}")
             print(f"  - Mean Score: {archive.stats.obj_mean}")
-        if itr % save_interval == 0:
+        if itr % rllib_save_interval == 0:
             save(archive, optimizer, emitters, stats, policies=env.swarms)
             visualize_pyribs(archive)
         stats['n_iter'] += 1
@@ -497,13 +493,15 @@ if __name__ == '__main__':
     parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
     parser.add_argument('--oracle_policy', action='store_true', help="Whether to use the oracle (optimal) policy, and"
                                                                       "thereby focus on validating generator-evolution.")
+    parser.add_argument('-fo', '--fully_observable', action='store_true',
+                        help="Whether to use a fully observable environment.")
     args = parser.parse_args()
     gen_phase_len = -1
     if args.oracle_policy:
         play_phase_len = -1
         n_pop = 1
     else:
-        play_phase_len = -1
+        play_phase_len = 1
         n_pop = 5
     n_policies = args.n_policies
     generator_cls = globals()[args.generator_class]
@@ -527,7 +525,8 @@ if __name__ == '__main__':
     # env = ParticleGymRLlib(
     env = ParticleMazeEnv(
         {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
-         'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function})
+         'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
+         'fully_observable': args.fully_observable})
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
     initial_weights = generator.get_init_weights()
@@ -549,7 +548,7 @@ if __name__ == '__main__':
     bins_per_dim = int(pow(args.max_total_bins, 1. / nb_features))
     nb_bins = (
                   bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
-    save_interval = 10
+    rllib_save_interval = 10
 
     # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
     features_domain = [(0, env.max_steps - 1)] * nb_features  # The domain (min/max values) of the features
@@ -558,7 +557,7 @@ if __name__ == '__main__':
     particle_trainer = init_particle_trainer(env, num_rllib_workers=n_rllib_workers, n_rllib_envs=n_rllib_envs,
                                              enjoy=args.enjoy, render=args.render, save_dir=save_dir,
                                              num_gpus=args.num_gpus, evaluate=args.evaluate, 
-                                             oracle_policy=args.oracle_policy)
+                                             oracle_policy=args.oracle_policy, fully_observable=args.fully_observable)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
