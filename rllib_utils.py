@@ -8,6 +8,7 @@ from pdb import set_trace as TT
 
 import numpy as np
 import ray
+import torch as th
 from ray.rllib.agents.ppo import ppo
 from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
 from ray.rllib.policy.policy import PolicySpec
@@ -41,7 +42,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         workers = trainer.evaluation_workers
     else:
         workers = trainer.workers
-    worlds = {k: np.array(world) for k, world in worlds.items()}
+    worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
     # fitnesses = {k: [] for k in worlds}
     all_stats = []
 
@@ -72,6 +73,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
 
         # If using oracle, manually load the world
         if oracle_policy:
+            flood_model = trainer.get_policy('policy_0').model
             workers.foreach_worker(
                 lambda worker: worker.foreach_env(lambda env: env.reset()))
 
@@ -82,7 +84,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
 
             new_fitnesses = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
-                    lambda env: {env.world_idx: ((len(get_solution(env.world_flat)),), (0,0))}))
+                    lambda env: {env.world_idx: ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0))}))
             all_stats.append([])
 
         else:
@@ -118,7 +120,7 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     return all_stats, trial_fitnesses
 
 
-def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
+def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
                   idx_counter=None, logbook=None):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     toggle_exploration(trainer, explore=True, n_policies=n_policies)
@@ -133,22 +135,28 @@ def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_d
         if i % 10 == 0:
             rllib_save_model(trainer, save_dir)
         world_idxs = np.random.choice(np.array(landscapes).shape[0], n_rllib_envs, replace=False)
-        curr_lands = np.array(landscapes)[world_idxs]
+        # curr_lands = np.array(landscapes)[world_idxs]
+        curr_lands = [landscapes[wid] for wid in world_idxs]
         worlds = {i: l for i, l in enumerate(curr_lands)}
         all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter=idx_counter)
+        logbook_stats = {'iteration': net_itr}
         if i == 0:
             mean_path_length = get_mean_env_path_length(trainer, n_policies)
+            logbook_stats['meanPath'] = mean_path_length
             max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
-            print(f'Mean path length: {mean_path_length}\nMax mean reward: {max_mean_reward}')
+            # print(f'Mean path length: {mean_path_length}\nMax mean reward: {max_mean_reward}')
         assert len(all_stats) == 1
         rllib_stats = all_stats[0]
-        # if logbook:
-        #     logbook.record(iteration=curr_itr, meanAgentReward=rllib_stats["episode_reward_mean"],
-        #                    maxAgentReward=rllib_stats["episode_reward_max"],
-        #                    minAgentReward=rllib_stats["episode_reward_min"])
+        logbook_stats.update({
+            'meanRew': rllib_stats['episode_reward_mean'],
+            'maxRew': rllib_stats['episode_reward_max'],
+            'minRew': rllib_stats['episode_reward_min'],
+            'elapsed': timer() - start_time,
+        })
+        logbook.record(**logbook_stats)
         keys = ['episode_reward_max', 'episode_reward_mean']
         # TODO: track stats over calls to train (shouldn't be necessary during evolution)
-        print('\n'.join([f'Training iteration {i}, time elapsed: {timer() - start_time}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
+        # print('\n'.join([f'Training iteration {i}, time elapsed: {timer() - start_time}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
         if 'evaluation' in rllib_stats:
             print('\n'.join(['evaluation:'] + [f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
         recent_rewards[:-1] = recent_rewards[1:]
@@ -166,7 +174,9 @@ def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_d
                 # done_training = running_std < 1.0 or i >= 100
             # else:
                 # done_training = False
+        print(logbook.stream)
         i += 1
+        net_itr += 1
     # toggle_exploration(trainer, explore=False, n_policies=n_policies)
     trainer.workers.local_worker().set_policies_to_train([])
 
@@ -174,7 +184,7 @@ def train_players(play_phase_len, n_policies, n_pop, trainer, landscapes, save_d
 @ray.remote
 class IdxCounter:
     ''' When using rllib trainer to train and simulate on evolved maps, this global object will be
-    responsible for providing unique indexes to parallel environments.'''
+    responsible for providing unique indices to parallel environments.'''
 
     def __init__(self):
         self.count = 0
@@ -236,7 +246,6 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     :return: An rllib PPOTrainer object
     """
 
-    # ModelCatalog.register_custom_model('flood_model', FloodModel)
     if oracle_policy:
         policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
                                                      action_space=env.action_spaces[i], config={        })
@@ -245,11 +254,12 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
     else:
         policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
                          for i, swarm in enumerate(env.swarms)}
+        # ModelCatalog.register_custom_model('flood_model', NavNet)
         model_config = copy.copy(MODEL_DEFAULTS)
         model_config.update({
             "use_lstm": True,
             "lstm_cell_size": 32,
-            "fcnet_hiddens": [32, 32],  # Looks like this is unused because of LSTM?
+            "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
 
             # Arranging the second convolution to leave us with an activation of size just >= 32 when flattened (3*3*4=36)
             "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
@@ -269,6 +279,9 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         },
         "model": model_config,
+        # "model": {
+            # "custom_model": "nav_net",
+        # },
         # "model": {
             # "custom_model": "flood_model",
         # },
@@ -355,7 +368,7 @@ def rllib_save_model(trainer, save_dir):
     # Record latest checkpoint path in case of re-loading
     with open(ckp_path_file, 'w') as f:
         f.write(checkpoint)
-    print("checkpoint saved at", checkpoint)
+    # print("checkpoint saved at", checkpoint)
 
 def toggle_exploration(trainer, explore: bool, n_policies: int):
     for i in range(n_policies):

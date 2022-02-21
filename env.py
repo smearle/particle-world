@@ -39,7 +39,7 @@ class ParticleSwarmEnv(object):
         self.swarms = None
         self.width = width
         # self.fovs = [si+1 for si in range(n_policies)]
-        
+
         # Fully observable map (given wrapping)
         # self.fovs = [math.floor(width/2) for si in range(n_policies)]
 
@@ -61,10 +61,6 @@ class ParticleSwarmEnv(object):
                 # trg_scape_val=trg)
                 trg_scape_val=1.0)
             for si, trg in zip(range(n_policies), np.arange(n_policies) / max(1, (n_policies - 1)))]
-
-    def set_policies(self, policies, trainer_config):
-        # self.swarms = policies
-        [swarm.set_nn(policy, i, self.observation_spaces[i], self.action_spaces[i], trainer_config) for i, (swarm, policy) in enumerate(zip(self.swarms, policies))]
 
     def reset(self):
         # assert self.landscape_set
@@ -141,6 +137,9 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         self.max_steps = max_steps
         self.n_step = 0
 
+    def set_policies(self, policies, trainer_config):
+        # self.swarms = policies
+        [swarm.set_nn(policy, i, self.observation_spaces[i], self.action_spaces[i], trainer_config) for i, (swarm, policy) in enumerate(zip(self.swarms, policies))]
 
     def reset(self):
         # print('reset', self.worlds.keys())
@@ -442,8 +441,12 @@ for y in eval_mazes:
 
 
 class ParticleMazeEnv(ParticleGymRLlib):
+    empty_chan = 0
+    wall_chan = 1
+    start_chan = 2
+    goal_chan = 3
     def __init__(self, cfg):
-        cfg.update({'n_chan': 3})
+        cfg.update({'n_chan': 4})
         cfg['swarm_cls'] = cfg.get('swarm_cls', MazeSwarm)
         self.evaluate = cfg.get('evaluate')
         if self.evaluate:
@@ -453,41 +456,59 @@ class ParticleMazeEnv(ParticleGymRLlib):
         n_policies = len(self.swarms)
         patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
-        # We only ask the generator for 3 chans. 3rd shares goal and start, so we observe a 4-channel onehot encoding
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(self.n_chan + 1, patch_ws[i], patch_ws[i]))
+        # Observe empty, wall, and goal tiles (not start tiles)
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(patch_ws[i], patch_ws[i], self.n_chan-1))
                                    for i in range(n_policies)}
 
         self.max_steps = ParticleMazeEnv.get_max_steps(self.width)
+
+
+    def get_particle_observations(self):
+        obs = {(i, j): swarm.get_observations(scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
+                                               flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
+                for j in range(swarm.n_pop)}
+        return obs
+
 
     def set_world(self, world):
         """
         Convert an encoding produced by the generator into a world map. The encoding has channels (empty, wall, starg/goal)
         :param world: Encoding, optimized directly or produced by a world-generator.
         """
-        # Convert world from 3D to 2D, collapsing channel axis.
-        v = np.reshape(world, (self.n_chan, self.width, self.width))
+        w = np.zeros((self.width, self.width), dtype=np.int)
+        w.fill(1)
+        w[1:-1, 1:-1] = world
+        self.start_idx = np.argwhere(w == 2)
+        self.goal_idx = np.argwhere(w == 3)
+        assert len(self.start_idx) == 1
+        assert len(self.goal_idx) == 1
+        self.start_idx = self.start_idx[0]
+        self.goal_idx = self.goal_idx[0]
+        
+#       # Convert world from 3D to 2D, collapsing channel axis.
+#       v = np.reshape(world, (self.n_chan, self.width, self.width))
 
-        # Empty and wall tiles
-        w = np.argmax(v[:2], axis=(0))
+#       # Empty and wall tiles
+#       w = np.argmax(v[:2], axis=(0))
 
-        # Force the map to include border walls
-        w[0] = w[-1] = w[:, 0] = w[:, -1] = 1
+#       # Force the map to include border walls
+#       w[0] = w[-1] = w[:, 0] = w[:, -1] = 1
 
-        # Goal and start tiles
-        # Cannot end on obstacles
-        vg = v[2] - v[1]
-        goal_idxs = np.argwhere(vg == vg.max())
-        # FIXME: by not selecting start/goal locations randomly, we bias their positions
-        # self.goal_idx = goal_idxs[np.random.randint(goal_idxs.shape[0])]
-        self.goal_idx = goal_idxs[0]
+#       # Goal and start tiles
+#       # Cannot end on obstacles
+#       vg = v[2] - v[1]
+#       goal_idxs = np.argwhere(vg == vg.max())
+#       # FIXME: by not selecting start/goal locations randomly, we bias their positions
+#       # self.goal_idx = goal_idxs[np.random.randint(goal_idxs.shape[0])]
+#       self.goal_idx = goal_idxs[0]
 
-        # Cannot start on obstacles
-        vs = v[2] + v[1]
-        start_idxs = np.argwhere(vs == vs.min())
-        # self.start_idx = start_idxs[np.random.randint(start_idxs.shape[0])]
-        self.start_idx = start_idxs[0]
-        w[self.start_idx[0], self.start_idx[1]] = 2
-        w[self.goal_idx[0], self.goal_idx[1]] = 3
+#       # Cannot start on obstacles
+#       vs = v[2] + v[1]
+#       start_idxs = np.argwhere(vs == vs.min())
+#       # self.start_idx = start_idxs[np.random.randint(start_idxs.shape[0])]
+#       self.start_idx = start_idxs[0]
+#       w[self.start_idx[0], self.start_idx[1]] = 2
+#       w[self.goal_idx[0], self.goal_idx[1]] = 3
         self.world_flat = w
         self.next_world = discrete_to_onehot(w)
         self.need_world_reset = True

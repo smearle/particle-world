@@ -34,15 +34,17 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
     :returns: The final batch
     :returns: A class:`~deap.tools.Logbook` with the statistics of the
               evolution
-
-    TODO
     """
+    # The co-learning loop1 will always start here, with at least a single round of world-generation
+    net_itr = 0
+    gen_itr = 0
     idx_counter = ray.get_actor("idx_counter")
     rllib_trainer.workers.local_worker().set_policies_to_train([])
     if start_time == None:
         start_time = timer()
     logbook = deap.tools.Logbook()
-    logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + (stats.fields if stats else []) + ["elapsed"] #+ ["meanAgentReward", "minAgentReward", "maxAgentReward"]
+    logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + (stats.fields if stats else []) \
+        + ["meanRew", "minRew", "maxRew", "meanPath"] + ["elapsed"]
 
     if len(init_batch) == 0:
         raise ValueError("``init_batch`` must not be empty.")
@@ -86,10 +88,11 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
         print(logbook.stream)
     # Call callback function
     if iteration_callback != None:
-        iteration_callback(0, init_batch, container, logbook)
+        iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=init_batch, container=container, logbook=logbook)
+    net_itr += 1
 
     # Begin the generational process
-    for i in range(1, niter + 1):
+    for gen_itr in range(1, niter + 1):
         start_time = timer()
         # Select the next batch individuals
         batch = toolbox.select(container, batch_size)
@@ -130,12 +133,13 @@ def qdRLlibEval(rllib_trainer, rllib_eval: bool, quality_diversity: bool, init_b
 
         # Append the current generation statistics to the logbook
         record = stats.compile(container) if stats else {}
-        logbook.record(iteration=i, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time , **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
+        logbook.record(iteration=net_itr, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time , **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
         if verbose:
             print(logbook.stream)
+        net_itr += 1
         # Call callback function
         if iteration_callback != None:
-            iteration_callback(i, batch, container, logbook)
+            iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=batch, container=container, logbook=logbook)
 
     return batch, logbook
 

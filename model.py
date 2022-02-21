@@ -63,27 +63,32 @@ class FloodFill(nn.Module):
             self.conv_1.weight[age_chan, age_chan, 1, 1] = 1.
                 
 
-    def forward(self, input):
-        n_batches = input.shape[0]
-        with th.no_grad():
-            agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
-            x = self.conv_0(input)
-            batch_dones = self.get_dones(x, agent_pos)
-            i = 0
-            while not batch_dones.all() and i < 129:
-                x = self.flood(input, x)
-                if RENDER:
-                    im = x[0, self.flood_chan].cpu().numpy()
-                    im = im / im.max()
-                    im = np.expand_dims(np.vstack(im), axis=0)
-                    im = im.transpose(1, 2, 0)
-                    # im = cv2.resize(im, (600, 600), interpolation=None)
-                    cv2.imshow("FloodFill", im)
-                    cv2.waitKey(1)
+    def hid_forward(self, input):
+        self.n_batches = n_batches = input.shape[0]
+        agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
+        x = self.conv_0(input)
+        self.batch_dones = batch_dones = self.get_dones(x, agent_pos)
+        self.i = i = 0
+        while not batch_dones.all() and i < 129:
+            x = self.flood(input, x)
+            if RENDER:
+                im = x[0, self.flood_chan].cpu().numpy()
+                im = im / im.max()
+                im = np.expand_dims(np.vstack(im), axis=0)
+                im = im.transpose(1, 2, 0)
+                # im = cv2.resize(im, (600, 600), interpolation=None)
+                cv2.imshow("FloodFill", im)
+                cv2.waitKey(1)
 
-                batch_dones = self.get_dones(x, agent_pos)
-                i += 1
+            self.batch_dones = batch_dones = self.get_dones(x, agent_pos)
+            self.i = i = i + 1
             diag_neighb = x[:, self.age_chan, agent_pos[0] - 1: agent_pos[0] + 2, agent_pos[1] - 1: agent_pos[1] + 2]
+            
+
+    def forward(self, input):
+        n_batches = self.n_batches
+        with th.no_grad():
+            diag_neighb = self.hid_forward(input)
             neighb = th.zeros_like(diag_neighb)
             for adj in adjs:
                 neighb[:, adj[0], adj[1]] = diag_neighb[:, adj[0], adj[1]]
@@ -96,6 +101,12 @@ class FloodFill(nn.Module):
 
             act = [adjs_to_acts[tuple(pos)] for pos in next_pos]
         return act
+
+    def get_solution_length(self, input):
+        neighb = self.hid_forward(input)
+        if not self.batch_dones.all():
+            return 0
+        return self.i
 
     def get_dones(self, x, agent_pos):
         batch_dones = x[:, self.age_chan, agent_pos[0], agent_pos[1]] > 0.1

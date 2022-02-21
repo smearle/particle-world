@@ -18,7 +18,7 @@ from deap import tools
 from qdpy import containers
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 from qdpy.base import ParallelismManager
-from qdpy.phenotype import Individual
+from qdpy.phenotype import Features, Fitness, Individual
 from qdpy.plots import plotGridSubplots
 from ribs.archives import GridArchive
 from ribs.emitters import ImprovementEmitter, OptimizingEmitter
@@ -55,17 +55,19 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 fitness_domain = [(-np.inf, np.inf)]
 
 
-def phase_switch_callback(gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, save_dir):
+def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, save_dir):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     max_possible_generator_fitness = n_sim_steps - 1 / n_pop
     optimal_generators = logbook.select("avg")[-1] == max_possible_generator_fitness
     if args.oracle_policy:
         return
-    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
+    if gen_itr > 0 and container.free == 0 and \
+        (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
         qdpy_save_archive(container, gen_itr, logbook, save_dir)
-        train_players(play_phase_len=play_phase_len, trainer=player_trainer,
+        train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:n_rllib_envs],
-                      idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, save_dir=save_dir, n_rllib_envs=n_rllib_envs)
+                      idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
+                      save_dir=save_dir, n_rllib_envs=n_rllib_envs, logbook=logbook)
         # else:
         #     if itr % play_phase_len:
         # pass
@@ -99,19 +101,55 @@ def phase_switch_callback(gen_itr, player_trainer, container, toolbox, logbook, 
 #         creator.Individual.__init__(self)
 
 
-# class OnehotIndividual(Individual, width, n_chan):
-#     def __init__(self, *args, **kwargs):
-#         self.dist = np.random.random((n_chan, width, width))
-#         TT()
-#
-#     def __eq__(self, other):
-#         return np.all(self.discrete == other.discrete)
+class DiscreteIndividual(Individual):
+    def __init__(self, width, n_chan, unique_chans=[2, 3]):
+        Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
+        self.width = width
+        self.unique_chans = unique_chans
+        self.n_chan = n_chan
+        self.discrete = np.random.randint(0, n_chan, size=(width, width))
+        self.validate()
+
+    def validate(self):
+        # ensure exactly only one of each of these integers
+        for i, u in enumerate(self.unique_chans):
+            idxs = np.argwhere(self.discrete == u)
+            if len(idxs) == 0:
+                xys = range(self.width * self.width)
+                occ_xys = [np.where(self.discrete.flatten() == self.unique_chans[ii]) for ii in range(i)]
+                if occ_xys:
+                    xys = set(xys)
+                    occ_xys = np.hstack(occ_xys)
+                    [xys.remove(xy[0]) for xy in occ_xys]
+                    xys = list(xys)
+                xy = np.random.choice(xys)
+                x, y = xy // self.width, xy % self.width
+                self.discrete[x, y] = u
+                continue
+            np.random.shuffle(idxs)
+            idxs = idxs[:-1]
+            new_idxs = set(range(self.n_chan))
+            [new_idxs.remove(uc) for uc in self.unique_chans]
+            new_idxs = list(new_idxs)
+            self.discrete[idxs[:, 0], idxs[:, 1]] = np.random.choice(new_idxs, len(idxs))
+
+    def mutate(self):
+        n_mutate = np.random.randint(1, 5)
+        xys = np.random.randint(0, self.width * self.width, n_mutate)
+        xys = [(xy // self.width, xy % self.width) for xy in xys]
+        for xy in xys:
+            self.discrete[xy[0], xy[1]] = np.random.randint(self.n_chan)
+        self.validate()
+        return self, 
+
+    def __eq__(self, other):
+        return np.all(self.discrete == other.discrete)
 
 
 def run_qdpy():
-    def iteration_callback(toolbox, rllib_eval, staleness_counter, save_dir, gen_itr, batch, container, logbook, 
-                           oracle_policy=False):
-        """qdpy callback function, with custom args first, given with `partial` before the qdpy algo is instantiated."""
+    def iteration_callback(iteration, net_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, container, 
+                           logbook, oracle_policy=False):
+        gen_itr = iteration
         idx_counter = ray.get_actor('idx_counter')
         if gen_itr % qdpy_save_interval == 0:
             pass
@@ -131,7 +169,7 @@ def run_qdpy():
         stale = staleness_counter[0] >= time_until_stale
         if stale:
             staleness_counter[0] = 0
-        phase_switch_callback(gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
+        phase_switch_callback(net_itr, gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
                               logbook=logbook, idx_counter=idx_counter, stale_generators=stale, save_dir=save_dir)
 
     qdpy_save_interval = 100
@@ -245,7 +283,7 @@ def run_qdpy():
     else:
         mutation_pb = 0.1
     eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
-    ind_domain = (0., 1.)  # The domain (min/max values) of the individual genomes
+    ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
     # fitness_domain = [(0., 1.)]                # The domain (min/max values) of the fitness
     verbose = True
     show_warnings = False  # Display warning and error messages. Set to True if you want to check if some individuals were out-of-bounds
@@ -258,15 +296,16 @@ def run_qdpy():
 
     # Create Toolbox
     toolbox = base.Toolbox()
-    toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
-    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
-    # toolbox.register("individual", OnehotIndividual, width=env.width, n_chan=env.n_chan)
+    # toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
+    # toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
+    toolbox.register("individual", DiscreteIndividual, width=env.width-2, n_chan=env.n_chan)
     # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
     toolbox.register("evaluate", qdpy_eval, env, generator)
-    toolbox.register("mutate", tools.mutPolynomialBounded, low=ind_domain[0], up=ind_domain[1], eta=eta,
-                     indpb=mutation_pb)
+    # toolbox.register("mutate", tools.mutPolynomialBounded, low=ind_domain[0], up=ind_domain[1], eta=eta,
+                    #  indpb=mutation_pb)
+    toolbox.register("mutate", lambda individual: individual.mutate())
     toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
     # toolbox.register("select", tools.selBest) # But you can also use all DEAP selection functions instead to create your own QD-algorithm
 
@@ -295,8 +334,8 @@ def run_qdpy():
         # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
         # the archive. (Crucially, it is mutable.)
         staleness_counter = [0]
-        callback = partial(iteration_callback, toolbox, rllib_eval, staleness_counter,
-                           os.path.join('runs', args.experimentName))
+        callback = partial(iteration_callback, toolbox=toolbox, rllib_eval=rllib_eval, 
+                           staleness_counter=staleness_counter, save_dir=os.path.join('runs', args.experimentName))
         # Create a QD algorithm
         algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
                                batch_size=batch_size, niter=nb_iterations,
@@ -461,10 +500,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     gen_phase_len = -1
     if args.oracle_policy:
-        play_phase_len = 0
+        play_phase_len = -1
         n_pop = 1
     else:
-        play_phase_len = 1
+        play_phase_len = -1
         n_pop = 5
     n_policies = args.n_policies
     generator_cls = globals()[args.generator_class]
@@ -552,6 +591,8 @@ if __name__ == '__main__':
             # TODO: train generators?
             pass
     else:
-        # TODO: evolve players?
-        train_players(1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
-                      n_rllib_envs=n_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps)
+        train_players(0, 1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
+                      n_rllib_envs=n_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps, 
+                      # TODO: initialize logbook even if fixed worlds
+                      logbook=None)
+    # TODO: evolve players?
