@@ -15,7 +15,7 @@ from utils import update_individuals
 
 
 def qdRLlibEval(init_batch, toolbox, container, batch_size, niter, 
-                rllib_trainer, rllib_eval: bool, quality_diversity: bool, oracle_policy: bool, net_itr: int, gen_itr: int, 
+                rllib_trainer, rllib_eval: bool, quality_diversity: bool, oracle_policy: bool, net_itr: int, gen_itr: int, play_itr: int,
                 cxpb: float=0.0, mutpb:float=1.0, stats=None, logbook=None,
                 halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None):
     """Simple QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
@@ -96,14 +96,20 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         print(logbook.stream)
     net_itr += 1
     # Call callback function
+    old_net_itr = net_itr
     net_itr = [net_itr]
+    play_itr = [play_itr]
     if iteration_callback != None:
-        iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=init_batch, container=container, logbook=logbook,
-        stats=stats)
-    net_itr = net_itr[0]
+        iteration_callback(net_itr=net_itr, iteration=gen_itr, play_itr=play_itr, batch=init_batch, container=container, 
+                           logbook=logbook, stats=stats)
+    new_net_itr = net_itr[0]
+    play_itr = play_itr[0] + (new_net_itr - old_net_itr)
+    net_itr = new_net_itr
+
+    done = False
 
     # Begin the generational process
-    for gen_itr in range(1, niter + 1):
+    while not done:
         start_time = timer()
         # Select the next batch individuals
         batch = toolbox.select(container, batch_size)
@@ -143,11 +149,19 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
             print(logbook.stream)
         net_itr += 1
         # Call callback function
+        old_net_itr = net_itr
         net_itr = [net_itr]
+        play_itr = [play_itr]
         if iteration_callback != None:
-            iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=batch, container=container, logbook=logbook,
-            stats=stats)
-        net_itr = net_itr[0]
+            iteration_callback(net_itr=net_itr, iteration=gen_itr, play_itr=play_itr, batch=batch, container=container, 
+            logbook=logbook, stats=stats)
+        # TODO: properly increment play_itr
+        new_net_itr = net_itr[0]
+        play_itr = play_itr[0] + (new_net_itr - old_net_itr)
+        net_itr = new_net_itr
+        print('play_itr', play_itr)
+        gen_itr += 1
+        done = play_itr >= niter
 
     return batch, logbook
 

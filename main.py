@@ -52,7 +52,7 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 fitness_domain = [(-np.inf, np.inf)]
 
 
-def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, 
+def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, 
                           save_dir, quality_diversity, stats):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     max_possible_generator_fitness = n_sim_steps - 1 / n_pop
@@ -158,11 +158,13 @@ class DiscreteIndividual(Individual):
 
 
 def run_qdpy():
-    def iteration_callback(iteration, net_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, container, 
-                           logbook, stats, oracle_policy=False, quality_diversity=False):
+    def iteration_callback(iteration, net_itr, play_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, 
+                           container, logbook, stats, oracle_policy=False, quality_diversity=False):
         net_itr_lst = net_itr
-        assert len(net_itr_lst) == 1
+        play_itr_lst = play_itr
+        assert len(net_itr_lst) == 1 == len(play_itr_lst)
         net_itr = net_itr_lst[0]
+        play_itr = play_itr_lst[0]
 
         gen_itr = iteration
         idx_counter = ray.get_actor('idx_counter')
@@ -177,10 +179,12 @@ def run_qdpy():
         stale = staleness_counter[0] >= time_until_stale
         if stale:
             staleness_counter[0] = 0
-        net_itr = phase_switch_callback(net_itr, gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
-                              logbook=logbook, idx_counter=idx_counter, stale_generators=stale, save_dir=save_dir,
-                              quality_diversity=quality_diversity, stats=stats)
+        net_itr = phase_switch_callback(net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr, 
+                              player_trainer=particle_trainer, container=container, 
+                              toolbox=toolbox, logbook=logbook, idx_counter=idx_counter, stale_generators=stale, 
+                              save_dir=save_dir, quality_diversity=quality_diversity, stats=stats)
         net_itr_lst[0] = net_itr
+        play_itr_lst[0] = play_itr
         return net_itr
 
     qdpy_save_interval = 100
@@ -198,6 +202,7 @@ def run_qdpy():
         # env.set_policies(policies)
         grid = data['container']
         gen_itr = data['gen_itr']
+        play_itr = data['play_itr']
         net_itr = data['net_itr']
         logbook = data['logbook']
 
@@ -274,8 +279,9 @@ def run_qdpy():
                                             evaluate_only=True)
             sys.exit()
     else:
-        net_itr = 0
         gen_itr = 0
+        play_itr = 0
+        net_itr = 0
     # Algorithm parameters
     dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
     assert (dimension >= 2)
@@ -284,7 +290,7 @@ def run_qdpy():
 
     init_batch_size = num_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
     batch_size = num_rllib_envs  # The number of evaluations in each subsequent batch
-    nb_iterations = total_itrs - gen_itr  # The number of iterations (i.e. times where a new batch is evaluated)
+    nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome
     if generator_cls == TileFlipGenerator:
@@ -343,7 +349,7 @@ def run_qdpy():
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
         qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, rllib_eval=rllib_eval, net_itr=net_itr,
                           quality_diversity=args.quality_diversity, oracle_policy=args.oracle_policy, gen_itr=gen_itr,
-                          logbook=logbook)
+                          logbook=logbook, play_itr=play_itr)
         # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
         # the archive. (Crucially, it is mutable.)
         staleness_counter = [0]
@@ -471,7 +477,7 @@ if __name__ == '__main__':
     if not os.path.isdir(save_dir):
         os.mkdir(save_dir)
     load = args.load
-    total_itrs = 50000
+    total_play_itrs = 50000
     multi_proc = args.parallelismType != 'None'
     n_emitters = 5
     batch_size = 30

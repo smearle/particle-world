@@ -276,6 +276,7 @@ def load_config(args, config_file):
     config_file = os.path.join('auto_configs/', f'{config_file}.json')
     with open(config_file, 'r') as f:
         new_args = json.load(f)
+    print(f'Loaded config:\n{new_args}')
     for k, v in new_args.items():
         setattr(args, k, v)
     return args
