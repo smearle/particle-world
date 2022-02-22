@@ -22,13 +22,13 @@ from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv, eval_mazes, eval_mazes_probdists
+from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv, eval_mazes
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
-from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter, toggle_exploration
+from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
 from swarm import NeuralSwarm, MazeSwarm
-from utils import infer, infer_elites, qdpy_eval, simulate, save, discrete_to_onehot, update_individuals
-from visualize import visualize_pyribs, plot_fitness_qdpy
+from utils import get_experiment_name, qdpy_eval, update_individuals, load_config
+from visualize import plot_fitness_qdpy
 
 seed = None
 ndim = 2
@@ -62,7 +62,7 @@ def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, 
     if gen_itr > 0 and container.free == 0 and \
         (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
         qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
-        train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
+        net_itr = train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:num_rllib_envs],
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
                       save_dir=save_dir, n_rllib_envs=num_rllib_envs, logbook=logbook, 
@@ -74,11 +74,12 @@ def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, 
         invalid_ind = [ind for ind in container]
         container.clear_all()
 
-        # After player training,
+        # After player training, the reckoning: re-evaluate all worlds with new policies
+        net_itr -= 1
         if rllib_eval:
             rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
                 net_itr=net_itr, trainer=player_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, 
-                idx_counter=idx_counter, quality_diversity=quality_diversity, start_time=start_time, logbook=logbook,
+                idx_counter=idx_counter, quality_diversity=quality_diversity, start_time=start_time,
                 calc_world_stats=False)
 
         else:
@@ -100,6 +101,8 @@ def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, 
         })
         logbook.record(**logbook_stats)
         print(logbook.stream)
+        net_itr += 1
+    return net_itr
 
 
 # TODO:
@@ -142,7 +145,7 @@ class DiscreteIndividual(Individual):
             self.discrete[idxs[:, 0], idxs[:, 1]] = np.random.choice(new_idxs, len(idxs))
 
     def mutate(self):
-        n_mutate = np.random.randint(1, 5)
+        n_mutate = np.random.randint(1, 10)
         xys = np.random.randint(0, self.width * self.width, n_mutate)
         xys = [(xy // self.width, xy % self.width) for xy in xys]
         for xy in xys:
@@ -157,6 +160,10 @@ class DiscreteIndividual(Individual):
 def run_qdpy():
     def iteration_callback(iteration, net_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, container, 
                            logbook, stats, oracle_policy=False, quality_diversity=False):
+        net_itr_lst = net_itr
+        assert len(net_itr_lst) == 1
+        net_itr = net_itr_lst[0]
+
         gen_itr = iteration
         idx_counter = ray.get_actor('idx_counter')
         if net_itr % qdpy_save_interval == 0:
@@ -170,9 +177,11 @@ def run_qdpy():
         stale = staleness_counter[0] >= time_until_stale
         if stale:
             staleness_counter[0] = 0
-        phase_switch_callback(net_itr, gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
+        net_itr = phase_switch_callback(net_itr, gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
                               logbook=logbook, idx_counter=idx_counter, stale_generators=stale, save_dir=save_dir,
                               quality_diversity=quality_diversity, stats=stats)
+        net_itr_lst[0] = net_itr
+        return net_itr
 
     qdpy_save_interval = 100
     max_items_per_bin = 1 if args.max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
@@ -181,7 +190,7 @@ def run_qdpy():
     if load:
         fname = 'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
-        with open(f"runs/{args.experimentName}/{fname}.p", "rb") as f:
+        with open(os.path.join(save_dir, f"{fname}.p"), "rb") as f:
             data = pickle.load(f)
         # with open(f'runs/{args.experimentName}/learn.pickle', 'rb') as f:
         #     supp_data = pickle.load(f)
@@ -246,8 +255,8 @@ def run_qdpy():
             if args.evaluate:
                 worlds = eval_mazes
             for i, elite in enumerate(worlds):
-                ret = rllib_evaluate_worlds(particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
-                                            evaluate_only=True)
+                ret = rllib_evaluate_worlds(trainer=particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
+                                            evaluate_only=True, calc_world_stats=False)
             sys.exit()
 
         # Evaluate
@@ -261,7 +270,7 @@ def run_qdpy():
             else:
                 # TODO: collect per-world stats. I think using trainer.evaluate(), as above, will work.
                 worlds = {i: z for i, z in enumerate(eval_mazes)}
-                ret = rllib_evaluate_worlds(particle_trainer, worlds=worlds, idx_counter=idx_counter,
+                ret = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
                                             evaluate_only=True)
             sys.exit()
     else:
@@ -339,14 +348,14 @@ def run_qdpy():
         # the archive. (Crucially, it is mutable.)
         staleness_counter = [0]
         callback = partial(iteration_callback, toolbox=toolbox, rllib_eval=rllib_eval, 
-                           staleness_counter=staleness_counter, save_dir=os.path.join('runs', args.experimentName),
+                           staleness_counter=staleness_counter, save_dir=save_dir,
                            quality_diversity=args.quality_diversity)
         # Create a QD algorithm
         algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
                                batch_size=batch_size, niter=nb_iterations,
                                verbose=verbose, show_warnings=show_warnings,
                                results_infos=results_infos, log_base_path=log_base_path, save_period=None,
-                               iteration_filename=f'{args.experimentName}' + '/latest-{}.p',
+                               iteration_filename=f'{experiment_name}' + '/latest-{}.p',
                                iteration_callback_fn=callback,
                                ea_fn=qd_algo,
                                )
@@ -384,7 +393,7 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
     # parser.add_argument('-li', '--loadIteration', default=-1, type=int)
     parser.add_argument('-a', '--algo', default='me')
-    parser.add_argument('-exp', '--experimentName', default='test')
+    parser.add_argument('-exp', '--exp_name', default='test')
     parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
                                                                            "skipping the world-generation phase.")
     parser.add_argument('-g', '--generator_class', type=str, default="TileFlipGenerator",
@@ -408,13 +417,23 @@ if __name__ == '__main__':
                                                                       "thereby focus on validating generator-evolution.")
     parser.add_argument('-fo', '--fully_observable', action='store_true',
                         help="Whether to use a fully observable environment.")
+    parser.add_argument('-gp', '--gen_phase_len', type=int, default=-1,
+                        help="How many generations to evolve worlds (generator). If -1, run until convergence.")
+    parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
+                        help="How many iterations to train the player. If -1, run until convergence.")
+    parser.add_argument('-lc', '--load_config', type=int, default=None, 
+                        help="Load a dictionary of (automatically-generated) arguments. "
+                        "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
     args = parser.parse_args()
-    gen_phase_len = 2
+    if args.load_config is not None:
+        args = load_config(args, args.load_config)
     if args.oracle_policy:
-        play_phase_len = -1
+        gen_phase_len = -1
+        play_phase_len = 0
         n_pop = 1
     else:
-        play_phase_len = 1
+        gen_phase_len = args.gen_phase_len
+        play_phase_len = args.play_phase_len
         n_pop = 5
     n_policies = args.n_policies
     generator_cls = globals()[args.generator_class]
@@ -446,8 +465,9 @@ if __name__ == '__main__':
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
     initial_weights = generator.get_init_weights()
-
-    save_dir = os.path.join(args.outputDir, args.experimentName)
+    
+    experiment_name = get_experiment_name(args)
+    save_dir = os.path.join(args.outputDir, experiment_name)
     if not os.path.isdir(save_dir):
         os.mkdir(save_dir)
     load = args.load
@@ -491,7 +511,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if args.enjoy and args.fixed_worlds:
                 particle_trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(particle_trainer, {0: generator.landscape})
+                rllib_evaluate_worlds(trainer=particle_trainer, worlds={0: generator.landscape}, calc_world_stats=False)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
                 # particle_trainer.evaluate()

@@ -20,8 +20,8 @@ from model import OraclePolicy
 from utils import get_solution
 
 
-def rllib_evaluate_worlds(net_itr, trainer, worlds, logbook, start_time, idx_counter=None, evaluate_only=False, 
-    quality_diversity=False, n_trials=1, oracle_policy=False, calc_world_stats=True):
+def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
+    quality_diversity=False, oracle_policy=False, calc_world_stats=False, calc_agent_stats=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -37,6 +37,8 @@ def rllib_evaluate_worlds(net_itr, trainer, worlds, logbook, start_time, idx_cou
     population fitnesses.
     :return:
     """
+    if start_time is None:
+        start_time = timer()
     idxs = np.random.permutation(list(worlds.keys()))
     if evaluate_only:
         workers = trainer.evaluation_workers
@@ -61,9 +63,12 @@ def rllib_evaluate_worlds(net_itr, trainer, worlds, logbook, start_time, idx_cou
             envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env))
             envs = [e for we in envs for e in we]
             n_envs = len(envs)
-            hashes = [hash(e) for e in envs]
-            # hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
-            # hashes = [h for wh in hashes for h in wh]
+            # hashes = [hash(e) for e in envs]
+
+            # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
+            hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+            hashes = [h for wh in hashes for h in wh]
+
             # n_envs = sum([e for we in hashes for e in we])
             sub_idxs = idxs[world_id:min(world_id + n_envs, len(idxs))]
             idx_counter.set_idxs.remote(sub_idxs)
@@ -114,11 +119,9 @@ def rllib_evaluate_worlds(net_itr, trainer, worlds, logbook, start_time, idx_cou
         if calc_world_stats:
             world_stats = get_env_world_stats(trainer)
             logbook_stats.update({f'{k}Path': world_stats[f'{k}_path_length'] for k in stat_keys})
-        logbook_stats.update({
-            f'{k}Rew': rl_stats[f'episode_reward_{k}'] for k in stat_keys})
-        logbook_stats.update({
-            'elapsed': timer() - start_time,
-        })
+        if calc_agent_stats and not evaluate_only:
+            logbook_stats.update({
+                f'{k}Rew': rl_stats[f'episode_reward_{k}'] for k in stat_keys})
         if 'evaluation' in rl_stats:
             logbook_stats.update({
                 f'{k}EvalRew': rl_stats['evaluation'][f'episode_reward_{k}'] for k in stat_keys})
@@ -136,6 +139,10 @@ def rllib_evaluate_worlds(net_itr, trainer, worlds, logbook, start_time, idx_cou
             world_id = len(qd_stats)
         else:
             world_id += len(new_fitnesses)
+
+        logbook_stats.update({
+            'elapsed': timer() - start_time,
+        })
 
         # [fitnesses[k].append(v) for k, v in trial_fitnesses.items()]
     # fitnesses = {k: ([np.mean([vi[0][fi] for vi in v]) for fi in range(len(v[0][0]))],
@@ -167,7 +174,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         calc_world_stats = (i == 0)
 
         rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
-            net_itr=net_itr, trainer=trainer, worlds=worlds, idx_counter=idx_counter, logbook=logbook, 
+            net_itr=net_itr, trainer=trainer, worlds=worlds, idx_counter=idx_counter, calc_agent_stats=True,
             start_time=start_time, evaluate_only=False, quality_diversity=quality_diversity, 
             calc_world_stats=calc_world_stats)
         recent_rewards[:-1] = recent_rewards[1:]
@@ -180,8 +187,6 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         # End training if within a certain margin of optimal performance
         done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
 
-        if play_phase_len != -1:
-            done_training = done_training or i >= play_phase_len
         # if play_phase_len == -1:
             # if i >= staleness_window:
                 # running_std = np.std(recent_rewards)
@@ -192,9 +197,12 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         logbook.record(**logbook_stats)
         print(logbook.stream)
         i += 1
+        if play_phase_len != -1:
+            done_training = done_training or i >= play_phase_len
         net_itr += 1
     # toggle_exploration(trainer, explore=False, n_policies=n_policies)
     trainer.workers.local_worker().set_policies_to_train([])
+    return net_itr
 
 
 @ray.remote
@@ -295,7 +303,9 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 "use_lstm": True,
                 "lstm_cell_size": 32,
                 # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
-                "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
+                "conv_filters": [
+                    [16, [5, 5], 1], 
+                    [4, [3, 3], 1]],
                 # "post_fcnet_hiddens": [32, 32],
             })
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
@@ -447,7 +457,8 @@ def toggle_exploration(trainer, explore: bool, n_policies: int):
 def get_env_world_stats(trainer):
     flood_model = trainer.get_policy('oracle').model
     path_lengths = trainer.workers.foreach_worker(
-        lambda w: w.foreach_env(lambda e: flood_model.get_solution_length(th.Tensor(e.world[None,...]))))
+        # lambda w: w.foreach_env(lambda e: flood_model.get_solution_length(th.Tensor(e.world[None,...]))))
+        lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
     path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
     mean_path_length = np.mean(path_lengths)
     min_path_length = np.min(path_lengths)

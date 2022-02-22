@@ -1,3 +1,4 @@
+import json
 import os
 from pdb import set_trace as TT
 import pickle
@@ -241,14 +242,6 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
             back_paths.update({adj: curr})
     return []
 
-
-def update_individuals(individuals, qd_stats):
-    qd_stats = [qd_stats[k] for k in range(len(qd_stats))]
-    for ind, s in zip(individuals, qd_stats):
-        ind.fitness.values = s[0]
-        ind.features = s[1]
-
-
 # start_time = timer()
 # print(get_solution(np.array([
 #     [1, 1, 1, 0, 1],
@@ -258,3 +251,31 @@ def update_individuals(individuals, qd_stats):
 #     [1, 1, 1, 0, 1],
 # ])))
 # print(timer() - start_time)
+
+
+def update_individuals(individuals, qd_stats):
+    qd_stats = [qd_stats[k] for k in range(len(qd_stats))]
+    for ind, s in zip(individuals, qd_stats):
+        ind.fitness.values = s[0]
+        ind.features = s[1]
+
+
+def get_experiment_name(args):
+    if args.quality_diversity:
+        exp_name = 'qd'
+    else:
+        exp_name = f'{args.objective_function}'
+    exp_name += f'_{args.n_policies}-pol_{args.gen_phase_len}-gen_{args.play_phase_len}-play'
+    if args.fully_observable:
+        exp_name += '_fullObs'
+    exp_name += f'_{args.exp_name}'
+    return exp_name
+
+
+def load_config(args, config_file):
+    config_file = os.path.join('auto_configs/', f'{config_file}.json')
+    with open(config_file, 'r') as f:
+        new_args = json.load(f)
+    for k, v in new_args.items():
+        setattr(args, k, v)
+    return args

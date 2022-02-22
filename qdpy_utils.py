@@ -63,8 +63,8 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     if rllib_eval:
         rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
             trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, idx_counter=idx_counter,
-            quality_diversity=quality_diversity, n_trials=1, oracle_policy=oracle_policy, net_itr=net_itr,
-            logbook=logbook, start_time=start_time, evaluate_only=False)
+            quality_diversity=quality_diversity, oracle_policy=oracle_policy, net_itr=net_itr,
+            start_time=start_time, evaluate_only=False)
         # assert len(rllib_stats) == 1
 
     else:
@@ -94,11 +94,13 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     logbook.record(**logbook_stats)
     if verbose:
         print(logbook.stream)
+    net_itr += 1
     # Call callback function
+    net_itr = [net_itr]
     if iteration_callback != None:
         iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=init_batch, container=container, logbook=logbook,
         stats=stats)
-    net_itr += 1
+    net_itr = net_itr[0]
 
     # Begin the generational process
     for gen_itr in range(1, niter + 1):
@@ -113,7 +115,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
         if rllib_eval:
-            rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr, logbook=logbook, evaluate_only=False,
+            rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr, evaluate_only=False,
                 trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, idx_counter=idx_counter,
                 oracle_policy=oracle_policy, start_time=start_time, quality_diversity=quality_diversity)
 
@@ -141,9 +143,11 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
             print(logbook.stream)
         net_itr += 1
         # Call callback function
+        net_itr = [net_itr]
         if iteration_callback != None:
             iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=batch, container=container, logbook=logbook,
             stats=stats)
+        net_itr = net_itr[0]
 
     return batch, logbook
 
