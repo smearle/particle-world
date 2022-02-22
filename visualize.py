@@ -24,15 +24,15 @@ def plot_fitness_qdpy(save_dir, logbook, quality_diversity=True):
     fit_maxs = remove_nones(logbook.select("max"))
 
     fig, ax1 = plt.subplots()
-    line0 = ax1.plot(gen, fit_mins, "b--")
     #  line1_err = ax1.errorbar(gen, fit_avgs, fit_stds[:,0], color='green', mfc='green', mec='green', linestyle="-",
     #                           label="Average Fitness",
     #                           ms=20, mew=4,
     #                           alpha=min(0.9, 100 / len(gen)),
     #                           # alpha=0.9,
     #                           )
+    # line0 = ax1.plot(gen, fit_mins, "b--")
     line1 = ax1.plot(gen, fit_avgs, 'b-', label='Mean Fitness')
-    line2 = ax1.plot(gen, fit_maxs, "b--")
+    # line2 = ax1.plot(gen, fit_maxs, "b--")
     ax1.set_xlabel("Generation")
     ax1.set_ylabel("Fitness")
     # FIXME: figure out from logbook if we've got all-1 bin sizes so we don't plot size
@@ -64,23 +64,26 @@ def plot_fitness_qdpy(save_dir, logbook, quality_diversity=True):
     line0 = ax1.plot(gen, path_means, "b-", label="Mean Path Length")
     ax1.set_xlabel("Generation")
     ax1.set_ylabel("Path Length")
-    mean_rews = remove_nones(logbook.select("meanRew"))
-    min_rews = remove_nones(logbook.select("minRew"))
-    max_rews = remove_nones(logbook.select("maxRew"))
-    ax2 = ax1.twinx()
-    line1 = ax2.plot(gen, min_rews, "r--")
-    line2 = ax2.plot(gen, mean_rews, "r-", label="Mean Reward")
-    line3 = ax2.plot(gen, max_rews, "r--")
-    start, end = ax2.get_ylim()
-    ax2.set_ylabel("Agent Reward", color="r")
-    ax2.yaxis.set_ticks(np.arange(start, end, (end - start) / 10))
-    for tl in ax2.get_yticklabels():
-        tl.set_color("r")
-    lns = line0 + line2
+    lns = line0
     labs = [l.get_label() for l in lns]
     ax1.legend(lns, labs, loc="best")
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'path_length.png'))
+
+    fig, ax1 = plt.subplots()
+    mean_rews = remove_nones(logbook.select("meanRew"))
+    min_rews = remove_nones(logbook.select("minRew"))
+    max_rews = remove_nones(logbook.select("maxRew"))
+    # line1 = ax2.plot(gen, min_rews, "r--")
+    line2 = ax1.plot(gen, mean_rews, "r-", label="Mean Reward")
+    # line3 = ax2.plot(gen, max_rews, "r--")
+    ax1.set_ylabel("Agent Reward")
+    # ax1.yaxis.set_ticks(np.arange(start, end, (end - start) / 10))
+    lns = line2
+    labs = [l.get_label() for l in lns]
+    ax1.legend(lns, labs, loc="best")
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'agent_reward.png'))
 
 def remove_nones(l):
     iv = 0

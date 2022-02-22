@@ -57,11 +57,11 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
 
         # When running parallel envs, if each env is to evaluate a separate world, map envs to worlds
         if idx_counter:
-            n_envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: 1))
-            n_envs = sum([e for we in n_envs for e in we])
+            # n_envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: 1))
+            hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+            n_envs = sum([e for we in hashes for e in we])
             sub_idxs = idxs[world_id:min(world_id + n_envs, len(idxs))]
             idx_counter.set_idxs.remote(sub_idxs)
-            hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
             hashes = [h for wh in hashes for h in wh]
             idx_counter.set_hashes.remote(hashes)
 
@@ -142,8 +142,11 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter=idx_counter)
         logbook_stats = {'iteration': net_itr}
         if i == 0:
-            mean_path_length = get_mean_env_path_length(trainer, n_policies)
-            logbook_stats['meanPath'] = mean_path_length
+            mean_path_length, min_path_length, max_path_length, std_path_length = \
+                get_env_path_length_stats(trainer, n_policies)
+            logbook_stats.update({
+                'meanPath': mean_path_length,
+            })
             max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
             # print(f'Mean path length: {mean_path_length}\nMax mean reward: {max_mean_reward}')
         assert len(all_stats) == 1
@@ -212,8 +215,9 @@ class IdxCounter:
         self.count = 0
         self.idxs = idxs
 
-    def set_hashes(self, hashes):
-        assert len(hashes) >= len(self.idxs)
+    def set_hashes(self, hashes, allow_one_to_many: bool=False):
+        if not allow_one_to_many:
+            assert len(hashes) >= len(self.idxs)
         idxs = self.idxs
 
         # If we have more hashes than indices, map many-to-one
@@ -226,15 +230,16 @@ class IdxCounter:
         return self.hashes_to_idxs
 
 
-def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
-                          oracle_policy, fully_observable):
+def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
+                          oracle_policy, fully_observable, idx_counter):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
     #TODO: abstract this to support training generators as well.
     :param env: a dummy environment, created in the main script, from which we will draw environment variables. Will not
     be used in actual training.
-    :param num_rllib_workers: how many RLlib workers to use for training (1 core per worker)
+    :param num_rllib_remote_workers: how many RLlib remote workers to use for training (1 core per worker). Just a local
+    worker if 0.
     :param n_rllib_envs: how many environments to use for training. This determines how many worlds/generators can be
     evaluated with each call to train. When evolving worlds, the determines the batch size.
     :param evaluate: if True, then we are evaluating only (no training), and will launch n_rllib_workers-many
@@ -275,8 +280,15 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
                 "conv_filters": [[16, [5, 5], 1], [4, [3, 3], 1]],
                 # "post_fcnet_hiddens": [32, 32],
             })
-    workers = 1 if num_rllib_workers == 0 or enjoy else num_rllib_workers
-    num_envs_per_worker = math.ceil(n_rllib_envs / workers) if not enjoy else 1
+    num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
+    num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
+    num_eval_envs = num_envs_per_worker
+    if enjoy:
+        evaluation_num_episodes = num_eval_envs * 2
+    elif evaluate:
+        evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * num_eval_envs * 5
+    else:
+        evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * num_eval_envs
 
     trainer_config = {
         "multiagent": {
@@ -310,23 +322,30 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
             "fully_observable": fully_observable,
         },
         "num_gpus": num_gpus,
-        "num_workers": num_rllib_workers if not (enjoy or evaluate) else 0,
+        "num_workers": num_rllib_remote_workers if not (enjoy or evaluate) else 0,
         "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
         "render_env": render if not enjoy else True,
 
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
-        "evaluation_interval": 100 if not enjoy else 10,
+        "evaluation_interval": 50 if not enjoy else 10,
 
-        "evaluation_num_workers": 0 if not (evaluate) else num_rllib_workers,
-        # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number of steps.)
-        "evaluation_num_episodes": len(eval_mazes * num_envs_per_worker) if not (evaluate or enjoy) else len(eval_mazes) + 1,
+        "evaluation_num_workers": 0 if not (evaluate) else num_rllib_remote_workers,
+
+        # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
+        # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
+        # trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number 
+        # of steps.)
+        "evaluation_num_episodes": evaluation_num_episodes,
+            # if not (evaluate or enjoy) else len(eval_mazes) + 1,
+
         "evaluation_config": {
             "env_config": {
                 # "n_pop": 1,
 
                 # If enjoying, then we look at generated levels instead of eval levels. (Because we user trainer.evaluate() when enjoying.)
                 "evaluate": True if not enjoy else evaluate,
+                "num_eval_envs": num_eval_envs,
             },
             "evaluation_parallel_to_training": True,
             "render_env": render,
@@ -338,12 +357,31 @@ def init_particle_trainer(env, num_rllib_workers, n_rllib_envs, evaluate, enjoy,
         # "lr": 0.1,
         # "log_level": "INFO",
         # "record_env": True,
-
         "rollout_fragment_length": env.max_steps,
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
         "train_batch_size": env.max_steps * n_rllib_envs,
+        "sgd_minibatch_size": env.max_steps * n_rllib_envs if (enjoy or evaluate) and render else 128,
     }
     trainer = ppo.PPOTrainer(env=type(env), config=trainer_config)
+
+    # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
+    if not enjoy:
+        # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_idx of each env will be incremented
+        # by len(eval_mazes) each reset.
+        worlds = {i: maze for i, maze in enumerate(eval_mazes)}
+        eval_workers = trainer.evaluation_workers
+        hashes = eval_workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+        n_eval_envs = sum([e for we in hashes for e in we])
+        idxs = list(worlds.keys())
+        idx_counter.set_idxs.remote(idxs)
+        hashes = [h for wh in hashes for h in wh]
+        idx_counter.set_hashes.remote(hashes, allow_one_to_many=True)
+        # FIXME: Sometimes hash-to-idx dict is not set by the above call?
+        assert ray.get(idx_counter.scratch.remote())
+        # Assign envs to worlds
+        eval_workers.foreach_worker(
+            lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter)))
+
     n_policies = len(env.swarms)
     for i in range(n_policies):
         n_params = 0
@@ -388,9 +426,12 @@ def toggle_exploration(trainer, explore: bool, n_policies: int):
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
 
 
-def get_mean_env_path_length(trainer, n_policies: int):
+def get_env_path_length_stats(trainer, n_policies: int):
     path_lengths = trainer.workers.foreach_worker(
         lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
     path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
     mean_path_length = np.mean(path_lengths)
-    return mean_path_length
+    min_path_length = np.min(path_lengths)
+    max_path_length = np.max(path_lengths)
+    std_path_length = np.std(path_lengths)
+    return mean_path_length, min_path_length, max_path_length, std_path_length

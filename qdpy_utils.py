@@ -15,9 +15,9 @@ from rllib_utils import IdxCounter, rllib_evaluate_worlds
 
 def qdRLlibEval(init_batch, toolbox, container, batch_size, niter, 
                 rllib_trainer, rllib_eval: bool, quality_diversity: bool, oracle_policy: bool, net_itr: int, gen_itr: int, 
-                cxpb: float=0.0, mutpb:float=1.0, stats=None, 
+                cxpb: float=0.0, mutpb:float=1.0, stats=None, logbook=None,
                 halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None):
-    """The simplest QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
+    """Simple QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
     :param rllib_eval: #TODO
     :param quality_diversity: If this is False, we are reducing this to a vanilla evolutionary strategy.
@@ -40,10 +40,12 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     """
     # The co-learning loop will always start here, with at least a single round of world-generation
     idx_counter = ray.get_actor("idx_counter")
+    if logbook is None:
+        assert net_itr == gen_itr == 0
+        logbook = deap.tools.Logbook()
     rllib_trainer.workers.local_worker().set_policies_to_train([])
     if start_time == None:
         start_time = timer()
-    logbook = deap.tools.Logbook()
     logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + (stats.fields if stats else []) \
         + ["meanRew", "minRew", "maxRew", "meanPath"] + ["elapsed"]
 
