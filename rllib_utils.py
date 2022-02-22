@@ -20,8 +20,8 @@ from model import OraclePolicy
 from utils import get_solution
 
 
-def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False, quality_diversity=False, n_trials=1, 
-                          oracle_policy=False):
+def rllib_evaluate_worlds(net_itr, trainer, worlds, logbook, start_time, idx_counter=None, evaluate_only=False, 
+    quality_diversity=False, n_trials=1, oracle_policy=False, calc_world_stats=True):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -45,11 +45,11 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     if not isinstance(list(worlds.values())[0], np.ndarray):
         worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
     # fitnesses = {k: [] for k in worlds}
-    all_stats = []
+    rl_stats = []
 
     # Train/evaluate on all worlds n_trials many times each
     # for i in range(n_trials):
-    trial_fitnesses = {}
+    qd_stats = {}
     world_id = 0
 
     # Train/evaluate until we have simulated in all worlds
@@ -58,11 +58,15 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
         # When running parallel envs, if each env is to evaluate a separate world, map envs to worlds
         if idx_counter:
             # n_envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: 1))
-            hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
-            n_envs = sum([e for we in hashes for e in we])
+            envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env))
+            envs = [e for we in envs for e in we]
+            n_envs = len(envs)
+            hashes = [hash(e) for e in envs]
+            # hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+            # hashes = [h for wh in hashes for h in wh]
+            # n_envs = sum([e for we in hashes for e in we])
             sub_idxs = idxs[world_id:min(world_id + n_envs, len(idxs))]
             idx_counter.set_idxs.remote(sub_idxs)
-            hashes = [h for wh in hashes for h in wh]
             idx_counter.set_hashes.remote(hashes)
 
             # FIXME: Sometimes hash-to-idx dict is not set by the above call?
@@ -81,12 +85,13 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
             # Hardcoded rendering
             envs = workers.foreach_worker(
                 lambda worker: worker.foreach_env(lambda env: env))
-            envs[0][0].render()
+            envs = [e for we in envs for e in we]
+            envs[0].render()
 
             new_fitnesses = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: {env.world_idx: ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0))}))
-            all_stats.append([])
+            rl_stats.append([])
 
         else:
             # Train/evaluate
@@ -95,22 +100,40 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
             else:
                 stats = trainer.train()
             # print(pretty_print(stats))
-            all_stats.append(stats)
+            rl_stats.append(stats)
 
             # Collect stats for generator
             new_fitnesses = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
+        assert(len(rl_stats) == 1)
+        rl_stats = rl_stats[0]
+        logbook_stats = {'iteration': net_itr}
+        stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
+        # if i == 0:
+        if calc_world_stats:
+            world_stats = get_env_world_stats(trainer)
+            logbook_stats.update({f'{k}Path': world_stats[f'{k}_path_length'] for k in stat_keys})
+        logbook_stats.update({
+            f'{k}Rew': rl_stats[f'episode_reward_{k}'] for k in stat_keys})
+        logbook_stats.update({
+            'elapsed': timer() - start_time,
+        })
+        if 'evaluation' in rl_stats:
+            logbook_stats.update({
+                f'{k}EvalRew': rl_stats['evaluation'][f'episode_reward_{k}'] for k in stat_keys})
+        # logbook.record(**logbook_stats)
+        # print(logbook.stream)
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
         [new_fits.update(nf) for nf in new_fitnesses]
-        trial_fitnesses.update(new_fits)
+        qd_stats.update(new_fits)
 
         # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
         # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
-            world_id = len(trial_fitnesses)
+            world_id = len(qd_stats)
         else:
             world_id += len(new_fitnesses)
 
@@ -118,11 +141,11 @@ def rllib_evaluate_worlds(trainer, worlds, idx_counter=None, evaluate_only=False
     # fitnesses = {k: ([np.mean([vi[0][fi] for vi in v]) for fi in range(len(v[0][0]))],
     #         [np.mean([vi[1][mi] for vi in v]) for mi in range(len(v[0][1]))]) for k, v in fitnesses.items()}
 
-    return all_stats, trial_fitnesses
+    return rl_stats, qd_stats, logbook_stats
 
 
 def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
-                  idx_counter=None, logbook=None):
+                  idx_counter=None, logbook=None, quality_diversity=False):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
@@ -139,32 +162,20 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         # curr_lands = np.array(landscapes)[world_idxs]
         curr_lands = [landscapes[wid] for wid in world_idxs]
         worlds = {i: l for i, l in enumerate(curr_lands)}
-        all_stats, fitnesses = rllib_evaluate_worlds(trainer, worlds, idx_counter=idx_counter)
-        logbook_stats = {'iteration': net_itr}
-        if i == 0:
-            mean_path_length, min_path_length, max_path_length, std_path_length = \
-                get_env_path_length_stats(trainer, n_policies)
-            logbook_stats.update({
-                'meanPath': mean_path_length,
-            })
-            max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
-            # print(f'Mean path length: {mean_path_length}\nMax mean reward: {max_mean_reward}')
-        assert len(all_stats) == 1
-        rllib_stats = all_stats[0]
-        logbook_stats.update({
-            'meanRew': rllib_stats['episode_reward_mean'],
-            'maxRew': rllib_stats['episode_reward_max'],
-            'minRew': rllib_stats['episode_reward_min'],
-            'elapsed': timer() - start_time,
-        })
-        logbook.record(**logbook_stats)
-        keys = ['episode_reward_max', 'episode_reward_mean']
-        # TODO: track stats over calls to train (shouldn't be necessary during evolution)
-        # print('\n'.join([f'Training iteration {i}, time elapsed: {timer() - start_time}'] + [f'{k}: {rllib_stats[k]}' for k in keys]))
-        if 'evaluation' in rllib_stats:
-            print('\n'.join(['evaluation:'] + [f"  {k}: {rllib_stats['evaluation'][k]}" for k in keys]))
+
+        # Get world stats on first iteration only, since they won't change after this inside training loop
+        calc_world_stats = (i == 0)
+
+        rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
+            net_itr=net_itr, trainer=trainer, worlds=worlds, idx_counter=idx_counter, logbook=logbook, 
+            start_time=start_time, evaluate_only=False, quality_diversity=quality_diversity, 
+            calc_world_stats=calc_world_stats)
         recent_rewards[:-1] = recent_rewards[1:]
-        recent_rewards[-1] = rllib_stats['episode_reward_mean']
+        recent_rewards[-1] = rl_stats['episode_reward_mean']
+
+        if i == 0:
+            mean_path_length = logbook_stats['meanPath']
+            max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
 
         # End training if within a certain margin of optimal performance
         done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
@@ -178,6 +189,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
                 # done_training = running_std < 1.0 or i >= 100
             # else:
                 # done_training = False
+        logbook.record(**logbook_stats)
         print(logbook.stream)
         i += 1
         net_itr += 1
@@ -254,12 +266,18 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
 
     if oracle_policy:
         policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
-                                                     action_space=env.action_spaces[i], config={        })
+                                                     action_space=env.action_spaces[i], config={})
                             for i, _ in enumerate(env.swarms)}
         model_config = {}
     else:
         policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
                          for i, swarm in enumerate(env.swarms)}
+        # Add the oracle (flood-fill convolutional model) for fast path-length computations. obs/act spaces are dummy
+        policies_dict.update({
+            'oracle': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[0], 
+            action_space=env.action_spaces[0], config={})
+            })
+
         # ModelCatalog.register_custom_model('flood_model', NavNet)
         model_config = copy.copy(MODEL_DEFAULTS)
         if fully_observable:
@@ -426,12 +444,18 @@ def toggle_exploration(trainer, explore: bool, n_policies: int):
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
 
 
-def get_env_path_length_stats(trainer, n_policies: int):
+def get_env_world_stats(trainer):
+    flood_model = trainer.get_policy('oracle').model
     path_lengths = trainer.workers.foreach_worker(
-        lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
+        lambda w: w.foreach_env(lambda e: flood_model.get_solution_length(th.Tensor(e.world[None,...]))))
     path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
     mean_path_length = np.mean(path_lengths)
     min_path_length = np.min(path_lengths)
     max_path_length = np.max(path_lengths)
-    std_path_length = np.std(path_lengths)
-    return mean_path_length, min_path_length, max_path_length, std_path_length
+    # std_path_length = np.std(path_lengths)
+    return {
+        'mean_path_length': mean_path_length,
+        'min_path_length': min_path_length,
+        'max_path_length': max_path_length,
+    }
+    # return mean_path_length, min_path_length, max_path_length  #, std_path_length

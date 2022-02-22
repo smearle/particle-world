@@ -19,6 +19,7 @@ from qdpy.algorithms.deap import DEAPQDAlgorithm
 from qdpy.base import ParallelismManager
 from qdpy.phenotype import Features, Fitness, Individual
 from qdpy.plots import plotGridSubplots
+from timeit import default_timer as timer
 from tqdm import tqdm
 
 from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv, eval_mazes, eval_mazes_probdists
@@ -26,7 +27,7 @@ from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
 from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter, toggle_exploration
 from swarm import NeuralSwarm, MazeSwarm
-from utils import infer, infer_elites, qdpy_eval, simulate, save, discrete_to_onehot
+from utils import infer, infer_elites, qdpy_eval, simulate, save, discrete_to_onehot, update_individuals
 from visualize import visualize_pyribs, plot_fitness_qdpy
 
 seed = None
@@ -51,7 +52,8 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 fitness_domain = [(-np.inf, np.inf)]
 
 
-def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, save_dir):
+def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, 
+                          save_dir, quality_diversity, stats):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
     max_possible_generator_fitness = n_sim_steps - 1 / n_pop
     optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
@@ -63,31 +65,41 @@ def phase_switch_callback(net_itr, gen_itr, player_trainer, container, toolbox, 
         train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:num_rllib_envs],
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
-                      save_dir=save_dir, n_rllib_envs=num_rllib_envs, logbook=logbook)
+                      save_dir=save_dir, n_rllib_envs=num_rllib_envs, logbook=logbook, 
+                      quality_diversity=quality_diversity)
         # else:
         #     if itr % play_phase_len:
         # pass
+        start_time = timer()
         invalid_ind = [ind for ind in container]
         container.clear_all()
 
         # After player training,
         if rllib_eval:
-            rllib_stats, fitnesses = rllib_evaluate_worlds(player_trainer,
-                                                           {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter)
-            fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
+            rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
+                net_itr=net_itr, trainer=player_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, 
+                idx_counter=idx_counter, quality_diversity=quality_diversity, start_time=start_time, logbook=logbook,
+                calc_world_stats=False)
 
         else:
-            fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+            qd_stats = toolbox.map(toolbox.evaluate, invalid_ind)
 
-        for ind, fit in zip(invalid_ind, fitnesses):
-            ind.fitness.values = fit[0]
-            ind.features = fit[1]
+        update_individuals(invalid_ind, qd_stats)
+        
 
         # Store batch in container
         nb_updated = container.update(invalid_ind, issue_warning=True)
         if nb_updated == 0:
             raise ValueError(
                 "No individual could be added back to the QD container when re-evaluating after player training.")
+
+        record = stats.compile(container) if stats else {}
+        logbook_stats.update({
+            'iteration': net_itr, 'containerSize': container.size_str(), 'evals': len(invalid_ind), 'nbUpdated': nb_updated,
+            'elapsed': timer() - start_time, **record,
+        })
+        logbook.record(**logbook_stats)
+        print(logbook.stream)
 
 
 # TODO:
@@ -144,7 +156,7 @@ class DiscreteIndividual(Individual):
 
 def run_qdpy():
     def iteration_callback(iteration, net_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, container, 
-                           logbook, oracle_policy=False):
+                           logbook, stats, oracle_policy=False, quality_diversity=False):
         gen_itr = iteration
         idx_counter = ray.get_actor('idx_counter')
         if net_itr % qdpy_save_interval == 0:
@@ -159,7 +171,8 @@ def run_qdpy():
         if stale:
             staleness_counter[0] = 0
         phase_switch_callback(net_itr, gen_itr, player_trainer=particle_trainer, container=container, toolbox=toolbox, 
-                              logbook=logbook, idx_counter=idx_counter, stale_generators=stale, save_dir=save_dir)
+                              logbook=logbook, idx_counter=idx_counter, stale_generators=stale, save_dir=save_dir,
+                              quality_diversity=quality_diversity, stats=stats)
 
     qdpy_save_interval = 100
     max_items_per_bin = 1 if args.max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
@@ -326,7 +339,8 @@ def run_qdpy():
         # the archive. (Crucially, it is mutable.)
         staleness_counter = [0]
         callback = partial(iteration_callback, toolbox=toolbox, rllib_eval=rllib_eval, 
-                           staleness_counter=staleness_counter, save_dir=os.path.join('runs', args.experimentName))
+                           staleness_counter=staleness_counter, save_dir=os.path.join('runs', args.experimentName),
+                           quality_diversity=args.quality_diversity)
         # Create a QD algorithm
         algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
                                batch_size=batch_size, niter=nb_iterations,
@@ -395,7 +409,7 @@ if __name__ == '__main__':
     parser.add_argument('-fo', '--fully_observable', action='store_true',
                         help="Whether to use a fully observable environment.")
     args = parser.parse_args()
-    gen_phase_len = -1
+    gen_phase_len = 2
     if args.oracle_policy:
         play_phase_len = -1
         n_pop = 1
@@ -494,6 +508,7 @@ if __name__ == '__main__':
     else:
         train_players(0, 1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
                       n_rllib_envs=num_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps, 
+                      quality_diversity=args.quality_diversity,
                       # TODO: initialize logbook even if not evolving worlds
                       logbook=None)
     # TODO: evolve players?

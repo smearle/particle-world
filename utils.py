@@ -241,6 +241,14 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
             back_paths.update({adj: curr})
     return []
 
+
+def update_individuals(individuals, qd_stats):
+    qd_stats = [qd_stats[k] for k in range(len(qd_stats))]
+    for ind, s in zip(individuals, qd_stats):
+        ind.fitness.values = s[0]
+        ind.features = s[1]
+
+
 # start_time = timer()
 # print(get_solution(np.array([
 #     [1, 1, 1, 0, 1],

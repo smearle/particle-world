@@ -11,6 +11,7 @@ from qdpy.phenotype import *
 from qdpy.containers import *
 
 from rllib_utils import IdxCounter, rllib_evaluate_worlds
+from utils import update_individuals
 
 
 def qdRLlibEval(init_batch, toolbox, container, batch_size, niter, 
@@ -38,16 +39,17 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     :returns: A class:`~deap.tools.Logbook` with the statistics of the
               evolution
     """
+    if start_time == None:
+        start_time = timer()
     # The co-learning loop will always start here, with at least a single round of world-generation
     idx_counter = ray.get_actor("idx_counter")
     if logbook is None:
         assert net_itr == gen_itr == 0
         logbook = deap.tools.Logbook()
     rllib_trainer.workers.local_worker().set_policies_to_train([])
-    if start_time == None:
-        start_time = timer()
+    # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
     logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + (stats.fields if stats else []) \
-        + ["meanRew", "minRew", "maxRew", "meanPath"] + ["elapsed"]
+        + ["meanRew", "meanEvalRew", "meanPath"] + ["elapsed"]
 
     if len(init_batch) == 0:
         raise ValueError("``init_batch`` must not be empty.")
@@ -59,18 +61,16 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     invalid_ind = init_batch
 
     if rllib_eval:
-        rllib_stats, fitnesses = rllib_evaluate_worlds(
-            rllib_trainer, {i: ind for i, ind in enumerate(init_batch)}, idx_counter,
-            quality_diversity=quality_diversity, n_trials=1, oracle_policy=oracle_policy)
-        qd_stats = [fitnesses[k] for k in range(len(fitnesses))]
+        rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
+            trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, idx_counter=idx_counter,
+            quality_diversity=quality_diversity, n_trials=1, oracle_policy=oracle_policy, net_itr=net_itr,
+            logbook=logbook, start_time=start_time, evaluate_only=False)
         # assert len(rllib_stats) == 1
-        rl_stats = rllib_stats[0]
 
     else:
         qd_stats = toolbox.map(toolbox.evaluate, invalid_ind)
-    for ind, s in zip(invalid_ind, qd_stats):
-        ind.fitness.values = s[0]
-        ind.features = s[1]
+
+    update_individuals(invalid_ind, qd_stats)
 
     if len(invalid_ind) == 0:
         raise ValueError("No valid individual found !")
@@ -86,12 +86,18 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
 
     # Compile stats and update logs
     record = stats.compile(container) if stats else {}
-    logbook.record(iteration=net_itr, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
+    logbook_stats.update({
+        'iteration': net_itr, 'containerSize': container.size_str(), 'evals': len(invalid_ind), 'nbUpdated': nb_updated,
+        'elapsed': timer() - start_time, **record,
+    })
+    # logbook.record(iteration=net_itr, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
+    logbook.record(**logbook_stats)
     if verbose:
         print(logbook.stream)
     # Call callback function
     if iteration_callback != None:
-        iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=init_batch, container=container, logbook=logbook)
+        iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=init_batch, container=container, logbook=logbook,
+        stats=stats)
     net_itr += 1
 
     # Begin the generational process
@@ -102,30 +108,19 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
 
         ## Vary the pool of individuals
         offspring = deap.algorithms.varAnd(batch, toolbox, cxpb, mutpb)
-        #offspring = []
-        #for o in batch:
-        #    newO = toolbox.clone(o)
-        #    ind, = toolbox.mutate(newO)
-        #    del ind.fitness.values
-        #    offspring.append(ind)
 
         # Evaluate the individuals with an invalid fitness
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
         if rllib_eval:
-            rllib_stats, fitnesses = rllib_evaluate_worlds(
-                rllib_trainer, {i: ind for i, ind in enumerate(invalid_ind)}, idx_counter, n_trials=1, 
-                oracle_policy=oracle_policy)
-            fitnesses = [fitnesses[k] for k in range(len(fitnesses))]
-            # assert len(rllib_stats) == 1
-            # rllib_stats = rllib_stats[0]
+            rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr, logbook=logbook, evaluate_only=False,
+                trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, idx_counter=idx_counter,
+                oracle_policy=oracle_policy, start_time=start_time, quality_diversity=quality_diversity)
 
         else:
-            fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+            qd_stats = toolbox.map(toolbox.evaluate, invalid_ind)
 
-        for ind, fit in zip(invalid_ind, fitnesses):
-            ind.fitness.values = fit[0]
-            ind.features = fit[1]
+        update_individuals(invalid_ind, qd_stats)
 
         # Replace the current population by the offspring
         nb_updated = container.update(offspring, issue_warning=show_warnings)
@@ -136,13 +131,19 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
 
         # Append the current generation statistics to the logbook
         record = stats.compile(container) if stats else {}
-        logbook.record(iteration=net_itr, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time , **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
+        logbook_stats.update({
+            'iteration': net_itr, 'containerSize': container.size_str(), 'evals': len(invalid_ind), 'nbUpdated': nb_updated,
+            'elapsed': timer() - start_time, **record,
+        })
+        # logbook.record(iteration=net_itr, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time , **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
+        logbook.record(**logbook_stats)
         if verbose:
             print(logbook.stream)
         net_itr += 1
         # Call callback function
         if iteration_callback != None:
-            iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=batch, container=container, logbook=logbook)
+            iteration_callback(net_itr=net_itr, iteration=gen_itr, batch=batch, container=container, logbook=logbook,
+            stats=stats)
 
     return batch, logbook
 
