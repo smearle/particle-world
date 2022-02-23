@@ -66,7 +66,7 @@ if __name__ == '__main__':
     parser.add_argument('-l', '--local', action='store_true', 
                         help='Run batch of jobs locally, in sequence. (Otherwise submit parallel jobs to SLURM.)')
     args = parser.parse_args()
-    job_time = 72
+    job_time = 48
     job_cpus = 12
     if args.local:
         num_cpus = 12

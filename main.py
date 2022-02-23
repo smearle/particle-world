@@ -61,7 +61,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
         return
     if gen_itr > 0 and container.free == 0 and \
         (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
-        qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
+        qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook, save_dir=save_dir)
         net_itr = train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:num_rllib_envs],
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
@@ -169,7 +169,7 @@ def run_qdpy():
         gen_itr = iteration
         idx_counter = ray.get_actor('idx_counter')
         if net_itr % qdpy_save_interval == 0:
-            qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
+            qdpy_save_archive(container=container, play_itr=play_itr, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
         time_until_stale = 10
         no_update = np.array(logbook.select('nbUpdated')[-1:]) == 0
         if no_update:
