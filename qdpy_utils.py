@@ -159,7 +159,6 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         new_net_itr = net_itr[0]
         play_itr = play_itr[0] + (new_net_itr - old_net_itr)
         net_itr = new_net_itr
-        print('play_itr', play_itr)
         gen_itr += 1
         done = play_itr >= niter
 
