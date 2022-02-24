@@ -186,26 +186,6 @@ def discrete_to_onehot(a):
     return np.eye(n_val)[a].transpose(2, 0, 1)
 
 
-class RunningMean(object):
-    def __init__(self, window_size=10):
-        self.window_size = window_size
-        self.recents = []
-        self.sum = 0
-        self.mean = 0
-
-        # We'll stop incrementing this counter once it hits window_size
-        self.i = 0
-
-    def add(self, val):
-        self.recents.append(val)
-        if self.i >= self.window_size:
-            popped_val = self.recents.pop(0)
-            self.sum -= val
-        else:
-            self.i += 1
-        self.sum += val
-        self.mean = self.sum / self.i
-
 
 adj_coords_2d = np.array([
     [1, 0],
@@ -280,3 +260,7 @@ def load_config(args, config_file):
     for k, v in new_args.items():
         setattr(args, k, v)
     return args
+
+
+def compile_train_stats(save_dir, logbook, quality_diversity=False):
+    pass

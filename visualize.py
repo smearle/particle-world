@@ -16,7 +16,7 @@ def visualize_pyribs(archive):
     plt.savefig("fitness.png")
     plt.close()
 
-def plot_fitness_qdpy(save_dir, logbook, quality_diversity=True):
+def visualize_train_stats(save_dir, logbook, quality_diversity=True):
     gen = logbook.select("iteration")
     fit_mins = remove_nones(logbook.select("min"))
     fit_avgs = remove_nones(logbook.select("avg"))
@@ -84,6 +84,21 @@ def plot_fitness_qdpy(save_dir, logbook, quality_diversity=True):
     ax1.legend(lns, labs, loc="best")
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'agent_reward.png'))
+
+    fig, ax1 = plt.subplots()
+    mean_eval_rews = remove_nones(logbook.select("meanEvalRew"))
+    min_eval_rews = remove_nones(logbook.select("minEvalRew"))
+    max_eval_rews = remove_nones(logbook.select("maxEvalRew"))
+    # line1 = ax2.plot(gen, min_eval_rews, "r--")
+    line2 = ax1.plot(gen, mean_eval_rews, "r-", label="Mean Eval Reward")
+    # line3 = ax2.plot(gen, max_eval_rews, "r--")
+    ax1.set_ylabel("Agent Evaluation Reward")
+    # ax1.yaxis.set_ticks(np.arange(start, end, (end - start) / 10))
+    lns = line2
+    labs = [l.get_label() for l in lns]
+    ax1.legend(lns, labs, loc="best")
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'agent_eval_reward.png'))
 
 def remove_nones(l):
     iv = 0

@@ -28,7 +28,7 @@ from qdpy_utils import qdRLlibEval, qdpy_save_archive
 from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
 from swarm import NeuralSwarm, MazeSwarm
 from utils import get_experiment_name, qdpy_eval, update_individuals, load_config
-from visualize import plot_fitness_qdpy
+from visualize import visualize_train_stats
 
 seed = None
 ndim = 2
@@ -190,7 +190,6 @@ def run_qdpy():
     qdpy_save_interval = 100
     max_items_per_bin = 1 if args.max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
     logbook = None
-
     if load:
         fname = 'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
@@ -242,7 +241,8 @@ def run_qdpy():
             im_grid = Image.fromarray(im_grid.astype(np.uint8))
             im_grid.save(os.path.join(save_dir, "level_grid.png"))
 
-            plot_fitness_qdpy(save_dir, logbook, quality_diversity=args.quality_diversity)
+            visualize_train_stats(save_dir, logbook, quality_diversity=args.quality_diversity)
+            compile_train_stats(save_dir, logbook, quality_diversity=args.quality_diversity)
 
             if args.quality_diversity:
                 # save fitness qd grid

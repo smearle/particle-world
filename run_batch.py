@@ -4,41 +4,14 @@ import json
 import os
 import re
 
-
-exp_names = [
-    0,
-]
-
-gen_phase_lens = [
-    1,
-    10,
-    50,
-    # 100,
-    -1,
-]
-
-play_phase_lens = [
-    1,
-    10,
-    50,
-    # 100,
-    # -1,
-]
-
-quality_diversities = [
-    False,
-    # True,
-]
-
-objectives = [
-    'min_solvable',
-]
+from batch_hyperparams import *
 
 
 def launch_job(exp_i, job_time, job_cpus):
     cmd = f'python main.py --load_config {exp_i}'
 
     if args.local:
+        print(f'Launching command locally:\n{cmd}')
         os.system(cmd)
 
     else:
@@ -65,25 +38,36 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-l', '--local', action='store_true', 
                         help='Run batch of jobs locally, in sequence. (Otherwise submit parallel jobs to SLURM.)')
+    parser.add_argument('-v', '--visualize', action='store_true')
+    parser.add_argument('-gpus', '--num_gpus', type=int, default=1)
+    parser.add_argument('-en', '--enjoy', action='store_true')
+    parser.add_argument('-ev', '--evaluate', action='store_true')
+    parser.add_argument('-r', '--render', action='store_true')
+    parser.add_argument('-cpus', '--num_cpus', type=int, default=12)
     args = parser.parse_args()
     job_time = 48
-    job_cpus = 12
-    if args.local:
-        num_cpus = 12
-    else:
-        num_cpus = 12
+    num_cpus = args.num_cpus
 
     exp_sets = list(product(gen_phase_lens, play_phase_lens, quality_diversities, objectives))
 
     for exp_i, exp_set in enumerate(exp_sets):
         gen_phase_len, play_phase_len, quality_diversity, objective = exp_set
+        load = True
+        num_gpus = 0 if args.visualize else args.num_gpus
+        render = True if args.enjoy else args.render
         config = {
             'gen_phase_len': gen_phase_len,
             'play_phase_len': play_phase_len,
             'quality_diversity': quality_diversity,
             'objective_function': objective,
             'num_proc': num_cpus,
-            'num_gpus': 1,
+            'num_gpus': num_gpus,
+            'visualize': args.visualize,
+            'load': load,
+            'enjoy': args.enjoy,
+            'evaluate': args.evaluate,
+            'render': render,
+            'num_proc': num_cpus,
         }
         with open(os.path.join('auto_configs', f'{exp_i}.json'), 'w') as f:
             json.dump(config, f)
@@ -91,4 +75,4 @@ if __name__ == '__main__':
     sbatch_file = os.path.join('slurm', 'run.sh')
 
     for exp_i, exp_set in enumerate(exp_sets):
-        launch_job(exp_i=exp_i, job_time=job_time, job_cpus=job_cpus)
+        launch_job(exp_i=exp_i, job_time=job_time, job_cpus=num_cpus)
