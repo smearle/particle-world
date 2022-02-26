@@ -249,7 +249,7 @@ def get_experiment_name(args):
     if args.fully_observable:
         exp_name += '_fullObs'
     if args.model is not None:
-        exp_name += f'_{args.model}'
+        exp_name += f'_mdl-{args.model}'
     exp_name += f'_{args.exp_name}'
     return exp_name
 
@@ -264,7 +264,7 @@ def load_config(args, config_file):
     return args
 
 
-def get_none_nones(lst):
+def filter_nones(lst):
     return [l for l in lst if l is not None]
 
 
@@ -273,10 +273,10 @@ def compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_d
         'net_itr': net_itr,
         'gen_itr': gen_itr,
         'play_itr': play_itr,
-        'meanRew': np.mean(get_none_nones(logbook.select('meanRew'))[-10:]),
-        'meanEvalRew': np.mean(get_none_nones(logbook.select('meanEvalRew'))[-10:]),
-        'meanPath': np.mean(get_none_nones(logbook.select('meanPath'))[-10:]),
-        'meanFit': np.mean(get_none_nones(logbook.select('avg'))[-10:]),
+        'meanRew': np.mean(filter_nones(logbook.select('meanRew'))[-10:]),
+        'meanEvalRew': np.mean(filter_nones(logbook.select('meanEvalRew'))[-10:]),
+        'meanPath': np.mean(filter_nones(logbook.select('meanPath'))[-10:]),
+        'meanFit': np.mean(filter_nones(logbook.select('avg'))[-10:]),
     }
     with open(os.path.join(save_dir, 'train_stats.json'), 'w') as f:
-        json.dump(stats, f)
+        json.dump(stats, f, indent=4)

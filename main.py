@@ -214,6 +214,7 @@ def run_qdpy():
 
             # if doing QD, render a grid of 1 world per cell in archive
             if args.quality_diversity:
+                nb_bins = grid.shape
                 world_im_width = width * 10
                 im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
                 for g in gg:
@@ -225,7 +226,8 @@ def run_qdpy():
 
             # otherwise, render a grid of elite levels
             else:
-                assert nb_bins == (1, 1)
+                assert (1, 1) == grid.shape
+                max_items_per_bin = len(grid)
                 n_world_width = math.ceil(math.sqrt(max_items_per_bin))
                 im_grid = np.zeros((world_im_width * n_world_width, world_im_width * n_world_width, 3))
                 for gi, g in enumerate(gg):
@@ -458,6 +460,8 @@ if __name__ == '__main__':
     else:
         # If not running a QD experiment, we must specify an objective function.
         assert args.objective_function is not None
+        if args.objective_function == "contrastive":
+            assert n_policies > 1
 
     # swarm_cls = NeuralSwarm
     swarm_cls = MazeSwarm

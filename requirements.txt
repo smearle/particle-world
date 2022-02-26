@@ -1,7 +1,8 @@
-ray[rllib]
-qdpy[deap]
-ribs
 neat-python
+pandas
 pygame
+qdpy[deap]
+ray[rllib]
+ribs
 tqdm
 ./pytorch-neat
