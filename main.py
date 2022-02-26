@@ -27,7 +27,7 @@ from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
 from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
 from swarm import NeuralSwarm, MazeSwarm
-from utils import get_experiment_name, qdpy_eval, update_individuals, load_config
+from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
 from visualize import visualize_train_stats
 
 seed = None
