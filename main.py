@@ -59,11 +59,15 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
     optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
     if args.oracle_policy:
         return
-    if gen_itr > 0 and container.free == 0 and \
-        (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
+    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
         qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook, save_dir=save_dir)
+        training_worlds = sorted(container, key=lambda i: i.fitness.values[0], reverse=True)
+        if quality_diversity:
+            # Eliminate impossible worlds
+            training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
+            training_worlds *= math.ceil(num_rllib_envs / len(training_worlds))
         net_itr = train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
-                      landscapes=sorted(container, key=lambda i: i.fitness.values[0], reverse=True)[:num_rllib_envs],
+                      landscapes=training_worlds,
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
                       save_dir=save_dir, n_rllib_envs=num_rllib_envs, logbook=logbook, 
                       quality_diversity=quality_diversity)
@@ -157,7 +161,7 @@ class DiscreteIndividual(Individual):
         return (self.__class__ == other.__class__ and np.all(self.discrete == other.discrete))
 
 
-def run_qdpy():
+def run_qdpy(nb_bins):
     def iteration_callback(iteration, net_itr, play_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, 
                            container, logbook, stats, oracle_policy=False, quality_diversity=False):
         net_itr_lst = net_itr
@@ -188,7 +192,7 @@ def run_qdpy():
         return net_itr
 
     qdpy_save_interval = 100
-    max_items_per_bin = 1 if args.max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
+    max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
     logbook = None
     if load:
         fname = 'latest-0'
@@ -226,7 +230,7 @@ def run_qdpy():
 
             # otherwise, render a grid of elite levels
             else:
-                assert (1, 1) == grid.shape
+                assert nb_bins == (1, 1) == grid.shape
                 max_items_per_bin = len(grid)
                 n_world_width = math.ceil(math.sqrt(max_items_per_bin))
                 im_grid = np.zeros((world_im_width * n_world_width, world_im_width * n_world_width, 3))
@@ -288,7 +292,6 @@ def run_qdpy():
     dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
     assert (dimension >= 2)
     assert (nb_features >= 1)
-    bins_per_dim = int(pow(args.max_total_bins, 1. / nb_features))
 
     init_batch_size = num_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
     batch_size = num_rllib_envs  # The number of evaluations in each subsequent batch
@@ -395,7 +398,7 @@ if __name__ == '__main__':
                         help="If reloading an experiment, produce plots, etc. "
                              "to visualize progress.")
     # parser.add_argument('-seq', '--sequential', help='not parallel', action='store_true')
-    parser.add_argument('--max_total_bins', type=int, default=1, help="Maximum number of bins in the grid")
+    # parser.add_argument('--max_total_bins', type=int, default=1, help="Maximum number of bins in the grid")
     parser.add_argument('-p', '--parallelismType', type=str, default='None',
                         help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
@@ -457,11 +460,13 @@ if __name__ == '__main__':
         assert n_policies > 1
         # Fitness function is fixed for QD experiments.
         assert args.objective_function is None
+        max_total_bins = 169  # so that we're guaranteed to have at least 12 non-impossible worlds (along the diagonal)
     else:
         # If not running a QD experiment, we must specify an objective function.
         assert args.objective_function is not None
         if args.objective_function == "contrastive":
             assert n_policies > 1
+        max_total_bins = 1
 
     # swarm_cls = NeuralSwarm
     swarm_cls = MazeSwarm
@@ -492,9 +497,8 @@ if __name__ == '__main__':
         nb_features = n_policies - 1
     else:
         nb_features = 2  # The number of features to take into account in the container
-    bins_per_dim = int(pow(args.max_total_bins, 1. / nb_features))
-    nb_bins = (
-                  bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
+    bins_per_dim = int(pow(max_total_bins, 1. / nb_features))
+    nb_bins = (bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
     rllib_save_interval = 10
 
     # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
@@ -531,7 +535,7 @@ if __name__ == '__main__':
 
     if not args.fixed_worlds:
         # if args.algo == 'me':
-        run_qdpy()
+        run_qdpy(nb_bins=nb_bins)
         # elif args.algo == 'cmame':
             # run_pyribs()
         # elif args.algo == 'ppo':

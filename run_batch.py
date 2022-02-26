@@ -46,31 +46,40 @@ def main():
     parser.add_argument('-r', '--render', action='store_true')
     parser.add_argument('-cpus', '--num_cpus', type=int, default=12)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
+    parser.add_argument('-ovr', '--overwrite', action='store_true')
     args = parser.parse_args()
     job_time = 48
     num_cpus = 0 if args.visualize else args.num_cpus
-    load = True
     num_gpus = 0 if args.visualize else args.num_gpus
     render = True if args.enjoy else args.render
 
-    exp_sets = list(product(exp_names, gen_phase_lens, play_phase_lens, quality_diversities, objectives))
+    exp_sets = list(product(exp_names, gen_play_phase_lens, qd_objectives))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
-        exp_name, gen_phase_len, play_phase_len, quality_diversity, objective = exp_set
+        exp_name, (gen_phase_len, play_phase_len), (quality_diversity, objective) = exp_set
+        if objective == 'min_solvable':
+            n_policies = 1
+        elif objective == 'contrastive':
+            n_policies = 2
+        elif quality_diversity:
+            n_policies = 3
+        else:
+            raise NotImplementedError
+        
         exp_config = {
             'exp_name': exp_name,
             'gen_phase_len': gen_phase_len,
             'play_phase_len': play_phase_len,
             'quality_diversity': quality_diversity,
             'objective_function': objective,
-            'n_policies': 1,
+            'n_policies': n_policies,
             'fully_observable': False,
             'model': None,
             'num_proc': num_cpus,
             'num_gpus': num_gpus,
             'visualize': args.visualize,
-            'load': load,
+            'load': not args.overwrite,
             'enjoy': args.enjoy,
             'evaluate': args.evaluate,
             'render': render,

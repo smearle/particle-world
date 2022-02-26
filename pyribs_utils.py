@@ -43,7 +43,7 @@ from visualize import visualize_pyribs
 #        )
 #        seeds = ([None] * n_emitters
 #                 if seed is None else [seed + i for i in range(n_emitters)])
-#        if args.max_total_bins == 1:
+#        if max_total_bins == 1:
 #            n_opt_emitters = len(seeds)
 #            n_imp_emitters = 0
 #        else:

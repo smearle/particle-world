@@ -60,17 +60,12 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
 
         # When running parallel envs, if each env is to evaluate a separate world, map envs to worlds
         if idx_counter:
-            # n_envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: 1))
-            envs = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env))
-            envs = [e for we in envs for e in we]
-            n_envs = len(envs)
-            # hashes = [hash(e) for e in envs]
 
             # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
             hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
             hashes = [h for wh in hashes for h in wh]
+            n_envs = len(hashes)
 
-            # n_envs = sum([e for we in hashes for e in we])
             sub_idxs = idxs[world_id:min(world_id + n_envs, len(idxs))]
             idx_counter.set_idxs.remote(sub_idxs)
             idx_counter.set_hashes.remote(hashes)

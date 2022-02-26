@@ -17,10 +17,10 @@ from utils import discrete_to_onehot
 player_colors = [
     (0, 0, 255),
     (255, 0, 0),
-    # (0, 255, 0),  # green
-    (255, 0, 255),
-    # (255, 255, 0),  # yellow
     (0, 255, 255),
+    (255, 0, 255),
+    # (0, 255, 0),  # green
+    # (255, 255, 0),  # yellow
 ]
 goal_color = (0, 255, 0)
 start_color = (255, 255, 0)
