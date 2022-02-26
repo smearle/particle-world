@@ -11,7 +11,7 @@ from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.policy.policy import Policy
 from ray.rllib.utils import override
 from ray.rllib.utils.typing import ModelConfigDict, ModelWeights
-from torch import Tensor, TensorType, nn
+from torch import TensorType, nn
 
 from env import ParticleMazeEnv, eval_mazes
 
@@ -144,7 +144,7 @@ class FloodFill(nn.Module):
 
 
 class OraclePolicy(Policy):
-    """Hand-coded policy that returns random actions."""
+    """Hand-coded oracle policy based on flood-fill BFS."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -194,30 +194,39 @@ class FloodModel(TorchModelV2, nn.Module):
         TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
                                              model_config=model_config, name=name)
         nn.Module.__init__(self)
+        self.obs_space = obs_space
         self.n_hid_chans = n_hid_chans = 8
-        self.n_in_chans = n_in_chans = obs_space.shape[0]
+        self.n_in_chans = n_in_chans = obs_space.shape[-1]
         self.conv_0 = nn.Conv2d(n_in_chans, n_hid_chans, 1, 1, padding=0, bias=True)
         self.conv_1 = nn.Conv2d(n_hid_chans, n_hid_chans, 3, 1, padding=1, padding_mode='circular', bias=True)
         self.act_dense = nn.Linear(3 * 3, num_outputs)
         self.val_dense = nn.Linear(3 * 3, 1)
         self.hid_neighb = None
 
+    def get_initial_state(self):
+        return [
+            np.zeros((self.n_hid_chans, self.obs_space.shape[0], self.obs_space.shape[1]), dtype=np.float32),
+        ]
+
     def forward(self, input_dict: Dict[str, TensorType], state: List[TensorType], seq_lens: TensorType):
-        input = input_dict['obs']
+        input = input_dict['obs'].permute(0, 3, 1, 2)
         n_batches = input.shape[0]
         agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
         x = self.conv_0(input)
+        print(x.shape, state[-1].shape)
+        x += state[-1]
         # batch_dones = self.get_dones(x, agent_pos)
         # while not batch_dones.all():
-        for i in range(100):
+        for i in range(1):
             x = self.conv_1(x)
-            x[:self.n_hid_chans//2] = th.sigmoid(x[:self.n_hid_chans//2])
-            x[self.n_hid_chans//2:] = th.relu(x[self.n_hid_chans//2:])
-            x[:, :self.n_in_chans] += input
+            # x[:self.n_hid_chans//2] = th.sigmoid(x[:self.n_hid_chans//2])
+            # x[self.n_hid_chans//2:] = th.relu(x[self.n_hid_chans//2:])
+            # x[:, :self.n_in_chans] += input
         self.hid_neighb = neighb = x[:, -1, agent_pos[0] - 1: agent_pos[0] + 2, agent_pos[1] - 1: agent_pos[1] + 2]
         act = self.act_dense(neighb.reshape(n_batches, -1))
         # Return model output and RNN hidden state (not used)
-        return act, []
+        print(x.shape)
+        return act, [x]
 
     def value_function(self):
         val = self.val_dense(self.hid_neighb.reshape(self.hid_neighb.shape[0], -1))

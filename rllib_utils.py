@@ -16,7 +16,8 @@ from ray.tune.logger import pretty_print
 from timeit import default_timer as timer
 
 from env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
-from model import OraclePolicy
+from model import FloodModel, OraclePolicy
+from paired_models.multigrid_models import MultigridRLlibNetwork
 from utils import get_solution
 
 
@@ -251,7 +252,7 @@ class IdxCounter:
 
 
 def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
-                          oracle_policy, fully_observable, idx_counter):
+                          oracle_policy, fully_observable, idx_counter, model):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -286,28 +287,34 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             action_space=env.action_spaces[0], config={})
             })
 
-        # ModelCatalog.register_custom_model('flood_model', NavNet)
         model_config = copy.copy(MODEL_DEFAULTS)
         if fully_observable:
             model_config.update({
             # Fully observable, non-translated map
             "conv_filters": [
-                [64, [3, 3], 1], 
                 [64, [3, 3], 2], 
                 [64, [3, 3], 2], 
                 [64, [3, 3], 2]
             ],
             })
         else:
-            model_config.update({
-                "use_lstm": True,
-                "lstm_cell_size": 32,
-                # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
-                "conv_filters": [
-                    [16, [5, 5], 1], 
-                    [4, [3, 3], 1]],
-                # "post_fcnet_hiddens": [32, 32],
-            })
+            if model is None:
+                model_config.update({
+                    "use_lstm": True,
+                    "lstm_cell_size": 32,
+                    # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+                    "conv_filters": [
+                        [16, [5, 5], 1], 
+                        [4, [3, 3], 1]],
+                    # "post_fcnet_hiddens": [32, 32],
+                })
+            elif model == 'paired':
+                # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
+                ModelCatalog.register_custom_model('paired', FloodModel)
+                model_config = {'custom_model': 'paired'}
+            else:
+                raise NotImplementedError
+
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
     num_eval_envs = num_envs_per_worker

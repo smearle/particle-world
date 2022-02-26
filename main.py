@@ -242,7 +242,7 @@ def run_qdpy():
             im_grid.save(os.path.join(save_dir, "level_grid.png"))
 
             visualize_train_stats(save_dir, logbook, quality_diversity=args.quality_diversity)
-            compile_train_stats(save_dir, logbook, quality_diversity=args.quality_diversity)
+            compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_diversity=args.quality_diversity)
 
             if args.quality_diversity:
                 # save fitness qd grid
@@ -427,6 +427,7 @@ if __name__ == '__main__':
                         help="How many generations to evolve worlds (generator). If -1, run until convergence.")
     parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
                         help="How many iterations to train the player. If -1, run until convergence.")
+    parser.add_argument('-m', '--model', type=str, default=None)
     parser.add_argument('-lc', '--load_config', type=int, default=None, 
                         help="Load a dictionary of (automatically-generated) arguments. "
                         "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
@@ -499,7 +500,8 @@ if __name__ == '__main__':
     particle_trainer = init_particle_trainer(env, num_rllib_remote_workers=n_rllib_workers, n_rllib_envs=num_rllib_envs,
                                              enjoy=args.enjoy, render=args.render, save_dir=save_dir,
                                              num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
-                                             oracle_policy=args.oracle_policy, fully_observable=args.fully_observable)
+                                             oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
+                                             model=args.model)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)

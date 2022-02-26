@@ -248,6 +248,8 @@ def get_experiment_name(args):
     exp_name += f'_{args.n_policies}-pol_{args.gen_phase_len}-gen_{args.play_phase_len}-play'
     if args.fully_observable:
         exp_name += '_fullObs'
+    if args.model is not None:
+        exp_name += f'_{args.model}'
     exp_name += f'_{args.exp_name}'
     return exp_name
 
@@ -262,5 +264,19 @@ def load_config(args, config_file):
     return args
 
 
-def compile_train_stats(save_dir, logbook, quality_diversity=False):
-    pass
+def get_none_nones(lst):
+    return [l for l in lst if l is not None]
+
+
+def compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_diversity=False):
+    stats = {
+        'net_itr': net_itr,
+        'gen_itr': gen_itr,
+        'play_itr': play_itr,
+        'meanRew': np.mean(get_none_nones(logbook.select('meanRew'))[-10:]),
+        'meanEvalRew': np.mean(get_none_nones(logbook.select('meanEvalRew'))[-10:]),
+        'meanPath': np.mean(get_none_nones(logbook.select('meanPath'))[-10:]),
+        'meanFit': np.mean(get_none_nones(logbook.select('avg'))[-10:]),
+    }
+    with open(os.path.join(save_dir, 'train_stats.json'), 'w') as f:
+        json.dump(stats, f)

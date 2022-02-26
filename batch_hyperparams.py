@@ -1,6 +1,7 @@
 
 exp_names = [
-    0,
+    'test',
+    # 0,
 ]
 
 gen_phase_lens = [

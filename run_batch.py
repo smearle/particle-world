@@ -36,7 +36,7 @@ def launch_job(exp_i, job_time, job_cpus):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-l', '--local', action='store_true', 
+    parser.add_argument('-lc', '--local', action='store_true', 
                         help='Run batch of jobs locally, in sequence. (Otherwise submit parallel jobs to SLURM.)')
     parser.add_argument('-v', '--visualize', action='store_true')
     parser.add_argument('-gpus', '--num_gpus', type=int, default=1)
@@ -46,16 +46,17 @@ if __name__ == '__main__':
     parser.add_argument('-cpus', '--num_cpus', type=int, default=12)
     args = parser.parse_args()
     job_time = 48
-    num_cpus = args.num_cpus
+    num_cpus = 0 if args.visualize else args.num_cpus
+    load = True
+    num_gpus = 0 if args.visualize else args.num_gpus
+    render = True if args.enjoy else args.render
 
-    exp_sets = list(product(gen_phase_lens, play_phase_lens, quality_diversities, objectives))
+    exp_sets = list(product(exp_names, gen_phase_lens, play_phase_lens, quality_diversities, objectives))
 
     for exp_i, exp_set in enumerate(exp_sets):
-        gen_phase_len, play_phase_len, quality_diversity, objective = exp_set
-        load = True
-        num_gpus = 0 if args.visualize else args.num_gpus
-        render = True if args.enjoy else args.render
+        exp_name, gen_phase_len, play_phase_len, quality_diversity, objective = exp_set
         config = {
+            'exp_name': exp_name,
             'gen_phase_len': gen_phase_len,
             'play_phase_len': play_phase_len,
             'quality_diversity': quality_diversity,
