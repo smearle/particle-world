@@ -41,7 +41,7 @@ class Swarm(object):
         obs[:, -1, self.ps[:, 0].astype(int), self.ps[:, 1].astype(int)] = 1
         return obs
 
-    def get_observations(self, scape, flatten=True):
+    def get_observations(self, scape, flatten=True, ps=None):
         """
         Return a batch of local observations corresponding to particles in the swarm, of size (n_pop, patch_w, patch_w),
         where patch_w is a square patch allowing the agent to see fov (field of vision)-many tiles in each direction.
@@ -50,10 +50,11 @@ class Swarm(object):
         :param flatten: If true, return obs of size (n_pop, patch_w ** 2), i.e. for processing by a dense layer.
         :return:
         """
+        ps = self.ps if ps is None else ps
         fov = self.fov
         patch_w = int(fov * 2 + 1)
         # Add new dimensions for patch_w-width patches of the environment around each agent
-        ps_int = np.floor(self.ps).astype(int)
+        ps_int = np.floor(ps).astype(int)
         # weird edge case, is modulo broken?
         ps_int = np.where(ps_int == self.world_width, 0, ps_int)
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
@@ -142,7 +143,7 @@ class RLlibNN(NN, TorchModelV2):
 
 
 class NeuralSwarm(Swarm):
-    """ Handles actions as might be output by a neural network, but assumes the neurla network is defined outside the
+    """ Handles actions as might be output by a neural network, but assumes the neural network is defined outside the
     environment/swarm."""
     def __init__(self, world_width, n_pop: int, fov: int = 4, trg_scape_val=1.0):
         super().__init__(n_pop, fov, trg_scape_val=trg_scape_val)
@@ -202,6 +203,19 @@ class MazeSwarm(NeuralSwarm):
 
     def update(self, scape, accelerations=None, obstacles=None):
         super().update(scape, accelerations, obstacles=scape[1])
+
+
+dirs = [[-1, 0], [0, -1], [0, 1], [1, 0]]
+
+
+class DirectedMazeSwarm(MazeSwarm):
+    def init_ps(self):
+        super().init_ps()
+        self.dirs = np.random.randint(0, 4, self.n_pop)
+
+    def get_observations(self, scape, flatten=True):
+        ps = self.ps + (dirs[self.dirs] * self.fov)
+        return super().get_observations(scape, flatten, ps=ps)
 
 
 class GreedySwarm(Swarm):

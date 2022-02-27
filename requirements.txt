@@ -2,7 +2,7 @@ neat-python
 pandas
 pygame
 qdpy[deap]
-ray[rllib]
+ray[rllib]==1.9.0  # upgrading to 1.10 results in different train_batch length. Also evaluating only 1 world in all envs?
 ribs
 tqdm
 ./pytorch-neat

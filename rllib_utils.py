@@ -16,7 +16,7 @@ from ray.tune.logger import pretty_print
 from timeit import default_timer as timer
 
 from env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
-from model import FloodModel, OraclePolicy
+from model import FloodModel, OraclePolicy, CustomRNNModel
 from paired_models.multigrid_models import MultigridRLlibNetwork
 from utils import get_solution
 
@@ -305,7 +305,8 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 })
             elif model == 'paired':
                 # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
-                ModelCatalog.register_custom_model('paired', FloodModel)
+                # ModelCatalog.register_custom_model('paired', FloodModel)
+                ModelCatalog.register_custom_model('paired', CustomRNNModel)
                 model_config = {'custom_model': 'paired'}
             else:
                 raise NotImplementedError
@@ -350,6 +351,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             "evaluate": False,
             "objective_function": env.obj_fn_str,
             "fully_observable": fully_observable,
+            "fov": env.fovs[0],
         },
         "num_gpus": num_gpus,
         "num_workers": num_rllib_remote_workers if not (enjoy or evaluate) else 0,

@@ -161,40 +161,132 @@ class DiscreteIndividual(Individual):
         return (self.__class__ == other.__class__ and np.all(self.discrete == other.discrete))
 
 
-def run_qdpy(nb_bins):
-    def iteration_callback(iteration, net_itr, play_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, 
-                           container, logbook, stats, oracle_policy=False, quality_diversity=False):
-        net_itr_lst = net_itr
-        play_itr_lst = play_itr
-        assert len(net_itr_lst) == 1 == len(play_itr_lst)
-        net_itr = net_itr_lst[0]
-        play_itr = play_itr_lst[0]
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-l', '--load', action='store_true')
+    parser.add_argument('-en', '--enjoy', action='store_true')
+    parser.add_argument('-v', '--visualize', action='store_true',
+                        help="If reloading an experiment, produce plots, etc. "
+                             "to visualize progress.")
+    # parser.add_argument('-seq', '--sequential', help='not parallel', action='store_true')
+    # parser.add_argument('--max_total_bins', type=int, default=1, help="Maximum number of bins in the grid")
+    parser.add_argument('-p', '--parallelismType', type=str, default='None',
+                        help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
+    parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
+    # parser.add_argument('-li', '--loadIteration', default=-1, type=int)
+    parser.add_argument('-a', '--algo', default='me')
+    parser.add_argument('-exp', '--exp_name', default='test')
+    parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
+                                                                           "skipping the world-generation phase.")
+    parser.add_argument('-g', '--generator_class', type=str, default="TileFlipGenerator",
+                        help="Which type of world-generator to use, whether a "
+                             "fixed (set of) world(s), or a parameterizable "
+                             "representation."
+                        )
+    parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
+    parser.add_argument('-np', '--num_proc', type=int, default=0, help="Number of RLlib workers. Each uses 1 CPU core.")
+    parser.add_argument('-gpus', '--num_gpus', type=int, default=1, help="How many GPUs to use for training.")
+    parser.add_argument('-ev', '--evaluate', action='store_true', help="Whether to evaluate trained agents/worlds and"
+                                                                       "collect relevant stats.")
+    parser.add_argument('-qd', '--quality_diversity', action='store_true',
+                        help='Search for a grid of levels with dimensions (measures) given by the fitness of distinct '
+                             'policies, and objective score given by the inverse fitness of an additional policy.')
+    parser.add_argument('-obj', '--objective_function', type=str, default=None,
+                        help='If not using quality diversity, the name of the fitness function that will compute world'
+                             'fitness based on population-wise rewards.')
+    parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
+    parser.add_argument('--oracle_policy', action='store_true', help="Whether to use the oracle (optimal) policy, and"
+                                                                      "thereby focus on validating generator-evolution.")
+    parser.add_argument('-fo', '--fully_observable', action='store_true',
+                        help="Whether to use a fully observable environment.")
+    parser.add_argument('-gp', '--gen_phase_len', type=int, default=-1,
+                        help="How many generations to evolve worlds (generator). If -1, run until convergence.")
+    parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
+                        help="How many iterations to train the player. If -1, run until convergence.")
+    parser.add_argument('-m', '--model', type=str, default=None)
+    parser.add_argument('-fov', '--field_of_view', type=int, default=4, help='How far agents can see in each direction.')
+    parser.add_argument('-lc', '--load_config', type=int, default=None, 
+                        help="Load a dictionary of (automatically-generated) arguments. "
+                        "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
+    args = parser.parse_args()
+    if args.load_config is not None:
+        args = load_config(args, args.load_config)
+    if args.oracle_policy:
+        gen_phase_len = -1
+        play_phase_len = 0
+        n_pop = 1
+    else:
+        gen_phase_len = args.gen_phase_len
+        play_phase_len = args.play_phase_len
+        n_pop = 5
+    n_policies = args.n_policies
+    generator_cls = globals()[args.generator_class]
+    n_rllib_workers = args.num_proc
+    if (args.enjoy or args.evaluate) and args.render:
+        num_rllib_envs = 1
+    else:
+        num_rllib_envs = n_rllib_workers * 6 if n_rllib_workers > 1 else 12
 
-        gen_itr = iteration
-        idx_counter = ray.get_actor('idx_counter')
-        if net_itr % qdpy_save_interval == 0:
-            qdpy_save_archive(container=container, play_itr=play_itr, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
-        time_until_stale = 10
-        no_update = np.array(logbook.select('nbUpdated')[-1:]) == 0
-        if no_update:
-            staleness_counter[0] += 1
-        else:
-            staleness_counter[0] = 0
-        stale = staleness_counter[0] >= time_until_stale
-        if stale:
-            staleness_counter[0] = 0
-        net_itr = phase_switch_callback(net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr, 
-                              player_trainer=particle_trainer, container=container, 
-                              toolbox=toolbox, logbook=logbook, idx_counter=idx_counter, stale_generators=stale, 
-                              save_dir=save_dir, quality_diversity=quality_diversity, stats=stats)
-        net_itr_lst[0] = net_itr
-        play_itr_lst[0] = play_itr
-        return net_itr
+    if args.quality_diversity:
+        # If using QD, objective score is determined by the fitness of an additional policy.
+        assert n_policies > 1
+        # Fitness function is fixed for QD experiments.
+        assert args.objective_function is None
+        max_total_bins = 169  # so that we're guaranteed to have at least 12 non-impossible worlds (along the diagonal)
+    else:
+        # If not running a QD experiment, we must specify an objective function.
+        assert args.objective_function is not None
+        if args.objective_function == "contrastive":
+            assert n_policies > 1
+        max_total_bins = 1
 
-    qdpy_save_interval = 100
-    max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
-    logbook = None
-    if load:
+    # swarm_cls = NeuralSwarm
+    swarm_cls = MazeSwarm
+    n_sim_steps = ParticleMazeEnv.get_max_steps(width=width)
+
+    # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
+    # env = ParticleGymRLlib(
+    env = ParticleMazeEnv(
+        {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
+         'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
+         'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1})
+    generator = generator_cls(width=width, n_chan=env.n_chan)
+
+    initial_weights = generator.get_init_weights()
+    
+    experiment_name = get_experiment_name(args)
+    load = args.load
+    total_play_itrs = 50000
+    multi_proc = args.parallelismType != 'None'
+    n_emitters = 5
+    batch_size = 30
+
+    if args.quality_diversity:
+        # Define grid in terms of fitness of all policies (save 1, for fitness)
+        nb_features = n_policies - 1
+    else:
+        nb_features = 2  # The number of features to take into account in the container
+    bins_per_dim = int(pow(max_total_bins, 1. / nb_features))
+    nb_bins = (bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
+    rllib_save_interval = 10
+
+    # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
+    features_domain = [(0, env.max_steps - 1)] * nb_features  # The domain (min/max values) of the features
+    save_dir = os.path.join(args.outputDir, experiment_name)
+
+    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
+
+    particle_trainer = None if args.load and args.visualize else \
+        init_particle_trainer(env, num_rllib_remote_workers=n_rllib_workers, n_rllib_envs=num_rllib_envs,
+                                             enjoy=args.enjoy, render=args.render, save_dir=save_dir,
+                                             num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
+                                             oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
+                                             model=args.model)
+
+    # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
+    # env.set_trainer(particle_trainer)
+
+    if args.load:
         fname = 'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
         with open(os.path.join(save_dir, f"{fname}.p"), "rb") as f:
@@ -258,8 +350,28 @@ def run_qdpy(nb_bins):
                 print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
             sys.exit()
 
+        if isinstance(env.swarms[0], NeuralSwarm) and rllib_eval:
+            # if args.loadIteration == -1:
+            with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
+                model_checkpoint_path = f.read()
+            # else:
+                # model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}')
+            particle_trainer.load_checkpoint(model_checkpoint_path)
+            print(f'Loaded model checkopint at {model_checkpoint_path}')
+
+
         # Render and observe
-        elif args.enjoy:
+        if args.enjoy:
+
+            # TODO: support multiple fixed worlds
+            if args.fixed_worlds:
+                particle_trainer.workers.local_worker().set_policies_to_train([])
+                rllib_evaluate_worlds(trainer=particle_trainer, worlds={0: generator.landscape}, calc_world_stats=False)
+                # particle_trainer.evaluation_workers.foreach_worker(
+                #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
+                # particle_trainer.evaluate()
+                sys.exit()
+
             # We'll look at each world independently in our single env
             elites = sorted(grid, key=lambda ind: ind.fitness, reverse=True)
             worlds = [i for i in elites]
@@ -271,7 +383,7 @@ def run_qdpy(nb_bins):
             sys.exit()
 
         # Evaluate
-        elif args.evaluate:
+        if args.evaluate:
 
             # If rendering, we have one eval worker that will increment through eval words each reset 
             if args.render:
@@ -284,10 +396,54 @@ def run_qdpy(nb_bins):
                 ret = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
                                             evaluate_only=True)
             sys.exit()
-    else:
-        gen_itr = 0
-        play_itr = 0
-        net_itr = 0
+
+    if not os.path.isdir(save_dir):
+        os.mkdir(save_dir)
+
+    if args.fixed_worlds:
+        train_players(0, 1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
+                      n_rllib_envs=num_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps, 
+                      quality_diversity=args.quality_diversity,
+                      # TODO: initialize logbook even if not evolving worlds
+                      logbook=None)
+        sys.exit()
+
+    def iteration_callback(iteration, net_itr, play_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, 
+                           container, logbook, stats, oracle_policy=False, quality_diversity=False):
+        net_itr_lst = net_itr
+        play_itr_lst = play_itr
+        assert len(net_itr_lst) == 1 == len(play_itr_lst)
+        net_itr = net_itr_lst[0]
+        play_itr = play_itr_lst[0]
+
+        gen_itr = iteration
+        idx_counter = ray.get_actor('idx_counter')
+        if net_itr % qdpy_save_interval == 0:
+            qdpy_save_archive(container=container, play_itr=play_itr, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
+        time_until_stale = 10
+        no_update = np.array(logbook.select('nbUpdated')[-1:]) == 0
+        if no_update:
+            staleness_counter[0] += 1
+        else:
+            staleness_counter[0] = 0
+        stale = staleness_counter[0] >= time_until_stale
+        if stale:
+            staleness_counter[0] = 0
+        net_itr = phase_switch_callback(net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr, 
+                              player_trainer=particle_trainer, container=container, 
+                              toolbox=toolbox, logbook=logbook, idx_counter=idx_counter, stale_generators=stale, 
+                              save_dir=save_dir, quality_diversity=quality_diversity, stats=stats)
+        net_itr_lst[0] = net_itr
+        play_itr_lst[0] = play_itr
+        return net_itr
+
+    qdpy_save_interval = 100
+    max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
+    logbook = None
+
+    gen_itr = 0
+    play_itr = 0
+    net_itr = 0
     # Algorithm parameters
     dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
     assert (dimension >= 2)
@@ -388,163 +544,3 @@ def run_qdpy(nb_bins):
                      fitness_domain[0], nbTicks=None)
     print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
     print("All results are available in the '%s' pickle file." % algo.final_filename)
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-l', '--load', action='store_true')
-    parser.add_argument('-en', '--enjoy', action='store_true')
-    parser.add_argument('-v', '--visualize', action='store_true',
-                        help="If reloading an experiment, produce plots, etc. "
-                             "to visualize progress.")
-    # parser.add_argument('-seq', '--sequential', help='not parallel', action='store_true')
-    # parser.add_argument('--max_total_bins', type=int, default=1, help="Maximum number of bins in the grid")
-    parser.add_argument('-p', '--parallelismType', type=str, default='None',
-                        help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
-    parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
-    # parser.add_argument('-li', '--loadIteration', default=-1, type=int)
-    parser.add_argument('-a', '--algo', default='me')
-    parser.add_argument('-exp', '--exp_name', default='test')
-    parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
-                                                                           "skipping the world-generation phase.")
-    parser.add_argument('-g', '--generator_class', type=str, default="TileFlipGenerator",
-                        help="Which type of world-generator to use, whether a "
-                             "fixed (set of) world(s), or a parameterizable "
-                             "representation."
-                        )
-    parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
-    parser.add_argument('-np', '--num_proc', type=int, default=0, help="Number of RLlib workers. Each uses 1 CPU core.")
-    parser.add_argument('-gpus', '--num_gpus', type=int, default=1, help="How many GPUs to use for training.")
-    parser.add_argument('-ev', '--evaluate', action='store_true', help="Whether to evaluate trained agents/worlds and"
-                                                                       "collect relevant stats.")
-    parser.add_argument('-qd', '--quality_diversity', action='store_true',
-                        help='Search for a grid of levels with dimensions (measures) given by the fitness of distinct '
-                             'policies, and objective score given by the inverse fitness of an additional policy.')
-    parser.add_argument('-obj', '--objective_function', type=str, default=None,
-                        help='If not using quality diversity, the name of the fitness function that will compute world'
-                             'fitness based on population-wise rewards.')
-    parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
-    parser.add_argument('--oracle_policy', action='store_true', help="Whether to use the oracle (optimal) policy, and"
-                                                                      "thereby focus on validating generator-evolution.")
-    parser.add_argument('-fo', '--fully_observable', action='store_true',
-                        help="Whether to use a fully observable environment.")
-    parser.add_argument('-gp', '--gen_phase_len', type=int, default=-1,
-                        help="How many generations to evolve worlds (generator). If -1, run until convergence.")
-    parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
-                        help="How many iterations to train the player. If -1, run until convergence.")
-    parser.add_argument('-m', '--model', type=str, default=None)
-    parser.add_argument('-lc', '--load_config', type=int, default=None, 
-                        help="Load a dictionary of (automatically-generated) arguments. "
-                        "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
-    args = parser.parse_args()
-    if args.load_config is not None:
-        args = load_config(args, args.load_config)
-    if args.oracle_policy:
-        gen_phase_len = -1
-        play_phase_len = 0
-        n_pop = 1
-    else:
-        gen_phase_len = args.gen_phase_len
-        play_phase_len = args.play_phase_len
-        n_pop = 5
-    n_policies = args.n_policies
-    generator_cls = globals()[args.generator_class]
-    n_rllib_workers = args.num_proc
-    if (args.enjoy or args.evaluate) and args.render:
-        num_rllib_envs = 1
-    else:
-        num_rllib_envs = n_rllib_workers * 6 if n_rllib_workers > 1 else 12
-
-    if args.quality_diversity:
-        # If using QD, objective score is determined by the fitness of an additional policy.
-        assert n_policies > 1
-        # Fitness function is fixed for QD experiments.
-        assert args.objective_function is None
-        max_total_bins = 169  # so that we're guaranteed to have at least 12 non-impossible worlds (along the diagonal)
-    else:
-        # If not running a QD experiment, we must specify an objective function.
-        assert args.objective_function is not None
-        if args.objective_function == "contrastive":
-            assert n_policies > 1
-        max_total_bins = 1
-
-    # swarm_cls = NeuralSwarm
-    swarm_cls = MazeSwarm
-    n_sim_steps = ParticleMazeEnv.get_max_steps(width=width)
-
-    # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
-    # env = ParticleGymRLlib(
-    env = ParticleMazeEnv(
-        {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
-         'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
-         'fully_observable': args.fully_observable, 'num_eval_envs': 1})
-    generator = generator_cls(width=width, n_chan=env.n_chan)
-
-    initial_weights = generator.get_init_weights()
-    
-    experiment_name = get_experiment_name(args)
-    save_dir = os.path.join(args.outputDir, experiment_name)
-    if not os.path.isdir(save_dir):
-        os.mkdir(save_dir)
-    load = args.load
-    total_play_itrs = 50000
-    multi_proc = args.parallelismType != 'None'
-    n_emitters = 5
-    batch_size = 30
-
-    if args.quality_diversity:
-        # Define grid in terms of fitness of all policies (save 1, for fitness)
-        nb_features = n_policies - 1
-    else:
-        nb_features = 2  # The number of features to take into account in the container
-    bins_per_dim = int(pow(max_total_bins, 1. / nb_features))
-    nb_bins = (bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
-    rllib_save_interval = 10
-
-    # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
-    features_domain = [(0, env.max_steps - 1)] * nb_features  # The domain (min/max values) of the features
-
-    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
-    particle_trainer = init_particle_trainer(env, num_rllib_remote_workers=n_rllib_workers, n_rllib_envs=num_rllib_envs,
-                                             enjoy=args.enjoy, render=args.render, save_dir=save_dir,
-                                             num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
-                                             oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
-                                             model=args.model)
-
-    # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
-    # env.set_trainer(particle_trainer)
-
-    if args.load:
-        if isinstance(env.swarms[0], NeuralSwarm) and rllib_eval:
-            # if args.loadIteration == -1:
-            with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
-                model_checkpoint_path = f.read()
-            # else:
-                # model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}')
-            particle_trainer.load_checkpoint(model_checkpoint_path)
-            print(f'Loaded model checkopint at {model_checkpoint_path}')
-
-            # TODO: support multiple fixed worlds
-            if args.enjoy and args.fixed_worlds:
-                particle_trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(trainer=particle_trainer, worlds={0: generator.landscape}, calc_world_stats=False)
-                # particle_trainer.evaluation_workers.foreach_worker(
-                #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
-                # particle_trainer.evaluate()
-                sys.exit()
-
-    if not args.fixed_worlds:
-        # if args.algo == 'me':
-        run_qdpy(nb_bins=nb_bins)
-        # elif args.algo == 'cmame':
-            # run_pyribs()
-        # elif args.algo == 'ppo':
-            # TODO: train generators?
-            # pass
-    else:
-        train_players(0, 1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
-                      n_rllib_envs=num_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps, 
-                      quality_diversity=args.quality_diversity,
-                      # TODO: initialize logbook even if not evolving worlds
-                      logbook=None)
-    # TODO: evolve players?

@@ -29,7 +29,7 @@ start_color = (255, 255, 0)
 class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
     propelling themselves toward desirable regions in the fitness world."""
-    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False):
+    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False, fov=4):
         self.n_chan = n_chan
         if not pg_width:
             pg_width = width
@@ -46,7 +46,7 @@ class ParticleSwarmEnv(object):
 
         else:
         # Partially observable map
-            self.fovs = [4 for si in range(n_policies)]
+            self.fovs = [fov for si in range(n_policies)]
 
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
@@ -455,8 +455,8 @@ class ParticleMazeEnv(ParticleGymRLlib):
             self.eval_maze_i = 0
         super().__init__(cfg)
         # TODO: maze-specific evaluation scenarios (will currently break)
-        n_policies = len(self.swarms)
-        patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
+        self.n_policies = n_policies = len(self.swarms)
+        self.patch_ws = patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
         # Observe empty, wall, and goal tiles (not start tiles)
         if self.fully_observable:
@@ -497,35 +497,9 @@ class ParticleMazeEnv(ParticleGymRLlib):
         assert len(self.goal_idx) == 1
         self.start_idx = self.start_idx[0]
         self.goal_idx = self.goal_idx[0]
-        
-#       # Convert world from 3D to 2D, collapsing channel axis.
-#       v = np.reshape(world, (self.n_chan, self.width, self.width))
-
-#       # Empty and wall tiles
-#       w = np.argmax(v[:2], axis=(0))
-
-#       # Force the map to include border walls
-#       w[0] = w[-1] = w[:, 0] = w[:, -1] = 1
-
-#       # Goal and start tiles
-#       # Cannot end on obstacles
-#       vg = v[2] - v[1]
-#       goal_idxs = np.argwhere(vg == vg.max())
-#       # FIXME: by not selecting start/goal locations randomly, we bias their positions
-#       # self.goal_idx = goal_idxs[np.random.randint(goal_idxs.shape[0])]
-#       self.goal_idx = goal_idxs[0]
-
-#       # Cannot start on obstacles
-#       vs = v[2] + v[1]
-#       start_idxs = np.argwhere(vs == vs.min())
-#       # self.start_idx = start_idxs[np.random.randint(start_idxs.shape[0])]
-#       self.start_idx = start_idxs[0]
-#       w[self.start_idx[0], self.start_idx[1]] = 2
-#       w[self.goal_idx[0], self.goal_idx[1]] = 3
         self.world_flat = w
         self.next_world = discrete_to_onehot(w)
         self.need_world_reset = True
-
 
     def step(self, actions):
         # print(f"step {self.n_step} world {self.world_idx}")
@@ -597,6 +571,20 @@ class ParticleMazeEnv(ParticleGymRLlib):
     def get_max_steps(width=15):
         # optimal zig-zag + hanging tile if width is odd
         return width * width // 2 + width % 2
+
+
+class DirectedMazeEnv(ParticleMazeEnv):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        if self.fully_observable:
+            n_chan = self.n_chan  # visible player
+        else:
+            n_chan = self.n_chan - 1
+        self.observation_spaces = {i: {
+            'map': gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], n_chan)),
+            'dir': gym.spaces.Discrete(4)}
+                                   for i in range(self.n_policies)}
+        self.action_spaces = {i : gym.spaces.Discrete(4) for i in range(self.n_policies)}
 
 
 # TODO: ...

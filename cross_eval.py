@@ -18,8 +18,12 @@ def vis_cross_eval(exp_configs):
         # args = parser.parse_args()
         # [setattr(args, k, v) for k, v in exp_config.items()]
         exp_name = get_experiment_name(args)
+        exp_save_dir = os.path.join('runs', exp_name)
+        if not os.path.isdir(exp_save_dir):
+            print(f'No directory found for experiment {exp_name}. Skipping.')
+            continue
         exp_names.append(exp_name)
-        with open(os.path.join('runs', exp_name, 'train_stats.json'), 'r') as f:
+        with open(os.path.join(exp_save_dir, 'train_stats.json'), 'r') as f:
             exp_train_stats = json.load(f)
         train_stats.append(exp_train_stats)
         if col_headers is None:

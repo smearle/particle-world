@@ -1,3 +1,4 @@
+from pdb import set_trace as TT
 from typing import Dict, List
 
 import numpy as np
@@ -6,8 +7,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import gym
 from gym.spaces import MultiDiscrete
-from pdb import set_trace as TT
+from ray.rllib.models.modelv2 import ModelV2
+from ray.rllib.models.torch.recurrent_net import RecurrentNetwork as TorchRNN
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.utils import override
 from ray.rllib.utils.typing import ModelConfigDict
 from torch import TensorType
 
@@ -126,7 +129,7 @@ class MultigridNetwork(DeviceAwareModule):
         else:
             return 0
 
-    def forward(self, inputs, rnn_hxs, masks):
+    def forward_rnn(self, inputs, rnn_hxs, masks):
         raise NotImplementedError
 
     def _forward_base(self, inputs, rnn_hxs, masks):
@@ -146,6 +149,7 @@ class MultigridNetwork(DeviceAwareModule):
 
         # TODO: take scalar info
         in_embedded = in_image
+
 #       if self.xy_embed:
 #           x = one_hot(self.xy_dim, x, device=self.device)
 #           y = one_hot(self.xy_dim, y, device=self.device)
@@ -243,11 +247,9 @@ class MultigridNetwork(DeviceAwareModule):
         return value, action_log_probs, dist_entropy, rnn_hxs
 
 
-class MultigridRLlibNetwork(MultigridNetwork, TorchModelV2):
+class MultigridRLlibNetwork(MultigridNetwork, TorchRNN):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
                 model_config: ModelConfigDict, name: str):
-        TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
-                                             model_config=model_config, name=name)
         # TODO: take scalar info (obs will be dict -- make sure this is compatible with rllib default models)
         MultigridNetwork.__init__(
             self, 
@@ -255,20 +257,23 @@ class MultigridRLlibNetwork(MultigridNetwork, TorchModelV2):
             action_space=action_space,
             scalar_dim=0,
             )
-
+        TorchRNN.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
+                                             model_config=model_config, name=name)
+    @override(ModelV2)
     def get_initial_state(self) -> List[np.ndarray]:
         return [
             np.zeros(self.recurrent_hidden_state_size, np.float32),
             np.zeros(self.recurrent_hidden_state_size, np.float32),
             ]
 
-    def forward(self, input_dict: Dict[str, TensorType], state: List[TensorType], seq_lens: TensorType):
+    @override(TorchRNN)
+    def forward_rnn(self, inputs: Dict[str, TensorType], state: List[TensorType], seq_lens: TensorType):
 
         # rllib deals with masking of hidden memory states
-        masks = torch.ones(input_dict['obs'].shape[0], 1, device=self.device)
+        masks = torch.ones(inputs['obs'].shape[0], 1, device=self.device)
 
         value, core_features, rnn_hxs = super().act(
-            inputs={'image': input_dict['obs'].permute(0, 3, 1, 2)}, 
+            inputs={'image': inputs['obs'].permute(0, 3, 1, 2)}, 
             rnn_hxs=state, 
             masks=masks
             )
@@ -276,5 +281,6 @@ class MultigridRLlibNetwork(MultigridNetwork, TorchModelV2):
 
         return core_features, [rnn_hxs]
 
+    @override(ModelV2)
     def value_function(self):
         return self.value
