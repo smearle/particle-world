@@ -119,7 +119,7 @@ class ParticleSwarmEnv(object):
 
 
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
-    def __init__(self, width, swarm_cls, n_policies, n_pop, max_steps, pg_width=500, n_chan=1, fully_observable=False):
+    def __init__(self, width, swarm_cls, n_policies, n_pop, max_steps, pg_width=500, n_chan=1, fully_observable=False, fov=4):
         super().__init__(
             width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable)
         patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
