@@ -286,6 +286,8 @@ if __name__ == '__main__':
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
 
+    max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
+
     if args.load:
         fname = 'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
@@ -397,6 +399,18 @@ if __name__ == '__main__':
                                             evaluate_only=True)
             sys.exit()
 
+    # Train
+
+    else:
+        # Initialize these if not reloading
+        gen_itr = 0
+        play_itr = 0
+        net_itr = 0
+        # Create container
+        grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
+                               fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
+        logbook = None
+
     if not os.path.isdir(save_dir):
         os.mkdir(save_dir)
 
@@ -438,12 +452,7 @@ if __name__ == '__main__':
         return net_itr
 
     qdpy_save_interval = 100
-    max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
-    logbook = None
 
-    gen_itr = 0
-    play_itr = 0
-    net_itr = 0
     # Algorithm parameters
     dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
     assert (dimension >= 2)
@@ -502,10 +511,6 @@ if __name__ == '__main__':
 
     # Turn off exploration before evolving. Henceforth toggled before/after player training.
     # toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
-    if not load:
-        # Create container
-        grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
-                               fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
 
     with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
         qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, rllib_eval=rllib_eval, net_itr=net_itr,

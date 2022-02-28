@@ -107,8 +107,8 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             new_fitnesses = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
-        assert(len(rl_stats) == 1)
-        rl_stats = rl_stats[0]
+        # assert(len(rl_stats) == 1)
+        last_rl_stats = rl_stats[-1]
         logbook_stats = {'iteration': net_itr}
         stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
         # if i == 0:
@@ -117,10 +117,10 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             logbook_stats.update({f'{k}Path': world_stats[f'{k}_path_length'] for k in stat_keys})
         if calc_agent_stats and not evaluate_only:
             logbook_stats.update({
-                f'{k}Rew': rl_stats[f'episode_reward_{k}'] for k in stat_keys})
-        if 'evaluation' in rl_stats:
+                f'{k}Rew': last_rl_stats[f'episode_reward_{k}'] for k in stat_keys})
+        if 'evaluation' in last_rl_stats:
             logbook_stats.update({
-                f'{k}EvalRew': rl_stats['evaluation'][f'episode_reward_{k}'] for k in stat_keys})
+                f'{k}EvalRew': last_rl_stats['evaluation'][f'episode_reward_{k}'] for k in stat_keys})
         # logbook.record(**logbook_stats)
         # print(logbook.stream)
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
@@ -136,15 +136,15 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         else:
             world_id += len(new_fitnesses)
 
-        logbook_stats.update({
-            'elapsed': timer() - start_time,
-        })
+    logbook_stats.update({
+        'elapsed': timer() - start_time,
+    })
 
         # [fitnesses[k].append(v) for k, v in trial_fitnesses.items()]
     # fitnesses = {k: ([np.mean([vi[0][fi] for vi in v]) for fi in range(len(v[0][0]))],
     #         [np.mean([vi[1][mi] for vi in v]) for mi in range(len(v[0][1]))]) for k, v in fitnesses.items()}
 
-    return rl_stats, qd_stats, logbook_stats
+    return last_rl_stats, qd_stats, logbook_stats
 
 
 def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
