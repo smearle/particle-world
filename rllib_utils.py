@@ -15,7 +15,7 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import pretty_print
 from timeit import default_timer as timer
 
-from env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
+from envs.env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
 from model import FloodModel, OraclePolicy, CustomRNNModel
 from paired_models.multigrid_models import MultigridRLlibNetwork
 from utils import get_solution
@@ -91,7 +91,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
 
             new_fitnesses = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
-                    lambda env: {env.world_idx: ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0))}))
+                    lambda env: {env.world_key: ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0))}))
             rl_stats.append([])
 
         else:
@@ -107,7 +107,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             new_fitnesses = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
-        # assert(len(rl_stats) == 1)
+        # assert(len(rl_stats) == 1)  # TODO: bring back this assertion except when we're re-evaluating world archive after training
         last_rl_stats = rl_stats[-1]
         logbook_stats = {'iteration': net_itr}
         stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
@@ -125,7 +125,15 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         # print(logbook.stream)
         new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
         new_fits = {}
-        [new_fits.update(nf) for nf in new_fitnesses]
+        # [new_fits.update(nf) for nf in new_fitnesses]
+        for nf in new_fitnesses:
+            for k in nf:
+                assert k not in new_fits
+
+        # Ensure we have not evaluated any world twice
+        for k in new_fits:
+            assert k not in qd_stats
+
         qd_stats.update(new_fits)
 
         # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
@@ -161,9 +169,9 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         # weights start changing.
         if i % 10 == 0:
             rllib_save_model(trainer, save_dir)
-        world_idxs = np.random.choice(np.array(landscapes).shape[0], n_rllib_envs, replace=False)
-        # curr_lands = np.array(landscapes)[world_idxs]
-        curr_lands = [landscapes[wid] for wid in world_idxs]
+        world_keys = np.random.choice(np.array(landscapes).shape[0], n_rllib_envs, replace=False)
+        # curr_lands = np.array(landscapes)[world_keys]
+        curr_lands = [landscapes[wid] for wid in world_keys]
         worlds = {i: l for i, l in enumerate(curr_lands)}
 
         # Get world stats on first iteration only, since they won't change after this inside training loop
@@ -316,10 +324,10 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     num_eval_envs = num_envs_per_worker
     if enjoy:
         evaluation_num_episodes = num_eval_envs * 2
-    elif evaluate:
-        evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * num_eval_envs * 5
+    # elif evaluate:
+        # evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * 10
     else:
-        evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * num_eval_envs
+        evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs)
 
     trainer_config = {
         "multiagent": {
@@ -360,7 +368,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         "render_env": render if not enjoy else True,
 
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
-        "evaluation_interval": 50 if not enjoy else 10,
+        "evaluation_interval": 1 if not enjoy else 10,
 
         "evaluation_num_workers": 0 if not (evaluate) else num_rllib_remote_workers,
 
@@ -398,13 +406,12 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
     if not enjoy:
-        # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_idx of each env will be incremented
+        # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_key of each env will be incremented
         # by len(eval_mazes) each reset.
-        worlds = {i: maze for i, maze in enumerate(eval_mazes)}
         eval_workers = trainer.evaluation_workers
         hashes = eval_workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
         n_eval_envs = sum([e for we in hashes for e in we])
-        idxs = list(worlds.keys())
+        idxs = list(eval_mazes.keys())
         idx_counter.set_idxs.remote(idxs)
         hashes = [h for wh in hashes for h in wh]
         idx_counter.set_hashes.remote(hashes, allow_one_to_many=True)
@@ -412,7 +419,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         assert ray.get(idx_counter.scratch.remote())
         # Assign envs to worlds
         eval_workers.foreach_worker(
-            lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter)))
+            lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
 
     n_policies = len(env.swarms)
     for i in range(n_policies):

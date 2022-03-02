@@ -10,6 +10,7 @@ import ray
 from ray import rllib
 from ray.rllib import MultiAgentEnv
 
+from envs.handmade_mazes import eval_mazes
 from generator import render_landscape
 from swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
 from utils import discrete_to_onehot
@@ -190,7 +191,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
-        self.rewards = None
+        self.rewards = []
         self.world = None
         evaluate = cfg.pop("evaluate")
         self.need_world_reset = False
@@ -217,16 +218,16 @@ class ParticleGymRLlib(ParticleGym):
             # self.max_steps = max(self.fovs) * 2
             # self.reset = partial(ParticleEvalEnv.reset, self)
             # self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
-        self.world_idx = None
+        self.world_key = None
         self.next_world = None
 
     def set_worlds(self, worlds: dict, idx_counter=None):
         # self.world_idx = 0
         if idx_counter:
-            self.world_idx = ray.get(idx_counter.get.remote(hash(self)))
+            self.world_key = ray.get(idx_counter.get.remote(hash(self)))
         else:
-            self.world_idx = np.random.choice(list(worlds.keys()))
-        self.set_world(worlds[self.world_idx])
+            self.world_key = np.random.choice(list(worlds.keys()))
+        self.set_world(worlds[self.world_key])
         self.worlds = worlds
 
     def set_world(self, world):
@@ -246,7 +247,7 @@ class ParticleGymRLlib(ParticleGym):
         return dones
 
     def set_world_eval(self, world: np.array, idx):
-        self.world_idx = idx
+        self.world_key = idx
         self.set_world(world)
         self.set_landscape(self.world)
 
@@ -261,7 +262,15 @@ class ParticleGymRLlib(ParticleGym):
         # self.world_idx = (self.world_idx + 1) % len(self.worlds)
 
         obs = super().reset()
-        self.rewards = {agent_id: 0 for agent_id in obs}
+
+        # Ensure no env is evaluating the same world twice before flushing stats via get_world_stats
+        for rw in self.rewards:
+            assert self.world_key not in rw
+
+        self.rewards.append({self.world_key: {agent_id: 0 for agent_id in obs}})
+
+        # This should be getting flushed out regularly
+        assert len(self.rewards) <= 100
 
         return obs
 
@@ -274,25 +283,39 @@ class ParticleGymRLlib(ParticleGym):
         # reset() call occurs on the first step (resulting in max_steps - 1).
         if not evaluate:
             assert self.max_steps - 1 <= self.n_step <= self.max_steps + 1
+
         n_pop = self.swarms[0].ps.shape[0]
+        stats = {}
+
+        assert len(self.rewards) <= 2  # only 2 when calling evaluate the first time
+
+        # FIXME: super convoluted, clean this up (tuples instead of dicts?)
+        rewards = self.rewards[0]
+        assert len(rewards) == 1
+        world_key = list(rewards.keys())[0]
+        rewards = rewards[world_key]
 
         # Convert agent to policy rewards
-        swarm_rewards = [[self.rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
+        swarm_rewards = [[rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
 
-        # Return a mapping of world_idx to a tuple of stats in a format that is compatible with qdpy
+        # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
         if quality_diversity:
             # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
-            stats = {self.world_idx: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
+            world_stats = {world_key: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
         else:
             # Objective and placeholder measures
-            stats = {self.world_idx: ((self.objective_function(swarm_rewards),), [0, 0])}
+            world_stats = {self.world_key: ((self.objective_function(swarm_rewards),), [0, 0])}
+
+        stats.update(world_stats)
+
+        self.rewards = []
         return stats
 
     def get_reward(self):
         rew = super().get_reward()
         # Store rewards so that we can compute world fitness according to progress over duration of level
         for k, v in rew.items():
-            self.rewards[k] += v
+            self.rewards[-1][self.world_key][k] += v
 
         return rew
 
@@ -345,100 +368,18 @@ class ParticleEvalEnv(ParticleGymRLlib):
         return rewards
     
     
-eval_mazes = [
-    # Empty room---easy (goal next to spawn)
-    np.array([
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    ]),
-    # Empty room---hard (goal and spawn in opposite corners
-    np.array([
-        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3],
-    ]),
-    # SixteenRooms
-    np.array([
-        [0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-        [0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-        [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
-        [1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0],
-        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-        [1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1],
-        [0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-        [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
-        [0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1],
-        [0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 3, 0],
-        [0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-    ]),
-    # Zig-Zag
-    np.array([
-        [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 3],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 2, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-    ]),
-    # Labyrinth (from REPAIRED paper)
-    np.array([
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
-        [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
-        [0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 3, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
-        [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
-        [1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0],
-        [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-    ]),
-]
 # Convert to 3-channel probability distribution (or agent action)-type representation
-eval_mazes_probdists = []
-for i, y in enumerate(eval_mazes):
+eval_mazes_probdists = {}
+for k, y in eval_mazes.items():
     y = discrete_to_onehot(y)
     z = np.empty((y.shape[0] - 1, y.shape[1], y.shape[2]))
     z[:3] = y[:3]
     z[2] -= y[3]
-    eval_mazes_probdists.append(z)
+    eval_mazes_probdists[k] = z
 
-eval_mazes_onehots = []
-for y in eval_mazes:
-    eval_mazes_onehots.append(discrete_to_onehot(y))
+eval_mazes_onehots = {}
+for k, y in eval_mazes.items():
+    eval_mazes_onehots[k] = discrete_to_onehot(y)
 
 
 class ParticleMazeEnv(ParticleGymRLlib):
@@ -512,13 +453,15 @@ class ParticleMazeEnv(ParticleGymRLlib):
 
     def reset(self):
         # FIXME: redundant observations are being taken here
-        # print(f'reset world {self.world_idx} on step {self.n_step}')
+        print(f'reset world {self.world_key} on step {self.n_step}')
+        world_keys = list(self.worlds.keys())
 
         # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
         if self.evaluate:
             # print('eval\n')
-            self.world_idx = (self.world_idx + self.num_eval_envs) % len(self.worlds)
-            self.set_world(self.worlds[self.world_idx])
+            # FIXME: maybe inefficient to call index
+            self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]
+            self.set_world(self.worlds[self.world_key])
 #           w = eval_mazes_onehots[self.eval_maze_i].astype(int)
 #           self.start_idx = np.argwhere(w[2:3] == 1)[0, 1:]
 #           self.goal_idx = np.argwhere(w[3:4] == 1)[0, 1:]

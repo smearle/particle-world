@@ -17,7 +17,7 @@ from ray.rllib.utils import override
 from ray.rllib.utils.typing import ModelConfigDict, ModelWeights
 from torch import TensorType, nn
 
-from env import ParticleMazeEnv, eval_mazes
+from envs import ParticleMazeEnv, eval_mazes
 
 
 th.set_printoptions(profile='full')

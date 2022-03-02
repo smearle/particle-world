@@ -22,7 +22,7 @@ from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-from env import ParticleGym, ParticleGymRLlib, ParticleMazeEnv, eval_mazes
+from envs import ParticleMazeEnv, eval_mazes
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
 from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
@@ -386,17 +386,14 @@ if __name__ == '__main__':
 
         # Evaluate
         if args.evaluate:
-
-            # If rendering, we have one eval worker that will increment through eval words each reset 
-            if args.render:
-                particle_trainer.evaluate()
-
-            # Otherwise, we evaluate worlds in parallel
-            else:
-                # TODO: collect per-world stats. I think using trainer.evaluate(), as above, will work.
-                worlds = {i: z for i, z in enumerate(eval_mazes)}
-                ret = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
-                                            evaluate_only=True)
+            worlds = eval_mazes
+            rllib_stats = particle_trainer.evaluate()
+            qd_stats = particle_trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
+                lambda env: env.get_world_stats(evaluate=True, quality_diversity=args.quality_diversity)))
+            qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
+            # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
+                                        # evaluate_only=True)
+            TT()
             sys.exit()
 
     # Train

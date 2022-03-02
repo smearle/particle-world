@@ -102,7 +102,7 @@ def infer_elites(env, generator, player_trainer, world_archive, pg_width, pg_del
     idx_counter = ray.get_actor('idx_counter')
     while running:
         fitnesses = {}
-        for world_idx, g_weights in enumerate(world_archive):
+        for world_key, g_weights in enumerate(world_archive):
             # generator.set_weights(g_weights)
             all_fit_difs = np.empty((n_eps))
             all_bcs = np.empty((n_eps, 2))
