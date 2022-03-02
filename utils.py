@@ -255,7 +255,7 @@ def get_experiment_name(args):
 
 
 def load_config(args, config_file):
-    config_file = os.path.join('auto_configs/', f'{config_file}.json')
+    config_file = os.path.join('configs', 'auto', f'{config_file}.json')
     with open(config_file, 'r') as f:
         new_args = json.load(f)
     print(f'Loaded config:\n{new_args}')

@@ -6,6 +6,8 @@ import os
 import pandas as pd
 from utils import get_experiment_name
 
+EVAL_DIR = 'runs_eval'
+
 
 def vis_cross_eval(exp_configs):
     exp_names = []
@@ -30,6 +32,7 @@ def vis_cross_eval(exp_configs):
             col_headers = list(exp_train_stats.keys())
         data_rows.append([exp_train_stats[k] for k in col_headers])
     df = pd.DataFrame(data_rows, columns=col_headers, index=exp_names)
-    df.to_latex('cross_eval.tex')
-    os.system('pdflatex tables.tex')
+    df.to_latex(os.path.join(EVAL_DIR, 'cross_eval.tex'))
+    proj_dir = os.curdir
+    os.system(f'cd {EVAL_DIR}; pdflatex tables.tex; cd {proj_dir}')
     

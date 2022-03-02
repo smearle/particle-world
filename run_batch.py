@@ -1,10 +1,10 @@
 import argparse
+from collections import namedtuple
 from itertools import product
 import json
 import os
 import re
 
-from batch_hyperparams import *
 from cross_eval import vis_cross_eval
 from utils import get_experiment_name
 
@@ -47,13 +47,18 @@ def main():
     parser.add_argument('-cpus', '--num_cpus', type=int, default=12)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
+    parser.add_argument('-bc', '--batch_config', type=str, default='0')
     args = parser.parse_args()
     job_time = 48
     num_cpus = 0 if args.visualize else args.num_cpus
     num_gpus = 0 if args.visualize else args.num_gpus
     render = True if args.enjoy else args.render
+    
+    with open(os.path.join('configs', args.batch_config + '.json')) as f:
+        batch_config = json.load(f)
+    batch_config = namedtuple('batch_config', batch_config.keys())(**batch_config)
 
-    exp_sets = list(product(exp_names, gen_play_phase_lens, qd_objectives))
+    exp_sets = list(product(batch_config.exp_names, batch_config.gen_play_phase_lens, batch_config.qd_objectives))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
@@ -86,8 +91,8 @@ def main():
             'num_proc': num_cpus,
         }
         exp_configs.append(exp_config)
-        with open(os.path.join('auto_configs', f'{exp_i}.json'), 'w') as f:
-            json.dump(exp_config, f)
+        with open(os.path.join('configs', 'auto', f'{exp_i}.json'), 'w') as f:
+            json.dump(exp_config, f, indent=4)
 
     sbatch_file = os.path.join('slurm', 'run.sh')
 
