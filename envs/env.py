@@ -263,11 +263,7 @@ class ParticleGymRLlib(ParticleGym):
 
         obs = super().reset()
 
-        # Ensure no env is evaluating the same world twice before flushing stats via get_world_stats
-        for rw in self.rewards:
-            assert self.world_key not in rw
-
-        self.rewards.append({self.world_key: {agent_id: 0 for agent_id in obs}})
+        self.rewards.append((self.world_key, {agent_id: 0 for agent_id in obs}))
 
         # This should be getting flushed out regularly
         assert len(self.rewards) <= 100
@@ -285,37 +281,35 @@ class ParticleGymRLlib(ParticleGym):
             assert self.max_steps - 1 <= self.n_step <= self.max_steps + 1
 
         n_pop = self.swarms[0].ps.shape[0]
-        stats = {}
+        qd_stats = []
 
-        assert len(self.rewards) <= 2  # only 2 when calling evaluate the first time
+        for (world_key, rewards) in self.rewards:
 
-        # FIXME: super convoluted, clean this up (tuples instead of dicts?)
-        rewards = self.rewards[0]
-        assert len(rewards) == 1
-        world_key = list(rewards.keys())[0]
-        rewards = rewards[world_key]
+            # Convert agent to policy rewards
+            swarm_rewards = [[rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
 
-        # Convert agent to policy rewards
-        swarm_rewards = [[rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
+            # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
+            # stats are of the form (world_key, qdpy_stats, policy_rewards)
+            if quality_diversity:
+                # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
+                world_stats = {world_key: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
+            else:
+                # Objective and placeholder measures
+                world_stats = (world_key, ((self.objective_function(swarm_rewards),), [0, 0]))
 
-        # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
-        if quality_diversity:
-            # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
-            world_stats = {world_key: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
-        else:
-            # Objective and placeholder measures
-            world_stats = {self.world_key: ((self.objective_function(swarm_rewards),), [0, 0])}
+            # Add per-policy stats
+            world_stats = (*world_stats, [np.mean(sr) for sr in swarm_rewards])
 
-        stats.update(world_stats)
+            qd_stats.append(world_stats)
 
         self.rewards = []
-        return stats
+        return qd_stats
 
     def get_reward(self):
         rew = super().get_reward()
         # Store rewards so that we can compute world fitness according to progress over duration of level
         for k, v in rew.items():
-            self.rewards[-1][self.world_key][k] += v
+            self.rewards[-1][1][k] += v
 
         return rew
 
@@ -406,6 +400,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
             n_chan = self.n_chan - 1
         self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(patch_ws[i], patch_ws[i], n_chan))
                                    for i in range(n_policies)}
+        self.observation_space = None
 
         self.max_steps = ParticleMazeEnv.get_max_steps(self.width)
 

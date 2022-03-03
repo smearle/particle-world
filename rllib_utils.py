@@ -89,7 +89,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             envs = [e for we in envs for e in we]
             envs[0].render()
 
-            new_fitnesses = workers.foreach_worker(
+            new_world_stats = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: {env.world_key: ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0))}))
             rl_stats.append([])
@@ -104,7 +104,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             rl_stats.append(stats)
 
             # Collect stats for generator
-            new_fitnesses = workers.foreach_worker(
+            new_world_stats = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
         # assert(len(rl_stats) == 1)  # TODO: bring back this assertion except when we're re-evaluating world archive after training
@@ -123,10 +123,11 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
                 f'{k}EvalRew': last_rl_stats['evaluation'][f'episode_reward_{k}'] for k in stat_keys})
         # logbook.record(**logbook_stats)
         # print(logbook.stream)
-        new_fitnesses = [fit for worker_fits in new_fitnesses for fit in worker_fits]
+        new_world_stats = [fit for worker_fits in new_world_stats for fit in worker_fits]
         new_fits = {}
         # [new_fits.update(nf) for nf in new_fitnesses]
-        for nf in new_fitnesses:
+        TT()
+        for nf in new_world_stats:
             for k in nf:
                 assert k not in new_fits
 
@@ -142,7 +143,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         if idx_counter:
             world_id = len(qd_stats)
         else:
-            world_id += len(new_fitnesses)
+            world_id += len(new_world_stats)
 
     logbook_stats.update({
         'elapsed': timer() - start_time,

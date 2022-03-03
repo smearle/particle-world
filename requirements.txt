@@ -1,8 +1,11 @@
+# NOTE: need pytorch=1.10.1 (or an rllib bug that attempts to validate env by looking at env.observation_space occurs)
+deap
 neat-python
+opencv-python
 pandas
 pygame
-qdpy[deap]
-ray[rllib]==1.9.0  # upgrading to 1.10 results in different train_batch length. Also evaluating only 1 world in all envs?
+ray[rllib]==1.9.2  # upgrading to 1.10 results in different train_batch length. Also evaluating only 1 world in all envs?
 ribs
 tqdm
-./pytorch-neat
+./submodules/pytorch-neat
+./submodules/qdpy
