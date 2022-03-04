@@ -25,7 +25,7 @@ from tqdm import tqdm
 from envs import ParticleMazeEnv, eval_mazes
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
-from rllib_utils import init_particle_trainer, train_players, rllib_evaluate_worlds, IdxCounter
+from rllib_utils import init_particle_trainer, toggle_exploration, train_players, rllib_evaluate_worlds, IdxCounter
 from swarm import NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
 from visualize import visualize_train_stats
@@ -81,15 +81,16 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
         # After player training, the reckoning: re-evaluate all worlds with new policies
         net_itr -= 1
         if rllib_eval:
-            rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
+            rl_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
                 net_itr=net_itr, trainer=player_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, 
                 idx_counter=idx_counter, quality_diversity=quality_diversity, start_time=start_time,
-                calc_world_stats=False)
+                calc_world_heuristics=False)
 
         else:
-            qd_stats = toolbox.map(toolbox.evaluate, invalid_ind)
+            world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
 
-        update_individuals(invalid_ind, qd_stats)
+        world_stats = {k: ws[0] for k, ws in world_stats.items()}
+        update_individuals(invalid_ind, world_stats)
         
 
         # Store batch in container
@@ -368,7 +369,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if args.fixed_worlds:
                 particle_trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(trainer=particle_trainer, worlds={0: generator.landscape}, calc_world_stats=False)
+                rllib_evaluate_worlds(trainer=particle_trainer, worlds={0: generator.landscape}, calc_world_heuristics=False)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
                 # particle_trainer.evaluate()
@@ -381,7 +382,7 @@ if __name__ == '__main__':
                 worlds = eval_mazes
             for i, elite in enumerate(worlds):
                 ret = rllib_evaluate_worlds(trainer=particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
-                                            evaluate_only=True, calc_world_stats=False)
+                                            evaluate_only=True, calc_world_heuristics=False)
             sys.exit()
 
         # Evaluate
@@ -509,27 +510,27 @@ if __name__ == '__main__':
     # Turn off exploration before evolving. Henceforth toggled before/after player training.
     # toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
 
-    with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
-        qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, rllib_eval=rllib_eval, net_itr=net_itr,
-                          quality_diversity=args.quality_diversity, oracle_policy=args.oracle_policy, gen_itr=gen_itr,
-                          logbook=logbook, play_itr=play_itr)
-        # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
-        # the archive. (Crucially, it is mutable.)
-        staleness_counter = [0]
-        callback = partial(iteration_callback, toolbox=toolbox, rllib_eval=rllib_eval, 
-                           staleness_counter=staleness_counter, save_dir=save_dir,
-                           quality_diversity=args.quality_diversity)
-        # Create a QD algorithm
-        algo = DEAPQDAlgorithm(pMgr.toolbox, grid, init_batch_siz=init_batch_size,
-                               batch_size=batch_size, niter=nb_iterations,
-                               verbose=verbose, show_warnings=show_warnings,
-                               results_infos=results_infos, log_base_path=log_base_path, save_period=None,
-                               iteration_filename=f'{experiment_name}' + '/latest-{}.p',
-                               iteration_callback_fn=callback,
-                               ea_fn=qd_algo,
-                               )
-        # Run the illumination process !
-        algo.run(init_batch_size=init_batch_size)
+    # with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
+    qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, rllib_eval=rllib_eval, net_itr=net_itr,
+                        quality_diversity=args.quality_diversity, oracle_policy=args.oracle_policy, gen_itr=gen_itr,
+                        logbook=logbook, play_itr=play_itr)
+    # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
+    # the archive. (Crucially, it is mutable.)
+    staleness_counter = [0]
+    callback = partial(iteration_callback, toolbox=toolbox, rllib_eval=rllib_eval, 
+                        staleness_counter=staleness_counter, save_dir=save_dir,
+                        quality_diversity=args.quality_diversity)
+    # Create a QD algorithm
+    algo = DEAPQDAlgorithm(toolbox, grid, init_batch_siz=init_batch_size,
+                            batch_size=batch_size, niter=nb_iterations,
+                            verbose=verbose, show_warnings=show_warnings,
+                            results_infos=results_infos, log_base_path=log_base_path, save_period=None,
+                            iteration_filename=f'{experiment_name}' + '/latest-{}.p',
+                            iteration_callback_fn=callback,
+                            ea_fn=qd_algo,
+                            )
+    # Run the illumination process !
+    algo.run(init_batch_size=init_batch_size)
     # Print results info
     print(f"Total elapsed: {algo.total_elapsed}\n")
     print(grid.summary())

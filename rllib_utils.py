@@ -22,7 +22,7 @@ from utils import get_solution
 
 
 def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
-    quality_diversity=False, oracle_policy=False, calc_world_stats=False, calc_agent_stats=False):
+    quality_diversity=False, oracle_policy=False, calc_world_heuristics=False, calc_agent_stats=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -52,7 +52,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
 
     # Train/evaluate on all worlds n_trials many times each
     # for i in range(n_trials):
-    qd_stats = {}
+    world_stats = {}
     world_id = 0
 
     # Train/evaluate until we have simulated in all worlds
@@ -112,9 +112,9 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         logbook_stats = {'iteration': net_itr}
         stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
         # if i == 0:
-        if calc_world_stats:
-            world_stats = get_env_world_stats(trainer)
-            logbook_stats.update({f'{k}Path': world_stats[f'{k}_path_length'] for k in stat_keys})
+        if calc_world_heuristics:
+            env_world_heuristics = get_env_world_heuristics(trainer)
+            logbook_stats.update({f'{k}Path': env_world_heuristics[f'{k}_path_length'] for k in stat_keys})
         if calc_agent_stats and not evaluate_only:
             logbook_stats.update({
                 f'{k}Rew': last_rl_stats[f'episode_reward_{k}'] for k in stat_keys})
@@ -123,25 +123,28 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
                 f'{k}EvalRew': last_rl_stats['evaluation'][f'episode_reward_{k}'] for k in stat_keys})
         # logbook.record(**logbook_stats)
         # print(logbook.stream)
+
+        # list with entries (world_key, (fit_vals, bc_vals), policy_rewards)
         new_world_stats = [fit for worker_fits in new_world_stats for fit in worker_fits]
+
         new_fits = {}
-        # [new_fits.update(nf) for nf in new_fitnesses]
-        TT()
-        for nf in new_world_stats:
-            for k in nf:
-                assert k not in new_fits
+        for stat_lst in new_world_stats:
+            for stat_tpl in stat_lst:
+                world_key = stat_tpl[0]
+                assert world_key not in new_fits
+                new_fits[world_key] = stat_tpl[1:]
 
         # Ensure we have not evaluated any world twice
         for k in new_fits:
-            assert k not in qd_stats
+            assert k not in world_stats
 
-        qd_stats.update(new_fits)
+        world_stats.update(new_fits)
 
         # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
         # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
-            world_id = len(qd_stats)
+            world_id = len(world_stats)
         else:
             world_id += len(new_world_stats)
 
@@ -153,13 +156,13 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
     # fitnesses = {k: ([np.mean([vi[0][fi] for vi in v]) for fi in range(len(v[0][0]))],
     #         [np.mean([vi[1][mi] for vi in v]) for mi in range(len(v[0][1]))]) for k, v in fitnesses.items()}
 
-    return last_rl_stats, qd_stats, logbook_stats
+    return last_rl_stats, world_stats, logbook_stats
 
 
 def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
                   idx_counter=None, logbook=None, quality_diversity=False):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
-    toggle_exploration(trainer, explore=True, n_policies=n_policies)
+    # toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
     staleness_window = 10
     done_training = False
@@ -175,13 +178,13 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         curr_lands = [landscapes[wid] for wid in world_keys]
         worlds = {i: l for i, l in enumerate(curr_lands)}
 
-        # Get world stats on first iteration only, since they won't change after this inside training loop
-        calc_world_stats = (i == 0)
+        # Get world heuristics on first iteration only, since they won't change after this inside training loop
+        calc_world_heuristics = (i == 0)
 
         rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
             net_itr=net_itr, trainer=trainer, worlds=worlds, idx_counter=idx_counter, calc_agent_stats=True,
             start_time=start_time, evaluate_only=False, quality_diversity=quality_diversity, 
-            calc_world_stats=calc_world_stats)
+            calc_world_heuristics=calc_world_heuristics)
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rl_stats['episode_reward_mean']
 
@@ -292,33 +295,36 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             })
 
         model_config = copy.copy(MODEL_DEFAULTS)
-        if fully_observable:
+#       if fully_observable:
+#           model_config.update({
+#           # Fully observable, non-translated map
+#           "conv_filters": [
+#               [64, [3, 3], 2], 
+#               [64, [3, 3], 2], 
+#               [64, [3, 3], 2]
+#           ],
+#           })
+#       else:
+        if model is None:
             model_config.update({
-            # Fully observable, non-translated map
-            "conv_filters": [
-                [64, [3, 3], 2], 
-                [64, [3, 3], 2], 
-                [64, [3, 3], 2]
-            ],
+                "use_lstm": True,
+                "lstm_cell_size": 32,
+                # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+                "conv_filters": [
+                    [16, [5, 5], 1], 
+                    [4, [3, 3], 1]],
+                # "post_fcnet_hiddens": [32, 32],
             })
+        elif model == 'paired':
+            # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
+            ModelCatalog.register_custom_model('paired', CustomRNNModel)
+            model_config = {'custom_model': 'paired'}
+        elif model == 'flood':
+            ModelCatalog.register_custom_model('flood', FloodModel)
+            model_config = {'custom_model': 'flood'}
+
         else:
-            if model is None:
-                model_config.update({
-                    "use_lstm": True,
-                    "lstm_cell_size": 32,
-                    # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
-                    "conv_filters": [
-                        [16, [5, 5], 1], 
-                        [4, [3, 3], 1]],
-                    # "post_fcnet_hiddens": [32, 32],
-                })
-            elif model == 'paired':
-                # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
-                # ModelCatalog.register_custom_model('paired', FloodModel)
-                ModelCatalog.register_custom_model('paired', CustomRNNModel)
-                model_config = {'custom_model': 'paired'}
-            else:
-                raise NotImplementedError
+            raise NotImplementedError
 
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
@@ -369,7 +375,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         "render_env": render if not enjoy else True,
 
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
-        "evaluation_interval": 1 if not enjoy else 10,
+        "evaluation_interval": 10 if not enjoy else 10,
 
         "evaluation_num_workers": 0 if not (evaluate) else num_rllib_remote_workers,
 
@@ -466,7 +472,7 @@ def toggle_exploration(trainer, explore: bool, n_policies: int):
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
 
 
-def get_env_world_stats(trainer):
+def get_env_world_heuristics(trainer):
     flood_model = trainer.get_policy('oracle').model
     path_lengths = trainer.workers.foreach_worker(
         # lambda w: w.foreach_env(lambda e: flood_model.get_solution_length(th.Tensor(e.world[None,...]))))

@@ -36,9 +36,9 @@ class ParticleSwarmEnv(object):
             pg_width = width
         self.pg_width=pg_width
         self.world = None
-        self.landscape_set = False
         self.swarms = None
         self.width = width
+        self.n_pop = n_pop
         # self.fovs = [si+1 for si in range(n_policies)]
 
         if fully_observable:
@@ -67,10 +67,9 @@ class ParticleSwarmEnv(object):
             for si, trg in zip(range(n_policies), np.arange(n_policies) / max(1, (n_policies - 1)))]
 
     def reset(self):
-        # assert self.landscape_set
         assert self.world is not None
         # assert len(self.world.shape) == 2
-        [swarm.reset(scape=self.world) for swarm in self.swarms]
+        [swarm.reset(scape=self.world, n_pop=self.n_pop) for swarm in self.swarms]
 
     def step_swarms(self):
         [s.update(scape=self.world) for s in self.swarms]
@@ -115,14 +114,13 @@ class ParticleSwarmEnv(object):
 
     def set_landscape(self, landscape):
         assert landscape is not None
-        self.landscape_set = True
         self.world = landscape
 
 
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     def __init__(self, width, swarm_cls, n_policies, n_pop, max_steps, pg_width=500, n_chan=1, fully_observable=False, fov=4):
         super().__init__(
-            width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable)
+            width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, fov=fov)
         patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
         self.actions = [(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1)]
 
@@ -173,9 +171,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     def get_dones(self):
         dones = {(i, j): False for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
-        dones.update({'__all__': self.n_step > 0 and self.n_step % (self.max_steps - 1) == 0})
-        if dones['__all__']:
-            self.landscape_set = False
+        dones.update({'__all__': self.n_step > 0 and self.n_step == self.max_steps})
         return dones
 
     def get_particle_observations(self):
@@ -191,7 +187,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
-        self.rewards = []
+        self.stats = []
         self.world = None
         evaluate = cfg.pop("evaluate")
         self.need_world_reset = False
@@ -204,6 +200,7 @@ class ParticleGymRLlib(ParticleGym):
             assert self.num_eval_envs is not None
 
         super().__init__(**cfg)
+        self.next_n_pop = self.n_pop
         obj_fn = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
         
         if obj_fn == min_solvable_fitness:
@@ -221,7 +218,7 @@ class ParticleGymRLlib(ParticleGym):
         self.world_key = None
         self.next_world = None
 
-    def set_worlds(self, worlds: dict, idx_counter=None):
+    def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None):
         # self.world_idx = 0
         if idx_counter:
             self.world_key = ray.get(idx_counter.get.remote(hash(self)))
@@ -229,6 +226,8 @@ class ParticleGymRLlib(ParticleGym):
             self.world_key = np.random.choice(list(worlds.keys()))
         self.set_world(worlds[self.world_key])
         self.worlds = worlds
+        if next_n_pop is not None:
+            self.next_n_pop = next_n_pop
 
     def set_world(self, world):
         """
@@ -243,7 +242,9 @@ class ParticleGymRLlib(ParticleGym):
 
     def get_dones(self):
         dones = super().get_dones()
-        dones['__all__'] = self.need_world_reset or self.n_step == self.max_steps + 1
+
+        # We'll take an additional step in the old world, then reset. Not the best but it works.
+        dones['__all__'] = dones['__all__'] or self.need_world_reset
         return dones
 
     def set_world_eval(self, world: np.array, idx):
@@ -252,6 +253,7 @@ class ParticleGymRLlib(ParticleGym):
         self.set_landscape(self.world)
 
     def reset(self):
+        self.n_pop = self.next_n_pop
         self.world = self.next_world
         # self.next_world = None
         self.need_world_reset = False
@@ -263,10 +265,10 @@ class ParticleGymRLlib(ParticleGym):
 
         obs = super().reset()
 
-        self.rewards.append((self.world_key, {agent_id: 0 for agent_id in obs}))
+        self.stats.append((self.world_key, {agent_id: 0 for agent_id in obs}))
 
         # This should be getting flushed out regularly
-        assert len(self.rewards) <= 100
+        # assert len(self.stats) <= 100
 
         return obs
 
@@ -283,10 +285,12 @@ class ParticleGymRLlib(ParticleGym):
         n_pop = self.swarms[0].ps.shape[0]
         qd_stats = []
 
-        for (world_key, rewards) in self.rewards:
+        assert len(self.stats) == 1
+
+        for (world_key, agent_rewards) in self.stats:
 
             # Convert agent to policy rewards
-            swarm_rewards = [[rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
+            swarm_rewards = [[agent_rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
 
             # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
             # stats are of the form (world_key, qdpy_stats, policy_rewards)
@@ -302,14 +306,19 @@ class ParticleGymRLlib(ParticleGym):
 
             qd_stats.append(world_stats)
 
-        self.rewards = []
+        self.stats = []
         return qd_stats
 
     def get_reward(self):
         rew = super().get_reward()
+
+        if len(self.stats) == 0:
+            assert self.need_world_reset
+            return rew
+
         # Store rewards so that we can compute world fitness according to progress over duration of level
         for k, v in rew.items():
-            self.rewards[-1][1][k] += v
+            self.stats[-1][1][k] += v
 
         return rew
 
@@ -438,21 +447,21 @@ class ParticleMazeEnv(ParticleGymRLlib):
         self.need_world_reset = True
 
     def step(self, actions):
-        # print(f"step {self.n_step} world {self.world_idx}")
 
-        obs, rew, info, done = super().step(actions)
-        return obs, rew, info, done
+        obs, rew, done, info = super().step(actions)
+        # print(f"step {self.n_step} world {self.world_key}, done: {done}, max steps {self.max_steps}")
+        return obs, rew, done, info
 
     def step_swarms(self):
         [s.update(scape=self.world, obstacles=self.world) for s in self.swarms]
 
     def reset(self):
         # FIXME: redundant observations are being taken here
-        print(f'reset world {self.world_key} on step {self.n_step}')
-        world_keys = list(self.worlds.keys())
+        # print(f'reset world {self.world_key} on step {self.n_step}')
 
         # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
         if self.evaluate:
+            world_keys = list(self.worlds.keys())
             # print('eval\n')
             # FIXME: maybe inefficient to call index
             self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]

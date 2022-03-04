@@ -61,16 +61,17 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     invalid_ind = init_batch
 
     if rllib_eval:
-        rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
+        rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
             trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, idx_counter=idx_counter,
             quality_diversity=quality_diversity, oracle_policy=oracle_policy, net_itr=net_itr,
             start_time=start_time, evaluate_only=False)
         # assert len(rllib_stats) == 1
 
     else:
-        qd_stats = toolbox.map(toolbox.evaluate, invalid_ind)
+        world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
 
-    update_individuals(invalid_ind, qd_stats)
+    world_stats = {k: ws[0] for k, ws in world_stats.items()}
+    update_individuals(invalid_ind, world_stats)
 
     if len(invalid_ind) == 0:
         raise ValueError("No valid individual found !")
@@ -121,14 +122,15 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
         if rllib_eval:
-            rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr, evaluate_only=False,
+            rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr, evaluate_only=False,
                 trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, idx_counter=idx_counter,
                 oracle_policy=oracle_policy, start_time=start_time, quality_diversity=quality_diversity)
 
         else:
-            qd_stats = toolbox.map(toolbox.evaluate, invalid_ind)
+            world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
 
-        update_individuals(invalid_ind, qd_stats)
+        world_stats = {k: ws[0] for k, ws in world_stats.items()}
+        update_individuals(invalid_ind, world_stats)
 
         # Replace the current population by the offspring
         nb_updated = container.update(offspring, issue_warning=show_warnings)

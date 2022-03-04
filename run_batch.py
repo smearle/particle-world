@@ -58,11 +58,12 @@ def main():
         batch_config = json.load(f)
     batch_config = namedtuple('batch_config', batch_config.keys())(**batch_config)
 
-    exp_sets = list(product(batch_config.exp_names, batch_config.gen_play_phase_lens, batch_config.qd_objectives))
+    exp_sets = list(product(batch_config.exp_names, batch_config.gen_play_phase_lens, batch_config.qd_objectives,
+                            batch_config.models))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
-        exp_name, (gen_phase_len, play_phase_len), (quality_diversity, objective) = exp_set
+        exp_name, (gen_phase_len, play_phase_len), (quality_diversity, objective), model = exp_set
         if objective == 'min_solvable':
             n_policies = 1
         elif objective == 'contrastive':
@@ -80,7 +81,7 @@ def main():
             'objective_function': objective,
             'n_policies': n_policies,
             'fully_observable': False,
-            'model': None,
+            'model': model,
             'num_proc': num_cpus,
             'num_gpus': num_gpus,
             'visualize': args.visualize,
@@ -89,6 +90,7 @@ def main():
             'evaluate': args.evaluate,
             'render': render,
             'num_proc': num_cpus,
+            'field_of_view': 2,
         }
         exp_configs.append(exp_config)
         with open(os.path.join('configs', 'auto', f'{exp_i}.json'), 'w') as f:

@@ -21,5 +21,8 @@
         [false, "min_solvable"],
         [false, "contrastive"],
         [true, null]
+    ],
+    "models": [
+        null
     ]
 }

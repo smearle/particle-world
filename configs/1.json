@@ -3,9 +3,12 @@
         "test"
     ],
     "gen_play_phase_lens": [
-        [1, 50]
+        [1, 1]
     ],
     "qd_objectives": [
         [false, "min_solvable"]
+    ],
+    "models": [
+        "paired"
     ]
 }

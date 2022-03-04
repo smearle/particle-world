@@ -30,9 +30,10 @@ class Swarm(object):
         self.n_pop = n_pop
         self.trg_scape_val = trg_scape_val
 
-    def reset(self, scape):
+    def reset(self, scape, n_pop):
         # self.world = scape
-        self.ps, self.vs = init_ps(self.world_width, self.n_pop)
+        self.n_pop = n_pop
+        self.ps, self.vs = init_ps(self.world_width, n_pop)
 
     def get_full_observations(self, scape, flatten=False):
         # Add a 4th channel for player positions
@@ -335,7 +336,7 @@ def contrastive_fitness(fits):
     return fit
 
 
-def min_solvable_fitness(rews, max_rew):
+def min_solvable_fitness(rews, max_rew, trg_rew=0):
     """ A fitness function rewarding levels that result in the least non-zero reward.
     :param rews: a list of lists of rewards achieved by distinct agents from distinct populations (length 1 or greater)
     :param max_rew: the maximum reward achievable by a given population
@@ -347,7 +348,8 @@ def min_solvable_fitness(rews, max_rew):
     if np.all(rews == 0):
         return 0
     else:
-        return max_rew - np.mean(rews)
+        # return max_rew - np.mean(rews)
+        return max_rew - np.abs(np.mean())
 
 
 def toroidal_distance(a, b, width):

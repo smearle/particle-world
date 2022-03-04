@@ -106,12 +106,22 @@ RENDER = False
 # TODO: Use strided convolutions to compute path length!
 class FloodSqueeze(nn.Module):
     def __init__(self, empty_chan=0, wall_chan=1, src_chan=3, trg_chan=2):
-        pass       
+        super().__init__()
+        n_hid_chans = 64
+        self.conv_0 = nn.Conv2d(4, n_hid_chans, kernel_size=3, stride=1, padding=0)
+        with th.no_grad():
+            sl, sb, sr, st = 0, 1, 2, 3
+            tl, tb, tr, tt = 4, 5, 6, 7
+            
+            self.conv_0.weight = nn.Parameter(th.zeros_like(self.conv_0.weight), requires_grad=False)
+            # self.conv_0.weight[]
 
     def hid_forward(self, input):
         pass 
 
     def forward(self, input):
+        input = input.permute(0, 3, 1, 2)
+        TT()
         pass
 
     def get_solution_length(self, input):
@@ -282,9 +292,11 @@ class FloodModel(TorchRNN, nn.Module):
     def get_initial_state(self):
         return [
             np.zeros((self.n_hid_chans, self.obs_space.shape[0], self.obs_space.shape[1]), dtype=np.float32),
+            np.zeros((self.n_hid_chans, self.obs_space.shape[0], self.obs_space.shape[1]), dtype=np.float32),
         ]
 
-    def forward(self, input_dict: Dict[str, TensorType], state: List[TensorType], seq_lens: TensorType):
+    def forward_rnn(self, input, state, seq_lens):
+        TT()
         input = input_dict['obs'].permute(0, 3, 1, 2)
         n_batches = input.shape[0]
         agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
@@ -316,12 +328,14 @@ if __name__ == '__main__':
     width = 15
     n_sim_steps = 128
     pg_width = 600
-    model = FloodFill()
+    model = FloodSqueeze()
     env = ParticleMazeEnv(
         {'width': width, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
-         'pg_width': pg_width, 'evaluate': True, 'objective_function': None, 'num_eval_envs': 1})
+         'pg_width': pg_width, 'evaluate': True, 'objective_function': None, 'num_eval_envs': 1, 
+         'fully_observable': True})
     cv2.namedWindow("FloodFill")
 
+    env.set_worlds(worlds = eval_mazes)
 
     for i in range(len(eval_mazes)):
         obs = env.reset()
