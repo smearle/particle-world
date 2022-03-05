@@ -102,25 +102,71 @@ adjs = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
 adjs_to_acts = {adj: i for i, adj in enumerate(adjs)}
 RENDER = False
 
+from matplotlib import pyplot as plt
 
 # TODO: Use strided convolutions to compute path length!
 class FloodSqueeze(nn.Module):
     def __init__(self, empty_chan=0, wall_chan=1, src_chan=3, trg_chan=2):
         super().__init__()
-        n_hid_chans = 64
-        self.conv_0 = nn.Conv2d(4, n_hid_chans, kernel_size=3, stride=1, padding=0)
+        self.conv_0 = nn.Conv2d(4, 14, kernel_size=3, stride=1, padding=0)
+        w_lb = th.Tensor([
+            [ 0,  0,  0],
+            [-1, -1,  0],
+            [ 0, -1,  0],
+        ])
+        w_lr = th.Tensor([
+            [ 0,  0,  0],
+            [-1, -1, -1],
+            [ 0,  0,  0],
+        ])
+        w_lt = th.Tensor([
+            [ 0, -1,  0],
+            [-1, -1,  0],
+            [ 0,  0,  0],
+        ])
+        w_br = th.Tensor([
+            [ 0,  0,  0],
+            [ 0, -1, -1],
+            [ 0, -1,  0],
+        ])
+        w_bt = th.Tensor([
+            [ 0, -1,  0],
+            [ 0, -1,  0],
+            [ 0, -1,  0],
+        ])
+        w_rt = th.Tensor([
+            [ 0, -1,  0],
+            [ 0, -1, -1],
+            [ 0,  0,  0],
+        ])
         with th.no_grad():
             sl, sb, sr, st = 0, 1, 2, 3
             tl, tb, tr, tt = 4, 5, 6, 7
+            lb, lr, lt, br, bt, rt = 8, 9, 10, 11, 12, 13
             
-            self.conv_0.weight = nn.Parameter(th.zeros_like(self.conv_0.weight), requires_grad=False)
-            # self.conv_0.weight[]
+            w0 = nn.Parameter(th.zeros_like(self.conv_0.weight), requires_grad=False)
+            b0 = nn.Parameter(th.zeros_like(self.conv_0.bias), requires_grad=False)
+
+            for dd_chan, w_dd in zip([lb, lr, lt, br, bt, rt], [w_lb, w_lr, w_lt, w_br, w_bt, w_rt]):
+                w0[dd_chan, wall_chan, :, :] = w_dd
+                b0[dd_chan] = 1
+
+            for s_chan, t_chan, d in zip([sl, sb, sr, st], [tl, tb, tr, tt], [(1, 0), (2, 1), (1, 2), (0, 1)]):
+                w0[s_chan, src_chan, 1, 1] = 1
+                w0[s_chan, wall_chan, d[0], d[1]] = -1
+                w0[t_chan, trg_chan, 1, 1] = 1
+                w0[t_chan, wall_chan, d[0], d[1]] = -1
+
+            self.conv_0.weight = w0
+            self.conv_0.bias = b0
 
     def hid_forward(self, input):
         pass 
 
     def forward(self, input):
         input = input.permute(0, 3, 1, 2)
+        x = self.conv_0(input)
+        x = th.clamp(x, 0, 1)
         TT()
         pass
 
