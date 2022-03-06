@@ -348,8 +348,8 @@ def min_solvable_fitness(rews, max_rew, trg_rew=0):
     if np.all(rews == 0):
         return 0
     else:
-        # return max_rew - np.mean(rews)
-        return max_rew - np.abs(np.mean())
+        return max_rew - np.mean(rews)
+        # return max_rew - np.abs(np.mean())
 
 
 def toroidal_distance(a, b, width):

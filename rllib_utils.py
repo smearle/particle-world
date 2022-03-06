@@ -295,36 +295,36 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             })
 
         model_config = copy.copy(MODEL_DEFAULTS)
-#       if fully_observable:
-#           model_config.update({
-#           # Fully observable, non-translated map
-#           "conv_filters": [
-#               [64, [3, 3], 2], 
-#               [64, [3, 3], 2], 
-#               [64, [3, 3], 2]
-#           ],
-#           })
-#       else:
-        if model is None:
+        if fully_observable:
             model_config.update({
-                "use_lstm": True,
-                "lstm_cell_size": 32,
-                # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
-                "conv_filters": [
-                    [16, [5, 5], 1], 
-                    [4, [3, 3], 1]],
-                # "post_fcnet_hiddens": [32, 32],
+            # Fully observable, non-translated map
+            "conv_filters": [
+                [64, [3, 3], 2], 
+                [128, [3, 3], 2], 
+                [256, [3, 3], 2]
+            ],
             })
-        elif model == 'paired':
-            # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
-            ModelCatalog.register_custom_model('paired', CustomRNNModel)
-            model_config = {'custom_model': 'paired'}
-        elif model == 'flood':
-            ModelCatalog.register_custom_model('flood', FloodModel)
-            model_config = {'custom_model': 'flood'}
-
         else:
-            raise NotImplementedError
+            if model is None:
+                model_config.update({
+                    "use_lstm": True,
+                    "lstm_cell_size": 32,
+                    # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+                    "conv_filters": [
+                        [16, [5, 5], 1], 
+                        [4, [3, 3], 1]],
+                    # "post_fcnet_hiddens": [32, 32],
+                })
+            elif model == 'paired':
+                # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
+                ModelCatalog.register_custom_model('paired', CustomRNNModel)
+                model_config = {'custom_model': 'paired'}
+            elif model == 'flood':
+                ModelCatalog.register_custom_model('flood', FloodModel)
+                model_config = {'custom_model': 'flood'}
+
+            else:
+                raise NotImplementedError
 
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
