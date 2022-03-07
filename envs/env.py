@@ -156,16 +156,21 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         assert self.world is not None
         swarm_acts = {i: {} for i in range(len(self.swarms))}
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
-        batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] for i in range(self.swarms[j].n_pop)])
+#       batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] for i in range(self.swarms[j].n_pop)])
+#                           for j in range(len(self.swarms))}
+        batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] if (i, j) in actions else [0, 0] for i in range(self.swarms[j].n_pop)])
                             for j in range(len(self.swarms))}
         [swarm.update(scape=self.world, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
         # Dones before rewards, in case reward is different e.g. at the last step
         self.dones = self.get_dones()
         rew = self.get_reward()
+        self.dones.update({(i, j): rew[(i, j)] > 0 for i, j in rew})
         info = {agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs}
         self.n_step += 1
         assert self.world is not None
+#       print(rew)
+        # print(dones)
         return obs, rew, self.dones, info
 
     def get_dones(self):
@@ -179,7 +184,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
                 for j in range(swarm.n_pop)}
 
     def get_reward(self):
-        swarm_rewards = [swarm.get_rewards(self.world) for swarm in self.swarms]
+        swarm_rewards = [swarm.get_rewards(self.world, self.n_step, self.max_steps) for swarm in self.swarms]
         rew = {(i, j): swarm_rewards[i][j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
         return rew
@@ -296,6 +301,7 @@ class ParticleGymRLlib(ParticleGym):
         # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
         # reset() call occurs on the first step (resulting in max_steps - 1).
         if not evaluate:
+            # print(f'get world stats at step {self.n_step}')
             assert self.max_steps - 1 <= self.n_step <= self.max_steps + 1
 
         n_pop = self.swarms[0].ps.shape[0]
@@ -473,12 +479,21 @@ class ParticleMazeEnv(ParticleGymRLlib):
 
         obs, rew, done, info = super().step(actions)
         # print(f"step {self.n_step} world {self.world_key}, done: {done}, max steps {self.max_steps}")
+
+        [obs.pop(k) for k in self.dead if k in obs]
+        [rew.pop(k) for k in self.dead if k in rew]
+        [done.pop(k) for k in self.dead if k in done]
+        [info.pop(k) for k in self.dead if k in info]
+
+        self.dead.update(k for k in obs if done[k])
+
         return obs, rew, done, info
 
     def step_swarms(self):
         [s.update(scape=self.world, obstacles=self.world) for s in self.swarms]
 
     def reset(self):
+        self.dead = set({})
         # FIXME: redundant observations are being taken here
         # print(f'reset world {self.world_key} on step {self.n_step}')
 

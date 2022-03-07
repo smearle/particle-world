@@ -13,43 +13,65 @@ from ray.rllib.utils.typing import AgentID, PolicyID
 
 class RegretCallbacks(DefaultCallbacks):
 
-    def on_episode_step(
-        self,
-        *,
-        worker: RolloutWorker,
-        base_env: BaseEnv,
-        policies: Dict[str, Policy],
-        episode: Episode,
-        env_index: int,
-        **kwargs
-    ):
-        pass
+#   def on_episode_step(
+#       self,
+#       *,
+#       worker: RolloutWorker,
+#       base_env: BaseEnv,
+#       policies: Dict[str, Policy],
+#       episode: Episode,
+#       env_index: int,
+#       **kwargs
+#   ):
+#       pass
 
- #  def on_postprocess_trajectory(
- #          self, *, worker: "RolloutWorker", episode: Episode,
- #          agent_id: AgentID, policy_id: PolicyID,
- #          policies: Dict[PolicyID, Policy], postprocessed_batch: SampleBatch,
- #          original_batches: Dict[AgentID, SampleBatch], **kwargs) -> None:
- #      """Called immediately after a policy's postprocess_fn is called.
+#   def on_episode_end(self, *, worker: "RolloutWorker", base_env: BaseEnv,
+#                      policies: Dict[PolicyID, Policy], episode: Episode,
+#                      **kwargs) -> None:
+#       """Runs when an episode is done.
 
- #      You can use this callback to do additional postprocessing for a policy,
- #      including looking at the trajectory data of other agents in multi-agent
- #      settings.
+#       Args:
+#           worker: Reference to the current rollout worker.
+#           base_env: BaseEnv running the episode. The underlying
+#               sub environment objects can be retrieved by calling
+#               `base_env.get_sub_environments()`.
+#           policies: Mapping of policy id to policy
+#               objects. In single agent mode there will only be a single
+#               "default_policy".
+#           episode: Episode object which contains episode
+#               state. You can use the `episode.user_data` dict to store
+#               temporary data, and `episode.custom_metrics` to store custom
+#               metrics for the episode.
+#           kwargs: Forward compatibility placeholder.
+#       """
+#       pass
 
- #      Args:
- #          worker: Reference to the current rollout worker.
- #          episode: Episode object.
- #          agent_id: Id of the current agent.
- #          policy_id: Id of the current policy for the agent.
- #          policies: Mapping of policy id to policy objects. In single
- #              agent mode there will only be a single "default_policy".
- #          postprocessed_batch: The postprocessed sample batch
- #              for this agent. You can mutate this object to apply your own
- #              trajectory postprocessing.
- #          original_batches: Mapping of agents to their unpostprocessed
- #              trajectory data. You should not mutate this object.
- #          kwargs: Forward compatibility placeholder.
- #      """
+#   def on_postprocess_trajectory(
+#           self, *, worker: "RolloutWorker", episode: Episode,
+#           agent_id: AgentID, policy_id: PolicyID,
+#           policies: Dict[PolicyID, Policy], postprocessed_batch: SampleBatch,
+#           original_batches: Dict[AgentID, SampleBatch], **kwargs) -> None:
+#       """Called immediately after a policy's postprocess_fn is called.
+
+#       You can use this callback to do additional postprocessing for a policy,
+#       including looking at the trajectory data of other agents in multi-agent
+#       settings.
+
+#       Args:
+#           worker: Reference to the current rollout worker.
+#           episode: Episode object.
+#           agent_id: Id of the current agent.
+#           policy_id: Id of the current policy for the agent.
+#           policies: Mapping of policy id to policy objects. In single
+#               agent mode there will only be a single "default_policy".
+#           postprocessed_batch: The postprocessed sample batch
+#               for this agent. You can mutate this object to apply your own
+#               trajectory postprocessing.
+#           original_batches: Mapping of agents to their unpostprocessed
+#               trajectory data. You should not mutate this object.
+#           kwargs: Forward compatibility placeholder.
+#       """
+#       pass
 
  #      advantages = postprocessed_batch["advantages"]
  #      pos_val_loss = np.mean(np.abs(advantages))

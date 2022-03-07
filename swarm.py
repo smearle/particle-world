@@ -197,9 +197,11 @@ class NeuralSwarm(Swarm):
 
 
 class MazeSwarm(NeuralSwarm):
-    def get_rewards(self, scape):
+    def get_rewards(self, scape, n_step, max_steps):
         ps = self.ps.astype(int)
-        rewards = (scape[3, ps[:, 0], ps[:, 1]] == 1).astype(int)
+#       rewards = (scape[3, ps[:, 0], ps[:, 1]] == 1).astype(np.int)
+        rewards = (scape[3, ps[:, 0], ps[:, 1]] == 1)
+        rewards = np.where(rewards, 1 - 0.9 * (n_step / max_steps), 0)
         return rewards
 
     def update(self, scape, accelerations=None, obstacles=None):
