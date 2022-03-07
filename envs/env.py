@@ -163,7 +163,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         # Dones before rewards, in case reward is different e.g. at the last step
         self.dones = self.get_dones()
         rew = self.get_reward()
-        info = {}
+        info = {agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs}
         self.n_step += 1
         assert self.world is not None
         return obs, rew, self.dones, info
@@ -185,6 +185,10 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         return rew
 
 
+def regret_fitness(regret_loss):
+    return regret_loss
+
+
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
         self.stats = []
@@ -193,11 +197,15 @@ class ParticleGymRLlib(ParticleGym):
         self.need_world_reset = False
         self.obj_fn_str = cfg.pop('objective_function')
         self.fully_observable = cfg.get('fully_observable')
+        self.regret_losses = []
 
         # Global knowledge of number of eval envs for incrementing eval world idx
         self.num_eval_envs = cfg.pop('num_eval_envs', None)
         if self.evaluate:
             assert self.num_eval_envs is not None
+
+        # Target reward world should elicit if using min_solvable objective
+        trg_rew = cfg.pop('target_reward')
 
         super().__init__(**cfg)
         self.next_n_pop = self.n_pop
@@ -207,7 +215,7 @@ class ParticleGymRLlib(ParticleGym):
             # TODO: this is specific to the maze subclass
             # The maximum reward
             max_rew = self.max_steps
-            obj_fn = partial(obj_fn, max_rew=max_rew)
+            obj_fn = partial(obj_fn, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_fn
 
         # if evaluate:
@@ -216,6 +224,7 @@ class ParticleGymRLlib(ParticleGym):
             # self.reset = partial(ParticleEvalEnv.reset, self)
             # self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
         self.world_key = None
+        self.last_world_key = self.world_key
         self.next_world = None
 
     def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None):
@@ -272,6 +281,13 @@ class ParticleGymRLlib(ParticleGym):
 
         return obs
 
+    def set_regret_loss(self, losses):
+        if self.last_world_key not in losses:
+            # assert self.evaluate, 'Samples should cover all simultaneously evaluated worlds except during evaluation.'
+            return
+        loss = losses[self.last_world_key]
+        self.regret_losses.append((self.last_world_key, loss))
+
     def get_world_stats(self, evaluate=False, quality_diversity=False):
         """
         Return the fitness (and behavior characteristics) achieved by the world after an episode of simulation. Note
@@ -287,7 +303,8 @@ class ParticleGymRLlib(ParticleGym):
 
         assert len(self.stats) == 1
 
-        for (world_key, agent_rewards) in self.stats:
+        for (world_key, agent_rewards), (world_key_2, regret_loss) in zip(self.stats, self.regret_losses):
+            assert world_key == world_key_2
 
             # Convert agent to policy rewards
             swarm_rewards = [[agent_rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
@@ -299,7 +316,11 @@ class ParticleGymRLlib(ParticleGym):
                 world_stats = {world_key: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
             else:
                 # Objective and placeholder measures
-                world_stats = (world_key, ((self.objective_function(swarm_rewards),), [0, 0]))
+                if self.obj_fn_str == 'regret':
+                    obj = self.objective_function(regret_loss)
+                else:
+                    obj = self.objective_function(swarm_rewards)
+                world_stats = (world_key, ((obj,), [0, 0]))
 
             # Add per-policy stats
             world_stats = (*world_stats, [np.mean(sr) for sr in swarm_rewards])
@@ -307,6 +328,8 @@ class ParticleGymRLlib(ParticleGym):
             qd_stats.append(world_stats)
 
         self.stats = []
+        self.regret_losses = []
+
         return qd_stats
 
     def get_reward(self):
@@ -458,6 +481,12 @@ class ParticleMazeEnv(ParticleGymRLlib):
     def reset(self):
         # FIXME: redundant observations are being taken here
         # print(f'reset world {self.world_key} on step {self.n_step}')
+
+        # Ugly hack to deal with eval envs resetting before end of sample. last_world_key = world_key during training,
+        # since the new world key is set right before reset. During eval, this is actually the last world_key, since
+        # reset happens before the end of the evaluate() batch.
+        # print(f"reset world {self.world_key} on step {self.n_step}")
+        self.last_world_key = self.world_key
 
         # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
         if self.evaluate:

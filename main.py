@@ -1,4 +1,5 @@
 import argparse
+import copy
 import math
 import os
 import pickle
@@ -25,7 +26,9 @@ from tqdm import tqdm
 from envs import ParticleMazeEnv, eval_mazes
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
-from rllib_utils import init_particle_trainer, toggle_exploration, train_players, rllib_evaluate_worlds, IdxCounter
+from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
+from rllib_utils.eval_worlds import rllib_evaluate_worlds
+from rllib_utils.utils import IdxCounter
 from swarm import NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
 from visualize import visualize_train_stats
@@ -55,8 +58,11 @@ fitness_domain = [(-np.inf, np.inf)]
 def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, 
                           save_dir, quality_diversity, stats):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
-    max_possible_generator_fitness = n_sim_steps - 1 / n_pop
-    optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
+    if args.objective_function == "min_solvable":
+        max_possible_generator_fitness = n_sim_steps - 1 / n_pop
+        optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
+    else:
+        optimal_generators = False
     if args.oracle_policy:
         return
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
@@ -209,6 +215,9 @@ if __name__ == '__main__':
     parser.add_argument('-lc', '--load_config', type=int, default=None, 
                         help="Load a dictionary of (automatically-generated) arguments. "
                         "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
+    parser.add_argument('-tr', '--target_reward', type=int, default=0, 
+                        help="Target reward the world should elicit from player if using the min_solvable objective "
+                        "function.")
     args = parser.parse_args()
     if args.load_config is not None:
         args = load_config(args, args.load_config)
@@ -247,10 +256,11 @@ if __name__ == '__main__':
 
     # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
     # env = ParticleGymRLlib(
-    env = ParticleMazeEnv(
-        {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
+    env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
          'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
-         'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1})
+         'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
+         'target_reward': args.target_reward}
+    env = ParticleMazeEnv(copy.copy(env_config))
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
     initial_weights = generator.get_init_weights()
@@ -282,7 +292,7 @@ if __name__ == '__main__':
                                              enjoy=args.enjoy, render=args.render, save_dir=save_dir,
                                              num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
                                              oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
-                                             model=args.model)
+                                             model=args.model, env_config=env_config)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)

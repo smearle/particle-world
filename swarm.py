@@ -346,10 +346,11 @@ def min_solvable_fitness(rews, max_rew, trg_rew=0):
     rews = np.array(rews)
     rews = np.mean(rews, axis=1)  # get mean per-population rewards
     if np.all(rews == 0):
-        return 0
+        # return 0
+        return -max_rew
     else:
-        return max_rew - np.mean(rews)
-        # return max_rew - np.abs(np.mean())
+        # return max_rew - np.mean(rews)
+        return -np.abs(np.mean(rews) - trg_rew)
 
 
 def toroidal_distance(a, b, width):

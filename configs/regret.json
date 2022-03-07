@@ -18,11 +18,9 @@
         [-1, 50]
     ],
     "qd_objectives": [
-        [false, "min_solvable"],
-        [false, "contrastive"],
-        [true, null]
+        [false, "regret"]
     ],
     "fo_models": [
-        [false, null]
+        [false, "paired"]
     ]
 }

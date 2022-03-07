@@ -10,7 +10,8 @@ from pdb import set_trace as TT
 from qdpy.phenotype import *
 from qdpy.containers import *
 
-from rllib_utils import IdxCounter, rllib_evaluate_worlds
+from rllib_utils.eval_worlds import rllib_evaluate_worlds
+from rllib_utils.utils import IdxCounter
 from utils import update_individuals
 
 
