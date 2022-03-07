@@ -6,6 +6,7 @@ from timeit import default_timer as timer
 import pickle
 import copy
 from pdb import set_trace as TT
+import random
 
 from qdpy.phenotype import *
 from qdpy.containers import *
@@ -114,10 +115,20 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     while not done:
         start_time = timer()
         # Select the next batch individuals
+        assert mutpb == 1.0
         batch = toolbox.select(container, batch_size)
+        # batch = np.random.choice(container, size=batch_size, replace=False)
 
         ## Vary the pool of individuals
-        offspring = deap.algorithms.varAnd(batch, toolbox, cxpb, mutpb)
+        # offspring = deap.algorithms.varAnd(batch, toolbox, cxpb, mutpb)
+        offspring = [toolbox.clone(ind) for ind in batch]
+        for i in range(len(offspring)):
+            if random.random() < 0.05:
+                offspring[i] = toolbox.individual()
+                del offspring[i].fitness.values
+            else:
+                offspring[i], = toolbox.mutate(offspring[i])
+                del offspring[i].fitness.values
 
         # Evaluate the individuals with an invalid fitness
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
