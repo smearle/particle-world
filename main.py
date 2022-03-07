@@ -58,11 +58,11 @@ fitness_domain = [(-np.inf, np.inf)]
 def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, 
                           save_dir, quality_diversity, stats):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
-    if args.objective_function == "min_solvable":
-        max_possible_generator_fitness = n_sim_steps - 1 / n_pop
-        optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
-    else:
-        optimal_generators = False
+#   if args.objective_function == "min_solvable":
+#       max_possible_generator_fitness = n_sim_steps - 1 / n_pop
+#       optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
+#   else:
+    optimal_generators = False
     if args.oracle_policy:
         return
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):

@@ -52,12 +52,13 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rl_stats['episode_reward_mean']
 
-        if i == 0:
-            mean_path_length = logbook_stats['meanPath']
-            max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
+#       if i == 0:
+#           mean_path_length = logbook_stats['meanPath']
+#           max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
 
         # End training if within a certain margin of optimal performance
-        done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
+#       done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
+        done_training = False
 
         # if play_phase_len == -1:
             # if i >= staleness_window:
