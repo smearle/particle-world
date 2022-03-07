@@ -64,7 +64,7 @@ def main():
 
     for exp_i, exp_set in enumerate(exp_sets):
         exp_name, (gen_phase_len, play_phase_len), (quality_diversity, objective), (fully_observable, model) = exp_set
-        if objective == 'min_solvable':
+        if objective in ['min_solvable', 'regret']:
             n_policies = 1
         elif objective == 'contrastive':
             n_policies = 2
