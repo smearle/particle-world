@@ -158,8 +158,8 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
 #       batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] for i in range(self.swarms[j].n_pop)])
 #                           for j in range(len(self.swarms))}
-        batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] if (i, j) in actions else [0, 0] for i in range(self.swarms[j].n_pop)])
-                            for j in range(len(self.swarms))}
+        batch_swarm_acts = {i: np.vstack([swarm_acts[i][j] if (i, j) in actions else [0, 0] for j in range(self.swarms[i].n_pop)])
+                            for i in range(len(self.swarms))}
         [swarm.update(scape=self.world, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
         # Dones before rewards, in case reward is different e.g. at the last step
