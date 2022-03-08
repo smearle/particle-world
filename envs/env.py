@@ -210,7 +210,7 @@ class ParticleGymRLlib(ParticleGym):
             assert self.num_eval_envs is not None
 
         # Target reward world should elicit if using min_solvable objective
-        trg_rew = cfg.pop('target_reward')
+        trg_rew = cfg.pop('target_reward', 0)
 
         super().__init__(**cfg)
         self.next_n_pop = self.n_pop
@@ -307,7 +307,8 @@ class ParticleGymRLlib(ParticleGym):
         n_pop = self.swarms[0].ps.shape[0]
         qd_stats = []
 
-        assert len(self.stats) == 1
+        if not evaluate:
+            assert len(self.stats) == 1
 
         for (world_key, agent_rewards), (world_key_2, regret_loss) in zip(self.stats, self.regret_losses):
             assert world_key == world_key_2

@@ -120,8 +120,8 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             for stat_tpl in stat_lst:
                 world_key = stat_tpl[0]
                 if world_key in new_fits:
-                    assert fixed_worlds, "Should not have redundant world evaluations inside thid functionunless "
-                    "training on fixed worlds."
+                    assert fixed_worlds or evaluate_only, "Should not have redundant world evaluations inside this "
+                    "function unless training on fixed worlds or doing evaluation/enjoyment."
                     # We'll create a list of stats from separate runs, though we're not doing anything with this for now
                     new_fits[world_key] = [new_fits[world_key]] + [stat_tpl[1:]]
                 else:
@@ -130,7 +130,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         # Ensure we have not evaluated any world twice
         for k in new_fits:
             if k in world_stats:
-                assert fixed_worlds
+                assert fixed_worlds or evaluate_only
         if fixed_worlds:
             for k in list(new_fits.keys()):
                 if k in world_stats:

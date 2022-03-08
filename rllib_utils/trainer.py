@@ -311,7 +311,7 @@ class MyPrintLogger(Logger):
 
     def _init(self):
         # Custom init function.
-        print("Initializing ...")
+        print("Initializing...")
         # Setting up our log-line prefix.
         self.prefix = self.config.get("logger_config").get("prefix")
 
@@ -325,5 +325,5 @@ class MyPrintLogger(Logger):
 
     def flush(self):
         # Flushing all possible disk writes to permanent storage.
-        print("Flushing ;)", flush=True)
+        print("Flushing", flush=True)
 

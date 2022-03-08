@@ -101,7 +101,7 @@ class CustomRNNModel(TorchRNN, nn.Module):
 adjs = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
 
 adjs_to_acts = {adj: i for i, adj in enumerate(adjs)}
-RENDER = False
+RENDER = True
 
 from matplotlib import pyplot as plt
 fig = plt.figure(figsize=(10,10))
@@ -204,9 +204,9 @@ class FloodSqueeze(nn.Module):
 
 
 class FloodFill(nn.Module):
-    def __init__(self, empty_chan=0, wall_chan=1, src_chan=3, trg_chan=2):
+    def __init__(self, empty_chan=0, wall_chan=1, src_chan=2, trg_chan=3):
         super(FloodFill, self).__init__()
-        self.trg_chan = 4
+        self.trg_chan = trg_chan
         self.n_in_chans = n_in_chans = 4
         n_hid_chans = n_in_chans + 2
         self.conv_0 = nn.Conv2d(n_in_chans, n_hid_chans, 1, 1, padding=0, bias=False)
@@ -244,28 +244,34 @@ class FloodFill(nn.Module):
 
     def hid_forward(self, input):
         self.n_batches = n_batches = input.shape[0]
-        agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
+        # agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
+        player_pos = th.where(input[:, self.trg_chan, ...] == 1)
+        player_pos = (player_pos[1].item(), player_pos[2].item())
         x = self.conv_0(input)
-        self.batch_dones = batch_dones = self.get_dones(x, agent_pos)
+        self.batch_dones = batch_dones = self.get_dones(x, player_pos)
         self.i = i = 0
         while not batch_dones.all() and i < 129:
             x = self.flood(input, x)
             if RENDER:
                 im = x[0, self.flood_chan].cpu().numpy()
+                im = im.T
                 im = im / im.max()
                 im = np.expand_dims(np.vstack(im), axis=0)
                 im = im.transpose(1, 2, 0)
-                # im = cv2.resize(im, (600, 600), interpolation=None)
+                im = cv2.resize(im, (550, 550), interpolation=None)
                 cv2.imshow("FloodFill", im)
                 cv2.waitKey(1)
 
-            self.batch_dones = batch_dones = self.get_dones(x, agent_pos)
+            self.batch_dones = batch_dones = self.get_dones(x, player_pos)
             self.i = i = i + 1
-            diag_neighb = x[:, self.age_chan, agent_pos[0] - 1: agent_pos[0] + 2, agent_pos[1] - 1: agent_pos[1] + 2]
+            diag_neighb = x[:, self.age_chan, player_pos[0] - 1: player_pos[0] + 2, player_pos[1] - 1: player_pos[1] + 2]
+        
+        return diag_neighb
             
 
     def forward(self, input):
-        n_batches = self.n_batches
+        n_batches = input.shape[0]
+        input = input.permute(0, 3, 1, 2)
         with th.no_grad():
             diag_neighb = self.hid_forward(input)
             neighb = th.zeros_like(diag_neighb)
@@ -276,9 +282,13 @@ class FloodFill(nn.Module):
             next_pos = next_pos.cpu().numpy()
 
             # If no path found, stay put
-            next_pos = np.where(next_pos == (0, 0), (1, 1), next_pos)
+            # next_pos = np.where(next_pos == (0, 0), (1, 1), next_pos)
+            next_pos = (1, 1) if next_pos == th.Tensor([0, 0]) else next_pos
 
-            act = [adjs_to_acts[tuple(pos)] for pos in next_pos]
+            # act = [adjs_to_acts[tuple(pos)] for pos in next_pos]
+            assert next_pos.shape[0] == 1
+            act = adjs_to_acts[tuple(next_pos[0])]
+
         return act
 
     def get_solution_length(self, input):
@@ -567,8 +577,9 @@ if __name__ == '__main__':
     width = 15
     n_sim_steps = 128
     pg_width = 600
+    model = FloodFill()
     # model = FloodSqueeze()
-    model = FloodMemoryModel()
+    # model = FloodMemoryModel()
     env = ParticleMazeEnv(
         {'width': width, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
          'pg_width': pg_width, 'evaluate': True, 'objective_function': None, 'num_eval_envs': 1, 
@@ -576,15 +587,14 @@ if __name__ == '__main__':
     cv2.namedWindow("FloodFill")
 
     # env.set_worlds(worlds = eval_mazes)
-    world_keys = ['zigzag']
+    world_keys = list(eval_mazes.keys()) * 2
 
-    for i in range(len(eval_mazes)):
-        wk = world_keys[i]
+    for wk in world_keys:
         env.set_worlds(worlds = {wk: eval_mazes[wk]})
         obs = env.reset()
         env.render()
-        done = {'__all__': False}
-        while not done['__all__']:
+        done = {(0, 0): False}
+        while not done[(0, 0)]:
             obs = th.Tensor(obs[(0, 0)]).unsqueeze(0)
             act = model(obs)
             obs, rew, done, info = env.step({(0, 0): act})

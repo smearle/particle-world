@@ -319,68 +319,76 @@ if __name__ == '__main__':
         train_worlds = full_obs_test_mazes
 
     if args.load:
-        fname = 'latest-0'
-        # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
-        with open(os.path.join(save_dir, f"{fname}.p"), "rb") as f:
-            data = pickle.load(f)
-        # with open(f'runs/{args.experimentName}/learn.pickle', 'rb') as f:
-        #     supp_data = pickle.load(f)
-        #     policies = supp_data['policies']
-        # env.set_policies(policies)
-        grid = data['container']
-        gen_itr = data['gen_itr']
-        play_itr = data['play_itr']
-        net_itr = data['net_itr']
-        logbook = data['logbook']
+        if not args.fixed_worlds:
+            fname = 'latest-0'
+            # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
+            with open(os.path.join(save_dir, f"{fname}.p"), "rb") as f:
+                data = pickle.load(f)
+            # with open(f'runs/{args.experimentName}/learn.pickle', 'rb') as f:
+            #     supp_data = pickle.load(f)
+            #     policies = supp_data['policies']
+            # env.set_policies(policies)
+            grid = data['container']
+            gen_itr = data['gen_itr']
+            play_itr = data['play_itr']
+            net_itr = data['net_itr']
+            logbook = data['logbook']
 
-        # Produce plots and visualizations
-        if args.visualize:
+            # Produce plots and visualizations
+            if args.visualize:
 
-            # visualize current worlds
-            gg = sorted(grid, key=lambda i: i.features)
-            world_im_width = width * 10
-
-            # if doing QD, render a grid of 1 world per cell in archive
-            if args.quality_diversity:
-                nb_bins = grid.shape
+                # visualize current worlds
+                gg = sorted(grid, key=lambda i: i.features)
                 world_im_width = width * 10
-                im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
-                for g in gg:
-                    i, j = grid.index_grid(g.features)
-                    env.set_world(g.discrete)
-                    env.reset()
-                    im = env.render(mode='rgb', pg_width=world_im_width)
-                    im_grid[i * world_im_width: (i + 1) * world_im_width, j * world_im_width: (j + 1) * world_im_width] = im
 
-            # otherwise, render a grid of elite levels
-            else:
-                assert nb_bins == (1, 1) == grid.shape
-                max_items_per_bin = len(grid)
-                n_world_width = math.ceil(math.sqrt(max_items_per_bin))
-                im_grid = np.zeros((world_im_width * n_world_width, world_im_width * n_world_width, 3))
-                for gi, g in enumerate(gg):
-                    i, j = gi // n_world_width, gi % n_world_width
-                    env.set_world(g.discrete)
-                    env.reset()
-                    im = env.render(mode='rgb', pg_width=world_im_width)
-                    im_grid[j * world_im_width: (j + 1) * world_im_width, i * world_im_width: (i + 1) * world_im_width] = im
+                # if doing QD, render a grid of 1 world per cell in archive
+                if args.quality_diversity:
+                    nb_bins = grid.shape
+                    world_im_width = width * 10
+                    im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
+                    for g in gg:
+                        i, j = grid.index_grid(g.features)
+                        env.set_world(g.discrete)
+                        env.reset()
+                        im = env.render(mode='rgb', pg_width=world_im_width)
+                        im_grid[i * world_im_width: (i + 1) * world_im_width, j * world_im_width: (j + 1) * world_im_width] = im
 
-            im_grid = im_grid.transpose(1, 0, 2)
-            # im_grid = np.flip(im_grid, 0)
-            # im_grid = np.flip(im_grid, 1)
-            im_grid = Image.fromarray(im_grid.astype(np.uint8))
-            im_grid.save(os.path.join(save_dir, "level_grid.png"))
+                # otherwise, render a grid of elite levels
+                else:
+                    gg = sorted(gg, key=lambda ind: ind.fitness[0], reverse=True)
+                    fits = [g.fitness[0] for g in gg]
+                    max_fit = max(fits)
+                    min_fit = min(fits)
+                    assert nb_bins == (1, 1) == grid.shape
+                    max_items_per_bin = len(grid)
+                    n_world_width = math.ceil(math.sqrt(max_items_per_bin))
+                    im_grid = np.zeros((world_im_width * n_world_width, world_im_width * n_world_width, 3))
+                    for gi, g in enumerate(gg):
+                        i, j = gi // n_world_width, gi % n_world_width
+                        env.set_world(g.discrete)
+                        env.reset()
+                        im = env.render(mode='rgb', pg_width=world_im_width)
+                        im_grid[j * world_im_width: (j + 1) * world_im_width, i * world_im_width: (i + 1) * world_im_width] = im
 
-            visualize_train_stats(save_dir, logbook, quality_diversity=args.quality_diversity)
-            compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_diversity=args.quality_diversity)
+                        # To visualize ranking of fitnesses
+                        im_grid[j * world_im_width: j * world_im_width + 7, int((i + 0.5) * world_im_width): int((i + 0.5) * world_im_width) + 7] = int(255 * (g.fitness[0] - min_fit) / (max_fit - min_fit))
 
-            if args.quality_diversity:
-                # save fitness qd grid
-                plot_path = os.path.join(save_dir, "performancesGrid.png")
-                plotGridSubplots(grid.quality_array[..., 0], plot_path, plt.get_cmap("magma"), features_domain,
-                                fitness_domain[0], nbTicks=None)
-                print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
-            sys.exit()
+                im_grid = im_grid.transpose(1, 0, 2)
+                # im_grid = np.flip(im_grid, 0)
+                # im_grid = np.flip(im_grid, 1)
+                im_grid = Image.fromarray(im_grid.astype(np.uint8))
+                im_grid.save(os.path.join(save_dir, "level_grid.png"))
+
+                visualize_train_stats(save_dir, logbook, quality_diversity=args.quality_diversity)
+                compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_diversity=args.quality_diversity)
+
+                if args.quality_diversity:
+                    # save fitness qd grid
+                    plot_path = os.path.join(save_dir, "performancesGrid.png")
+                    plotGridSubplots(grid.quality_array[..., 0], plot_path, plt.get_cmap("magma"), features_domain,
+                                    fitness_domain[0], nbTicks=None)
+                    print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
+                sys.exit()
 
         if isinstance(env.swarms[0], NeuralSwarm) and rllib_eval:
             # if args.loadIteration == -1:
