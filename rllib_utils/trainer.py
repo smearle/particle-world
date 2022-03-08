@@ -16,7 +16,7 @@ from ray.rllib.policy.policy import PolicySpec
 from timeit import default_timer as timer
 
 from envs.env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
-from model import FloodModel, OraclePolicy, CustomRNNModel
+from model import FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 from paired_models.multigrid_models import MultigridRLlibNetwork
 from rllib_utils.callbacks import RegretCallbacks
 from rllib_utils.eval_worlds import rllib_evaluate_worlds
@@ -115,7 +115,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             })
 
         model_config = copy.copy(MODEL_DEFAULTS)
-        if fully_observable:
+        if fully_observable and model != 'flood':
             model_config.update({
             # Fully observable, non-translated map
             "conv_filters": [
@@ -140,8 +140,11 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 ModelCatalog.register_custom_model('paired', CustomRNNModel)
                 model_config = {'custom_model': 'paired'}
             elif model == 'flood':
-                ModelCatalog.register_custom_model('flood', FloodModel)
+                ModelCatalog.register_custom_model('flood', FloodMemoryModel)
                 model_config = {'custom_model': 'flood'}
+            elif model == 'nca':
+                ModelCatalog.register_custom_model('nca', NCA)
+                model_config = {'custom_model': 'nca'}
 
             else:
                 raise NotImplementedError

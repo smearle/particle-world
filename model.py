@@ -169,12 +169,12 @@ class FloodSqueeze(nn.Module):
             w1 = nn.Parameter(th.zeros_like(self.conv_1.weight), requires_grad=False)
             b1 = nn.Parameter(th.zeros_like(self.conv_1.bias), requires_grad=False)
 
-            w1[l, lb, 1, 0] = 1
-            w1[l, lr, 1, 0] = 1
-            w1[l, lt, 1, 0] = 1
-            w1[b, lb, 2, 1] = 1
-            w1[b, br, 2, 1] = 1
-            w1[b, bt, 2, 1] = 1
+#           w1[l, lb, 1, 0] = 1
+#           w1[l, lr, 1, 0] = 1
+#           w1[l, lt, 1, 0] = 1
+#           w1[b, lb, 2, 1] = 1
+#           w1[b, br, 2, 1] = 1
+#           w1[b, bt, 2, 1] = 1
 
 
     def hid_forward(self, input):
@@ -341,8 +341,44 @@ class OraclePolicy(Policy):
         pass
 
 
+class NCA(TorchModelV2, nn.Module):
+    """An NCA model comprising a single comprising only convolutional layers, and with the same number of in and out 
+    channels. When used as a player, this model assumes that the environment is tailored to it, in that it is given 
+    sufficient "planning" steps at the beginning of the episode, during which it can repeatedly make local computations 
+    on the board, ultimately coming up with a global plan."""
+    def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
+                model_config: ModelConfigDict, name: str):
+        TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
+                                             model_config=model_config, name=name)
+        nn.Module.__init__(self)
+
+        # The channel that is 1 where the agent is, and 0 everywhere else. The value network will only consider the 
+        # neighborhood surrounding the agent, since we expect the shortest path-length to be encoded there (True, but 
+        # not on the first step...)
+        player_chan = model_config.get('player_chan')
+        self.obs_space = obs_space
+        self.n_in_chans = n_in_chans = obs_space.shape[-1]
+        self.conv_0 = nn.Conv2d(n_in_chans, n_in_chans, 3, 1, padding=1, bias=True)
+        self.conv_1 = nn.Conv2d(n_in_chans, n_in_chans, 1, 1, padding=0, bias=True)
+        self.conv_2 = nn.Conv2d(n_in_chans, n_in_chans, 1, 1, padding=0, bias=True)
+        self.val_dense = nn.Linear(3 * 3, 1)
+        self.hid_neighb = None
+
+    def forward(self, input_dict: Dict[str, TensorType]) -> Dict[str, TensorType]:
+        x = input_dict['obs']
+        x = self.conv_0(x)
+        x = th.relu(x)
+        x = self.conv_1(x)
+        x = th.relu(x)
+        x = self.conv_2(x)
+        act = th.sigmoid(x)
+        x = x.view(x.shape[0], -1)
+        val = self.val_dense(x)
+        return {'value': val, 'action': act}
+
+
 # This is prohibitively slow
-class FloodModel(TorchRNN, nn.Module):
+class FloodMemoryModel(TorchRNN, nn.Module):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
                 model_config: ModelConfigDict, name: str):
         TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
@@ -351,24 +387,43 @@ class FloodModel(TorchRNN, nn.Module):
         self.obs_space = obs_space
         self.n_hid_chans = n_hid_chans = 8
         self.n_in_chans = n_in_chans = obs_space.shape[-1]
-        self.conv_0 = nn.Conv2d(n_in_chans, n_hid_chans, 1, 1, padding=0, bias=True)
-        self.conv_1 = nn.Conv2d(n_hid_chans, n_hid_chans, 3, 1, padding=1, padding_mode='circular', bias=True)
-        self.act_dense = nn.Linear(3 * 3, num_outputs)
-        self.val_dense = nn.Linear(3 * 3, 1)
+        self.conv_0 = nn.Conv2d(n_in_chans + n_hid_chans, n_hid_chans, 3, 1, padding=1, bias=True)
+        self.conv_1 = nn.Conv2d(n_hid_chans, n_hid_chans, 1, 1, padding=0, bias=True)
+        self.conv_2 = nn.Conv2d(n_hid_chans, n_hid_chans, 1, 1, padding=0, bias=True)
+        self.act_dense = nn.Linear(3 * 3 * n_hid_chans, num_outputs)
+
+        # Value network is dense from hidden state (entire map). Could be more clever about this in theory (e.g., use
+        # stack of (repeated?) strided convolutions, or only observe the area surrounding the agent).
+        self.val_dense = nn.Linear(n_hid_chans * obs_space.shape[1] * obs_space.shape[2], 1)
         self.hid_neighb = None
 
     def get_initial_state(self):
         return [
             np.zeros((self.n_hid_chans, self.obs_space.shape[0], self.obs_space.shape[1]), dtype=np.float32),
-            np.zeros((self.n_hid_chans, self.obs_space.shape[0], self.obs_space.shape[1]), dtype=np.float32),
         ]
 
+    def forward(self, input_dict, state, seq_lens):
+        x = input_dict["obs"].permute(0, 3, 1, 2)
+        # x = x.reshape(x.size(0), -1)
+        return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)
+
     def forward_rnn(self, input, state, seq_lens):
+
+        # What is this dimension? Time?
+        assert input.shape[1] == 1
+        input = input[:, 0, ...]
+
+        # Only working with the previous state
+        assert len(state) == 1
+
+        x = th.cat((input, state[0]), dim=1)
+        # n_batches = input.shape[0]
+        x = th.relu(self.conv_0(x))
+        x = th.relu(self.conv_1(x))
+        x = th.sigmoid(self.conv_2(x))
+
         TT()
-        input = input_dict['obs'].permute(0, 3, 1, 2)
-        n_batches = input.shape[0]
         agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
-        x = self.conv_0(input)
         print(x.shape, state[-1].shape)
         x += state[-1]
         # batch_dones = self.get_dones(x, agent_pos)

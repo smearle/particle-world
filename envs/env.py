@@ -590,7 +590,9 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
         # reconstructed).
         n_aux_chans = 16
         self.aux_maps = np.zeros((n_aux_chans, self.width, self.width))
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(self.n_chan + 1 + n_aux_chans, 
+        self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(self.n_chan + 1 + n_aux_chans, 
+                                   self.patch_ws[i], self.patch_ws[i])) for i in range(self.n_policies)}
+        self.action_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(self.n_chan + 1 + n_aux_chans,
                                    self.patch_ws[i], self.patch_ws[i])) for i in range(self.n_policies)}
 
     def get_max_steps(width=15):
@@ -603,5 +605,8 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
         return obs_map
     
     def step(self, actions):
+        TT()
         if self.n_plan_step < self.max_plan_steps:
             self.aux_map += actions
+        else:
+            actions = actions[self.ps]

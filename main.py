@@ -24,6 +24,7 @@ from timeit import default_timer as timer
 from tqdm import tqdm
 
 from envs import ParticleMazeEnv, eval_mazes
+from envs.env import MazeEnvForNCAgents
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
 from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
@@ -219,6 +220,11 @@ if __name__ == '__main__':
                         help="Target reward the world should elicit from player if using the min_solvable objective "
                         "function.")
     args = parser.parse_args()
+
+    # This NCA-type model is meant to be used with full observations.
+    if args.model == 'flood':
+        assert args.fully_observable
+
     if args.load_config is not None:
         args = load_config(args, args.load_config)
     if args.oracle_policy:
@@ -260,7 +266,16 @@ if __name__ == '__main__':
          'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
          'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
          'target_reward': args.target_reward}
-    env = ParticleMazeEnv(copy.copy(env_config))
+
+    if args.model == 'nca':
+        env_cls = MazeEnvForNCAgents
+    else:
+        env_cls = ParticleMazeEnv
+
+    # Copying config here because we pop certain settings in env subclasses before passing to parent classes
+    # TODO: this copying can happen in the env itself.
+    env = env_cls(copy.copy(env_config))
+
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
     initial_weights = generator.get_init_weights()
