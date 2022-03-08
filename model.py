@@ -71,6 +71,7 @@ class CustomRNNModel(TorchRNN, nn.Module):
         return th.reshape(self.value_branch(self._features), [-1])
 
     def forward(self, input_dict, state, seq_lens):
+        print(seq_lens)
         x = nn.functional.relu(self.conv(input_dict["obs"].permute(0, 3, 1, 2)))
         x = x.reshape(x.size(0), -1)
         return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)
@@ -377,24 +378,27 @@ class NCA(TorchModelV2, nn.Module):
         return {'value': val, 'action': act}
 
 
-# This is prohibitively slow
-class FloodMemoryModel(TorchRNN, nn.Module):
+class FloodModel(TorchModelV2, nn.Module):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
                 model_config: ModelConfigDict, name: str):
         TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
                                              model_config=model_config, name=name)
         nn.Module.__init__(self)
+        self.player_chan = model_config['custom_model_config'].pop("player_chan")
+        assert self.player_chan is not None
         self.obs_space = obs_space
-        self.n_hid_chans = n_hid_chans = 8
+        self.n_hid_chans = n_hid_chans = 64
         self.n_in_chans = n_in_chans = obs_space.shape[-1]
         self.conv_0 = nn.Conv2d(n_in_chans + n_hid_chans, n_hid_chans, 3, 1, padding=1, bias=True)
         self.conv_1 = nn.Conv2d(n_hid_chans, n_hid_chans, 1, 1, padding=0, bias=True)
         self.conv_2 = nn.Conv2d(n_hid_chans, n_hid_chans, 1, 1, padding=0, bias=True)
-        self.act_dense = nn.Linear(3 * 3 * n_hid_chans, num_outputs)
+        # self.act_dense = nn.Linear(3 * 3 * n_hid_chans, num_outputs)
+        self.act_dense = nn.Linear(n_hid_chans, num_outputs)
 
         # Value network is dense from hidden state (entire map). Could be more clever about this in theory (e.g., use
         # stack of (repeated?) strided convolutions, or only observe the area surrounding the agent).
-        self.val_dense = nn.Linear(n_hid_chans * obs_space.shape[1] * obs_space.shape[2], 1)
+        # NOTE: assuming a fixed width here.
+        self.val_dense = nn.Linear(n_hid_chans * obs_space.shape[0] * obs_space.shape[1], 1)
         self.hid_neighb = None
 
     def get_initial_state(self):
@@ -403,15 +407,22 @@ class FloodMemoryModel(TorchRNN, nn.Module):
         ]
 
     def forward(self, input_dict, state, seq_lens):
+#       print('state shape', state[0].shape)
+#       print('seq_lens', seq_lens)
         x = input_dict["obs"].permute(0, 3, 1, 2)
+#       print(f'x shape: {x.shape}')
         # x = x.reshape(x.size(0), -1)
         return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)
 
     def forward_rnn(self, input, state, seq_lens):
 
         # What is this dimension? Time?
-        assert input.shape[1] == 1
-        input = input[:, 0, ...]
+#       print(f'input shape: {input.shape}')
+        # assert input.shape[1] == 1
+        # input = input[:, 0, ...]
+
+        # FIXME: definitely fuxcked. Ignoring some timesteps. (Where tf did these come from though?)
+        input = input[:, -1, ...]
 
         # Only working with the previous state
         assert len(state) == 1
@@ -420,28 +431,133 @@ class FloodMemoryModel(TorchRNN, nn.Module):
         # n_batches = input.shape[0]
         x = th.relu(self.conv_0(x))
         x = th.relu(self.conv_1(x))
-        x = th.sigmoid(self.conv_2(x))
+        self.x = x = th.sigmoid(self.conv_2(x))
 
-        TT()
-        agent_pos = (input.shape[2] // 2, input.shape[3] // 2)
-        print(x.shape, state[-1].shape)
-        x += state[-1]
-        # batch_dones = self.get_dones(x, agent_pos)
-        # while not batch_dones.all():
-        for i in range(1):
-            x = self.conv_1(x)
-            # x[:self.n_hid_chans//2] = th.sigmoid(x[:self.n_hid_chans//2])
-            # x[self.n_hid_chans//2:] = th.relu(x[self.n_hid_chans//2:])
-            # x[:, :self.n_in_chans] += input
-        self.hid_neighb = neighb = x[:, -1, agent_pos[0] - 1: agent_pos[0] + 2, agent_pos[1] - 1: agent_pos[1] + 2]
-        act = self.act_dense(neighb.reshape(n_batches, -1))
-        # Return model output and RNN hidden state (not used)
-        print(x.shape)
+        player_pos = th.where(input[:, self.player_chan, ...] == 1)
+
+        if player_pos[0].shape == (0,):
+            # This must be a dummy batch, so just put the player in the corner (against the wall)
+            player_pos = (th.arange(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int))
+        else:
+            assert player_pos[0].shape == (x.shape[0],)
+
+        # NOTE: the assumption that we always have walls is key here. Otherwise we could end up with invalid indices
+        # hid_neighb = x[player_pos[0], :, player_pos[1] - 1: player_pos[1] + 2, player_pos[2] - 1: player_pos[2] + 2]
+
+        # NOTE: taking a neighborhood is tricky, so we just take the channels at the player's tile and assume the neural
+        #  net has embedded the desired movement into them.
+        hid_neighb = x[player_pos[0], :, player_pos[1], player_pos[2]]
+        act = th.sigmoid(self.act_dense(hid_neighb))
+
         return act, [x]
 
     def value_function(self):
-        val = self.val_dense(self.hid_neighb.reshape(self.hid_neighb.shape[0], -1))
+        val = self.x.reshape(self.x.shape[0], -1)
+        val = self.val_dense(val)
         val = val.reshape(val.shape[0])
+        return val
+
+
+
+
+# This is prohibitively slow
+class FloodMemoryModel(TorchRNN, nn.Module):
+    def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
+                model_config: ModelConfigDict, name: str):
+        TorchRNN.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
+                                             model_config=model_config, name=name)
+        nn.Module.__init__(self)
+        self.player_chan = model_config['custom_model_config'].pop("player_chan")
+        assert self.player_chan is not None
+        self.obs_space = obs_space
+        self.n_hid_chans = n_hid_chans = 64
+        self.n_in_chans = n_in_chans = obs_space.shape[-1]
+        self.conv_0 = nn.Conv2d(n_in_chans + n_hid_chans, n_hid_chans, 3, 1, padding=1, bias=True)
+        self.conv_1 = nn.Conv2d(n_hid_chans, n_hid_chans, 1, 1, padding=0, bias=True)
+        self.conv_2 = nn.Conv2d(n_hid_chans, n_hid_chans, 1, 1, padding=0, bias=True)
+        # self.act_dense = nn.Linear(3 * 3 * n_hid_chans, num_outputs)
+        self.act_dense = nn.Linear(n_hid_chans, num_outputs)
+
+        # Value network is dense from hidden state (entire map). Could be more clever about this in theory (e.g., use
+        # stack of (repeated?) strided convolutions, or only observe the area surrounding the agent).
+        # NOTE: assuming a fixed width here.
+        self.val_dense = nn.Linear(n_hid_chans * obs_space.shape[0] * obs_space.shape[1], 1)
+        self.hid_neighb = None
+
+    def get_initial_state(self):
+        return [
+            np.zeros((self.n_hid_chans, self.obs_space.shape[0], self.obs_space.shape[1]), dtype=np.float32),
+        ]
+
+    def forward(self, input_dict, state, seq_lens):
+#       print('state shape', state[0].shape)
+#       print('seq_lens', seq_lens)
+        x = input_dict["obs"].permute(0, 3, 1, 2)
+#       print(f'x shape: {x.shape}')
+        # x = x.reshape(x.size(0), -1)
+        return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)
+
+    def forward_rnn(self, input, state, seq_lens):
+
+        # What is this dimension? Time?
+#       print(f'input shape: {input.shape}')
+        # assert input.shape[1] == 1
+        # input = input[:, 0, ...]
+
+        # Only working with the previous state
+        assert len(state) == 1
+
+        acts = []
+        last_states = []
+        last_state = state[0]
+
+        for t in range(input.shape[1]):
+            input_t = input[:, t, ...]
+            x = th.cat((input_t, last_state), dim=1)
+            x = th.relu(self.conv_0(x))
+            x = th.relu(self.conv_1(x))
+            x = th.sigmoid(self.conv_2(x))
+            last_state = x
+            last_states.append(last_state.unsqueeze(1))
+            player_pos = th.where(input_t[:, self.player_chan, ...] == 1)
+
+            if player_pos[0].shape == (0,):
+                # This must be a dummy batch, so just put the player in the corner (against the wall)
+                player_pos = (th.arange(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int))
+            else:
+#               print(f'player_pos shape', player_pos[0].shape)
+#               assert player_pos[0].shape == (x.shape[0],)
+
+                # FIXME: missing player observations here, though the same does not occur in the environment observations.
+                #  This happens when max_seq_len is > 1, because we are padding with all-0 observations. Fix this by padding
+                #  with dummy player-positions as appropriate.
+                if player_pos[0].shape != (x.shape[0],):
+                    TT()
+
+
+            # NOTE: the assumption that we always have walls is key here. Otherwise we could end up with invalid indices
+            # hid_neighb = x[player_pos[0], :, player_pos[1] - 1: player_pos[1] + 2, player_pos[2] - 1: player_pos[2] + 2]
+
+            # NOTE: taking a neighborhood is tricky, so we just take the channels at the player's tile and assume the neural
+            #  net has embedded the desired movement into them.
+            hid_neighb = x[player_pos[0], :, player_pos[1], player_pos[2]]
+            act = th.sigmoid(self.act_dense(hid_neighb))
+            acts.append(act.unsqueeze(1))
+
+        acts = th.cat(acts, dim=1)
+        self.last_states = th.cat(last_states, dim=1)
+        # n_batches = input.shape[0]
+
+
+#       print(f'acts shape: {acts.shape}')
+        return acts.reshape(-1, self.num_outputs), [self.last_states[:, -1, ...]]
+
+    def value_function(self):
+        val = self.last_states.reshape(self.last_states.shape[0] * self.last_states.shape[1], -1)
+        val = self.val_dense(val)
+        val = val.reshape(val.shape[0])
+#       print(f'val shape: {val.shape}')
+#       print()
         return val
 
 
@@ -451,7 +567,8 @@ if __name__ == '__main__':
     width = 15
     n_sim_steps = 128
     pg_width = 600
-    model = FloodSqueeze()
+    # model = FloodSqueeze()
+    model = FloodMemoryModel()
     env = ParticleMazeEnv(
         {'width': width, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
          'pg_width': pg_width, 'evaluate': True, 'objective_function': None, 'num_eval_envs': 1, 

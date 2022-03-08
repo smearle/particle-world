@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from pdb import set_trace as TT
 import shutil
+from typing import Iterable
 
 import numpy as np
 import ray
@@ -13,6 +14,7 @@ from ray.rllib.agents.ppo import ppo
 # from ray.tune.logger import pretty_print
 from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
 from ray.rllib.policy.policy import PolicySpec
+from ray.tune.logger import Logger
 from timeit import default_timer as timer
 
 from envs.env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
@@ -24,7 +26,7 @@ from utils import get_solution
 
 
 def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
-                  idx_counter=None, logbook=None, quality_diversity=False):
+                  idx_counter=None, logbook=None, quality_diversity=False, fixed_worlds=False):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     # toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
@@ -37,7 +39,24 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         # weights start changing.
         if i % 10 == 0:
             rllib_save_model(trainer, save_dir)
-        world_keys = np.random.choice(np.array(landscapes).shape[0], n_rllib_envs, replace=False)
+        replace = True if fixed_worlds else True
+        # 3) Custom logger (see `MyPrintLogger` class above).
+        logger_config = None if not fixed_worlds else {
+            # Provide the class directly or via fully qualified class
+            # path.
+            "type": MyPrintLogger,
+            # `config` keys:
+            "prefix": "ABC",
+            # Optional: Custom logdir (do not define this here
+            # for using ~/ray_results/...).
+            "logdir": save_dir,
+        }
+        if isinstance(landscapes, dict):
+            world_keys = list(landscapes.keys())
+        else:
+            assert isinstance(landscapes, Iterable)
+            world_keys = list(range(len(landscapes)))
+        world_keys = np.random.choice(world_keys, n_rllib_envs, replace=replace)
         # curr_lands = np.array(landscapes)[world_keys]
         curr_lands = [landscapes[wid] for wid in world_keys]
         worlds = {i: l for i, l in enumerate(curr_lands)}
@@ -48,7 +67,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
             net_itr=net_itr, trainer=trainer, worlds=worlds, idx_counter=idx_counter, calc_agent_stats=True,
             start_time=start_time, evaluate_only=False, quality_diversity=quality_diversity, 
-            calc_world_heuristics=calc_world_heuristics)
+            calc_world_heuristics=calc_world_heuristics, fixed_worlds=fixed_worlds)
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rl_stats['episode_reward_mean']
 
@@ -67,8 +86,9 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
                 # done_training = running_std < 1.0 or i >= 100
             # else:
                 # done_training = False
-        logbook.record(**logbook_stats)
-        print(logbook.stream)
+        if not fixed_worlds:
+            logbook.record(**logbook_stats)
+            print(logbook.stream)
         i += 1
         if play_phase_len != -1:
             done_training = done_training or i >= play_phase_len
@@ -141,7 +161,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 model_config = {'custom_model': 'paired'}
             elif model == 'flood':
                 ModelCatalog.register_custom_model('flood', FloodMemoryModel)
-                model_config = {'custom_model': 'flood'}
+                model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
             elif model == 'nca':
                 ModelCatalog.register_custom_model('nca', NCA)
                 model_config = {'custom_model': 'nca'}
@@ -284,4 +304,26 @@ def toggle_exploration(trainer, explore: bool, n_policies: int):
         trainer.get_policy(f'policy_{i}').config["explore"] = explore
         # Need to update each remote training worker as well (if they exist)
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
+
+class MyPrintLogger(Logger):
+    """Logs results by simply printing out everything.
+    """
+
+    def _init(self):
+        # Custom init function.
+        print("Initializing ...")
+        # Setting up our log-line prefix.
+        self.prefix = self.config.get("logger_config").get("prefix")
+
+    def on_result(self, result: dict):
+        # Define, what should happen on receiving a `result` (dict).
+        print(f"{self.prefix}: {result}")
+
+    def close(self):
+        # Releases all resources used by this logger.
+        print("Closing")
+
+    def flush(self):
+        # Flushing all possible disk writes to permanent storage.
+        print("Flushing ;)", flush=True)
 

@@ -23,7 +23,7 @@ from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-from envs import ParticleMazeEnv, eval_mazes
+from envs import ParticleMazeEnv, eval_mazes, full_obs_test_mazes
 from envs.env import MazeEnvForNCAgents
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils import qdRLlibEval, qdpy_save_archive
@@ -314,6 +314,10 @@ if __name__ == '__main__':
 
     max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
 
+    if args.fixed_worlds:
+        # train_worlds = {0: generator.landscape}
+        train_worlds = full_obs_test_mazes
+
     if args.load:
         fname = 'latest-0'
         # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
@@ -394,7 +398,8 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if args.fixed_worlds:
                 particle_trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(trainer=particle_trainer, worlds={0: generator.landscape}, calc_world_heuristics=False)
+                rllib_evaluate_worlds(trainer=particle_trainer, worlds=train_worlds, calc_world_heuristics=False, 
+                                      fixed_worlds=args.fixed_worlds)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
                 # particle_trainer.evaluate()
@@ -438,9 +443,9 @@ if __name__ == '__main__':
         os.mkdir(save_dir)
 
     if args.fixed_worlds:
-        train_players(0, 1000, trainer=particle_trainer, landscapes=[generator.world], n_policies=n_policies,
+        train_players(0, 1000, trainer=particle_trainer, landscapes=train_worlds, n_policies=n_policies,
                       n_rllib_envs=num_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps, 
-                      quality_diversity=args.quality_diversity,
+                      quality_diversity=args.quality_diversity, fixed_worlds=args.fixed_worlds,
                       # TODO: initialize logbook even if not evolving worlds
                       logbook=None)
         sys.exit()

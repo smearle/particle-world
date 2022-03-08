@@ -1,3 +1,4 @@
+import itertools
 import numpy as np
 
 
@@ -88,3 +89,27 @@ eval_mazes = {
             [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
         ]),
 }
+
+empty = 0
+wall = 1
+start = 2
+goal = 3
+
+full_obs_test_mazes = {}
+
+w = 13
+core_layout = np.ones((w, w), dtype=np.int8)
+core_layout[w//2,:] = core_layout[:,w//2] = empty
+core_layout[-1,1:-1] = core_layout[0,1:-1] = core_layout[1:-1,-1] = core_layout[1:-1,0] = empty
+core_layout[w//2, w//2] = start
+
+for x, y in [(0, 1), (0, -2), (-1, 1), (-1, -2)]:
+    cross_xy = core_layout.copy()
+    cross_xy[x, y] = goal
+    full_obs_test_mazes['cross_' + str(x) + '_' + str(y)] = cross_xy
+    cross_yx = core_layout.copy()
+    cross_yx[y, x] = goal
+    full_obs_test_mazes['cross_' + str(y) + '_' + str(x)] = cross_yx
+
+eval_mazes.update(full_obs_test_mazes)
+

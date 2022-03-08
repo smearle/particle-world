@@ -61,6 +61,7 @@ def visualize_train_stats(save_dir, logbook, quality_diversity=True):
 
     fig, ax1 = plt.subplots()
     path_means = remove_nones(logbook.select("meanPath"))
+    path_maxs = remove_nones(logbook.select("maxPath"))
     line0 = ax1.plot(gen, path_means, "b-", label="Mean Path Length")
     ax1.set_xlabel("Generation")
     ax1.set_ylabel("Path Length")

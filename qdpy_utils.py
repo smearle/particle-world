@@ -51,7 +51,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     rllib_trainer.workers.local_worker().set_policies_to_train([])
     # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
     logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + (stats.fields if stats else []) \
-        + ["meanRew", "meanEvalRew", "meanPath"] + ["elapsed"]
+        + ["meanRew", "meanEvalRew", "meanPath", "maxPath"] + ["elapsed"]
 
     if len(init_batch) == 0:
         raise ValueError("``init_batch`` must not be empty.")

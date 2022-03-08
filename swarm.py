@@ -20,6 +20,7 @@ def gen_policy(i, observation_space, action_space, fov):
     }
     return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
 
+th.set_printoptions(profile='full')
 
 class Swarm(object):
     def __init__(self, n_pop, fov=1, trg_scape_val=1.0):
@@ -39,7 +40,11 @@ class Swarm(object):
         # Add a 4th channel for player positions
         scape = np.vstack((scape, np.zeros_like(scape)[0:1]))
         obs = np.tile(scape[None,...], (self.n_pop, 1, 1, 1))
-        obs[:, -1, self.ps[:, 0].astype(int), self.ps[:, 1].astype(int)] = 1
+
+        # NOTE: don't change this, the environment assumes the last (4th) channel is for player positions
+        obs[np.arange(self.n_pop), -1, self.ps[:, 0].astype(int), self.ps[:, 1].astype(int)] = 1
+        assert obs[:, -1, :, :].sum() == self.n_pop
+
         return obs
 
     def get_observations(self, scape, flatten=True, ps=None):

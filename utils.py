@@ -241,11 +241,14 @@ def update_individuals(individuals, qd_stats):
 
 
 def get_experiment_name(args):
-    if args.quality_diversity:
-        exp_name = 'qd'
+    if args.fixed_worlds:
+        exp_name = f'fixedWorlds_{args.n_policies}-pol_'
     else:
-        exp_name = f'{args.objective_function}'
-    exp_name += f'_{args.n_policies}-pol_{args.gen_phase_len}-gen_{args.play_phase_len}-play'
+        if args.quality_diversity:
+            exp_name = 'qd'
+        else:
+            exp_name = f'{args.objective_function}'
+        exp_name += f'_{args.n_policies}-pol_{args.gen_phase_len}-gen_{args.play_phase_len}-play'
     if args.fully_observable:
         exp_name += '_fullObs'
     if args.model is not None:
@@ -276,6 +279,7 @@ def compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_d
         'meanRew': np.mean(filter_nones(logbook.select('meanRew'))[-10:]),
         'meanEvalRew': np.mean(filter_nones(logbook.select('meanEvalRew'))[-10:]),
         'meanPath': np.mean(filter_nones(logbook.select('meanPath'))[-10:]),
+        'maxPath': np.mean(filter_nones(logbook.select('maxPath'))[-10:]),
         'meanFit': np.mean(filter_nones(logbook.select('avg'))[-10:]),
     }
     with open(os.path.join(save_dir, 'train_stats.json'), 'w') as f:

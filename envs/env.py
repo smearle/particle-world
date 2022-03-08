@@ -434,8 +434,10 @@ class ParticleMazeEnv(ParticleGymRLlib):
         # Observe empty, wall, and goal tiles (not start tiles)
         if self.fully_observable:
             n_chan = self.n_chan  # visible player
+            self.player_chan = -1
         else:
             n_chan = self.n_chan - 1
+            self.player_chan = None
         self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(patch_ws[i], patch_ws[i], n_chan))
                                    for i in range(n_policies)}
         self.observation_space = None

@@ -9,7 +9,8 @@ from rllib_utils.utils import get_env_world_heuristics
 
 
 def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
-    quality_diversity=False, oracle_policy=False, calc_world_heuristics=False, calc_agent_stats=False):
+    quality_diversity=False, oracle_policy=False, calc_world_heuristics=False, calc_agent_stats=False, 
+    fixed_worlds=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -118,12 +119,22 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         for stat_lst in new_world_stats:
             for stat_tpl in stat_lst:
                 world_key = stat_tpl[0]
-                assert world_key not in new_fits
-                new_fits[world_key] = stat_tpl[1:]
+                if world_key in new_fits:
+                    assert fixed_worlds, "Should not have redundant world evaluations inside thid functionunless "
+                    "training on fixed worlds."
+                    # We'll create a list of stats from separate runs, though we're not doing anything with this for now
+                    new_fits[world_key] = [new_fits[world_key]] + [stat_tpl[1:]]
+                else:
+                    new_fits[world_key] = stat_tpl[1:]
 
         # Ensure we have not evaluated any world twice
         for k in new_fits:
-            assert k not in world_stats
+            if k in world_stats:
+                assert fixed_worlds
+        if fixed_worlds:
+            for k in list(new_fits.keys()):
+                if k in world_stats:
+                    world_stats[k] = [world_stats[k]] + [new_fits.pop(k)]
 
         world_stats.update(new_fits)
 
