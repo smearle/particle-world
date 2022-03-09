@@ -40,17 +40,6 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         if i % 10 == 0:
             rllib_save_model(trainer, save_dir)
         replace = True if fixed_worlds else True
-        # 3) Custom logger (see `MyPrintLogger` class above).
-        logger_config = None if not fixed_worlds else {
-            # Provide the class directly or via fully qualified class
-            # path.
-            "type": MyPrintLogger,
-            # `config` keys:
-            "prefix": "ABC",
-            # Optional: Custom logdir (do not define this here
-            # for using ~/ray_results/...).
-            "logdir": save_dir,
-        }
         if isinstance(landscapes, dict):
             world_keys = list(landscapes.keys())
         else:
@@ -99,7 +88,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
 
 
 def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
-                          oracle_policy, fully_observable, idx_counter, model, env_config):
+                          oracle_policy, fully_observable, idx_counter, model, env_config, fixed_worlds):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -119,7 +108,19 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     :param num_gpus: How many GPUs to use for training.
     :return: An rllib PPOTrainer object
     """
-
+    # logger_config = {} if not fixed_worlds else {
+    logger_config = {} if True else {
+        # Provide the class directly or via fully qualified class
+        # path.
+        "type": PrintLogger,
+        # `config` keys:
+        "prefix": "ABC",
+        # Optional: Custom logdir (do not define this here
+        # for using ~/ray_results/...).
+    }
+    logger_config.update({
+        "log_dir": save_dir,
+    })
     if oracle_policy:
         policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
                                                      action_space=env.action_spaces[i], config={})
@@ -231,9 +232,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             "render_env": render,
             "explore": False if oracle_policy else True,
         },
-        "logger_config": {
-            "log_dir": save_dir,
-        },
+        "logger_config": logger_config,
         # "lr": 0.1,
         # "log_level": "INFO",
         # "record_env": True,
@@ -305,7 +304,7 @@ def toggle_exploration(trainer, explore: bool, n_policies: int):
         # Need to update each remote training worker as well (if they exist)
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
 
-class MyPrintLogger(Logger):
+class PrintLogger(Logger):
     """Logs results by simply printing out everything.
     """
 
@@ -313,7 +312,7 @@ class MyPrintLogger(Logger):
         # Custom init function.
         print("Initializing...")
         # Setting up our log-line prefix.
-        self.prefix = self.config.get("logger_config").get("prefix")
+        self.prefix = self.config.get("prefix")
 
     def on_result(self, result: dict):
         # Define, what should happen on receiving a `result` (dict).

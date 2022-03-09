@@ -529,20 +529,26 @@ class FloodMemoryModel(TorchRNN, nn.Module):
             x = th.sigmoid(self.conv_2(x))
             last_state = x
             last_states.append(last_state.unsqueeze(1))
-            player_pos = th.where(input_t[:, self.player_chan, ...] == 1)
 
-            if player_pos[0].shape == (0,):
-                # This must be a dummy batch, so just put the player in the corner (against the wall)
-                player_pos = (th.arange(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int))
-            else:
+            # This is a bit weird. We expect only one 1 activation in each channel activation. We take the max so that 
+            # we get some values when there are empty/dummy inputs in the sequence.
+            _, player_pos_flat = input_t[:, self.player_chan, ...].view(input_t.shape[0], -1).max(-1)
+            player_pos_x, player_pos_y = player_pos_flat // input_t.shape[-1], player_pos_flat % input_t.shape[-1]
+            player_pos = (th.arange(input_t.shape[0]), player_pos_x, player_pos_y)
+
+#           if player_pos[0].shape == (0,):
+#               # This must be a dummy batch, so just put the player in the corner (against the wall)
+#               player_pos = (th.arange(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int), th.ones(x.shape[0], dtype=int))
+#           else:
 #               print(f'player_pos shape', player_pos[0].shape)
 #               assert player_pos[0].shape == (x.shape[0],)
 
-                # FIXME: missing player observations here, though the same does not occur in the environment observations.
-                #  This happens when max_seq_len is > 1, because we are padding with all-0 observations. Fix this by padding
-                #  with dummy player-positions as appropriate.
-                if player_pos[0].shape != (x.shape[0],):
-                    TT()
+            # FIXME: missing player observations here, though the same does not occur in the environment observations.
+            #  This happens when max_seq_len is > 1, because we are padding with all-0 observations. Fix this by padding
+            #  with dummy player-positions as appropriate.
+#           if player_pos[0].shape != (x.shape[0],):
+#               missing_seq_idxs = set(th.arange(x.shape[0])).difference(player_pos[0])
+#               TT()
 
 
             # NOTE: the assumption that we always have walls is key here. Otherwise we could end up with invalid indices

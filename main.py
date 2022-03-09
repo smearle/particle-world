@@ -307,7 +307,7 @@ if __name__ == '__main__':
                                              enjoy=args.enjoy, render=args.render, save_dir=save_dir,
                                              num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
                                              oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
-                                             model=args.model, env_config=env_config)
+                                             model=args.model, env_config=env_config, fixed_worlds=args.fixed_worlds)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
