@@ -80,14 +80,18 @@ class Hill(Generator):
 
 
 class NNGenerator(Generator):
-    def __init__(self, width, nn_model):
-        super(NNGenerator, self).__init__(width)
+    def __init__(self, width, n_chan, nn_model):
+        super(NNGenerator, self).__init__(width, n_chan)
         self.nn_model = nn_model
         self.world = None
 
     def _reset(self, latent):
         super()._reset()
-        self.world = th.Tensor(np.concatenate((self.xy, latent), axis=0)).unsqueeze(0)
+
+        # Could include global information in the form of xy coordinates here, but we won't for now.
+        # self.world = th.Tensor(np.concatenate((self.xy, latent), axis=0)).unsqueeze(0)
+
+        self.world = th.Tensor(latent).unsqueeze(0)
         self.landscape = self.world[0, 0].numpy()
 
     def _update(self):
@@ -95,19 +99,19 @@ class NNGenerator(Generator):
         #           cv2.imshow("NCA world generation", self.world)
         self.landscape = self.world[0, 0].numpy()
 
-    def get_init_weights(self):
+    def get_weights(self):
         return get_init_weights(self.nn_model)
 
     def set_weights(self, weights):
         return set_weights(self.nn_model, weights)
 
 
-class NCA(nn.Module):
+class GradlessNCA(nn.Module):
     def __init__(self, n_hid):
-        super(NCA, self).__init__()
-        self.ls1 = nn.Conv2d(n_hid + 2, 32, 3, 1, 1, padding_mode='circular')
+        super(GradlessNCA, self).__init__()
+        self.ls1 = nn.Conv2d(n_hid, 32, 3, 1, 1)  # , padding_mode='circular')
         self.ls2 = nn.Conv2d(32, 64, 1, 1, 0)
-        self.ls3 = nn.Conv2d(64, n_hid + 2, 1, 1, 0)
+        self.ls3 = nn.Conv2d(64, n_hid, 1, 1, 0)
         self.layers = [self.ls3, self.ls2, self.ls1]
         self.apply(init_weights)
 
@@ -164,19 +168,22 @@ class SinCPPNGenerator(NNGenerator):
 
 
 class NCAGenerator(NNGenerator):
-    def __init__(self, width, n_nca_steps):
+    def __init__(self, width, n_chan, n_nca_steps):
+        self.n_chan = n_chan
         self.n_nca_steps = n_nca_steps
-        self.n_hid = 3
-        nca_model = NCA(self.n_hid)
+        nca_model = GradlessNCA(n_chan)
         set_nograd(nca_model)
-        super(NCAGenerator, self).__init__(width, nca_model)
+        super(NCAGenerator, self).__init__(width, n_chan, nca_model)
         self.world = None
         self.n_nca_steps = n_nca_steps
+
+        # Fix the latent, making this simply an indirect encoding for now
+        self.latent = np.random.normal(0, 1, size=(self.n_chan, self.width, self.width))
+
         self._reset()
 
     def _reset(self):
-        latent = np.random.normal(0, 1, size=(self.n_hid, self.width, self.width))
-        super()._reset(latent)
+        super()._reset(self.latent)
 
     def _update(self):
         super()._update()

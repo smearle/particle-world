@@ -101,7 +101,7 @@ class CustomRNNModel(TorchRNN, nn.Module):
 adjs = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
 
 adjs_to_acts = {adj: i for i, adj in enumerate(adjs)}
-RENDER = True
+RENDER = False
 
 from matplotlib import pyplot as plt
 fig = plt.figure(figsize=(10,10))

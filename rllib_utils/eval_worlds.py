@@ -79,7 +79,9 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
 
             new_world_stats = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
-                    lambda env: {env.world_key: ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0))}))
+                    # NOTE: need to match what is returned by env in get_world_stats here
+                    #  i.e., [(world_key, ((qd_objective,), (qd_features...)), [swarm_rewards...]), ...]
+                    lambda env: [(env.world_key, ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0)), [])]))
             rl_stats.append([])
 
         else:

@@ -18,7 +18,6 @@ from deap import tools
 from qdpy import containers
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 from qdpy.base import ParallelismManager
-from qdpy.phenotype import Features, Fitness, Individual
 from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
@@ -26,7 +25,8 @@ from tqdm import tqdm
 from envs import ParticleMazeEnv, eval_mazes, full_obs_test_mazes
 from envs.env import MazeEnvForNCAgents
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
-from qdpy_utils import qdRLlibEval, qdpy_save_archive
+from qdpy_utils.utils import qdRLlibEval, qdpy_save_archive
+from qdpy_utils.individuals import TileFlipIndividual, NCAIndividual
 from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
 from rllib_utils.eval_worlds import rllib_evaluate_worlds
 from rllib_utils.utils import IdxCounter
@@ -64,8 +64,11 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
 #       optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
 #   else:
     optimal_generators = False
+
+    # No player training if we're using the optimal player-policies
     if args.oracle_policy:
-        return
+        return net_itr
+
     if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
         qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook, save_dir=save_dir)
         training_worlds = sorted(container, key=lambda i: i.fitness.values[0], reverse=True)
@@ -117,58 +120,6 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
     return net_itr
 
 
-# TODO:
-# class CPPNIndividual(creator.Individual, CPPN):
-#     def __init__(self):
-#         CPPN.__init__(self, width)
-#         creator.Individual.__init__(self)
-
-
-class DiscreteIndividual(Individual):
-    def __init__(self, width, n_chan, unique_chans=[2, 3]):
-        Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
-        self.width = width
-        self.unique_chans = unique_chans
-        self.n_chan = n_chan
-        self.discrete = np.random.randint(0, n_chan, size=(width, width))
-        self.validate()
-
-    def validate(self):
-        # ensure exactly only one of each of these integers
-        for i, u in enumerate(self.unique_chans):
-            idxs = np.argwhere(self.discrete == u)
-            if len(idxs) == 0:
-                xys = range(self.width * self.width)
-                occ_xys = [np.where(self.discrete.flatten() == self.unique_chans[ii]) for ii in range(i)]
-                if occ_xys:
-                    xys = set(xys)
-                    occ_xys = np.hstack(occ_xys)
-                    [xys.remove(xy[0]) for xy in occ_xys]
-                    xys = list(xys)
-                xy = np.random.choice(xys)
-                x, y = xy // self.width, xy % self.width
-                self.discrete[x, y] = u
-                continue
-            np.random.shuffle(idxs)
-            idxs = idxs[:-1]
-            new_idxs = set(range(self.n_chan))
-            [new_idxs.remove(uc) for uc in self.unique_chans]
-            new_idxs = list(new_idxs)
-            self.discrete[idxs[:, 0], idxs[:, 1]] = np.random.choice(new_idxs, len(idxs))
-
-    def mutate(self):
-        n_mutate = np.random.randint(1, 10)
-        xys = np.random.randint(0, self.width * self.width, n_mutate)
-        xys = [(xy // self.width, xy % self.width) for xy in xys]
-        for xy in xys:
-            self.discrete[xy[0], xy[1]] = np.random.randint(self.n_chan)
-        self.validate()
-        return self, 
-
-    def __eq__(self, other):
-        return (self.__class__ == other.__class__ and np.all(self.discrete == other.discrete))
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-l', '--load', action='store_true')
@@ -186,10 +137,8 @@ if __name__ == '__main__':
     parser.add_argument('-exp', '--exp_name', default='test')
     parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
                                                                            "skipping the world-generation phase.")
-    parser.add_argument('-g', '--generator_class', type=str, default="TileFlipGenerator",
-                        help="Which type of world-generator to use, whether a "
-                             "fixed (set of) world(s), or a parameterizable "
-                             "representation."
+    parser.add_argument('-g', '--generator_class', type=str, default="TileFlipIndividual",
+                        help="An evolvable representation of the environment (or environment-generator(?))."
                         )
     parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
     parser.add_argument('-np', '--num_proc', type=int, default=0, help="Number of RLlib workers. Each uses 1 CPU core.")
@@ -203,7 +152,7 @@ if __name__ == '__main__':
                         help='If not using quality diversity, the name of the fitness function that will compute world'
                              'fitness based on population-wise rewards.')
     parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
-    parser.add_argument('--oracle_policy', action='store_true', help="Whether to use the oracle (optimal) policy, and"
+    parser.add_argument('-op', '--oracle_policy', action='store_true', help="Whether to use the oracle (optimal) policy, and"
                                                                       "thereby focus on validating generator-evolution.")
     parser.add_argument('-fo', '--fully_observable', action='store_true',
                         help="Whether to use a fully observable environment.")
@@ -278,7 +227,8 @@ if __name__ == '__main__':
 
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
-    initial_weights = generator.get_init_weights()
+    # Don't need to know the dimension here since we'll simply call an individual's "mutate" method
+    # initial_weights = generator.get_init_weights()
     
     experiment_name = get_experiment_name(args)
     load = args.load
@@ -490,8 +440,8 @@ if __name__ == '__main__':
     qdpy_save_interval = 100
 
     # Algorithm parameters
-    dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
-    assert (dimension >= 2)
+    # dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
+    # assert (dimension >= 2)
     assert (nb_features >= 1)
 
     init_batch_size = num_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
@@ -521,11 +471,11 @@ if __name__ == '__main__':
     toolbox = base.Toolbox()
     # toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
     # toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
-    toolbox.register("individual", DiscreteIndividual, width=env.width-2, n_chan=env.n_chan)
+    toolbox.register("individual", generator_cls, width=env.width-2, n_chan=env.n_chan)
     # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
-    toolbox.register("evaluate", qdpy_eval, env, generator)
+    # toolbox.register("evaluate", qdpy_eval, env, generator)
     # toolbox.register("mutate", tools.mutPolynomialBounded, low=ind_domain[0], up=ind_domain[1], eta=eta,
                     #  indpb=mutation_pb)
     toolbox.register("mutate", lambda individual: individual.mutate())
@@ -534,7 +484,7 @@ if __name__ == '__main__':
 
     # Create a dict storing all relevant infos
     results_infos = {}
-    results_infos['dimension'] = dimension
+    # results_infos['dimension'] = dimension
     results_infos['ind_domain'] = ind_domain
     results_infos['features_domain'] = features_domain
     results_infos['fitness_domain'] = fitness_domain
