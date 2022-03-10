@@ -88,7 +88,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
 
 
 def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
-                          oracle_policy, fully_observable, idx_counter, model, env_config, fixed_worlds):
+                          oracle_policy, fully_observable, idx_counter, model, env_config, fixed_worlds, rotated_observations):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -136,15 +136,24 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             })
 
         model_config = copy.copy(MODEL_DEFAULTS)
-        if fully_observable and model != 'flood':
-            model_config.update({
-            # Fully observable, non-translated map
-            "conv_filters": [
-                [64, [3, 3], 2], 
-                [128, [3, 3], 2], 
-                [256, [3, 3], 2]
-            ],
-            })
+        if fully_observable and model == 'strided_feedforward':
+            if rotated_observations:
+                model_config.update({
+                # Fully observable, translated and padded map
+                "conv_filters": [
+                    [32, [3, 3], 2], 
+                    [64, [3, 3], 2], 
+                    [128, [3, 3], 2], 
+                    [256, [3, 3], 2]
+                ],})
+            else:
+                model_config.update({
+                # Fully observable, non-translated map
+                "conv_filters": [
+                    [64, [3, 3], 2], 
+                    [128, [3, 3], 2], 
+                    [256, [3, 3], 2]
+                ],})
         else:
             if model is None:
                 model_config.update({

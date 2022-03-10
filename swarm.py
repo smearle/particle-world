@@ -47,7 +47,7 @@ class Swarm(object):
 
         return obs
 
-    def get_observations(self, scape, flatten=True, ps=None):
+    def get_observations(self, scape, flatten=True, ps=None, padding_mode='wrap', surplus_padding=0):
         """
         Return a batch of local observations corresponding to particles in the swarm, of size (n_pop, patch_w, patch_w),
         where patch_w is a square patch allowing the agent to see fov (field of vision)-many tiles in each direction.
@@ -63,10 +63,12 @@ class Swarm(object):
         ps_int = np.floor(ps).astype(int)
         # weird edge case, is modulo broken?
         ps_int = np.where(ps_int == self.world_width, 0, ps_int)
+        padding = fov + surplus_padding
+        constant_values = {'constant_values': 0} if padding_mode == 'constant' else {}
         # TODO: this is discretized right now. Maybe it should use eval_fit instead to take advantage of continuity?
-        landscape = np.pad(scape, ((0, 0), (fov, fov), (fov, fov)), mode='wrap')
-        # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods
-        nbs = [landscape[:, pxi:pxi + 1 + 2 * fov, pyi:pyi + 1 + 2 * fov] for pxi, pyi in
+        landscape = np.pad(scape, ((0, 0), (padding, padding), (padding, padding)), mode=padding_mode, **constant_values)
+        # Padding makes this indexing a bit weird but these are patch_w-width neighborhoods, centered at provided positions
+        nbs = [landscape[:, pxi + padding - fov: pxi + 1 + padding + fov, pyi + padding - fov:pyi + 1 + padding + fov] for pxi, pyi in
                zip(ps_int[:, 0], ps_int[:, 1])]
         nbs = np.stack(nbs)
         # (agents, channels, width, height)
@@ -74,7 +76,7 @@ class Swarm(object):
         if flatten:
             nbs = np.reshape(nbs, (nbs.shape[0], nbs.shape[1], -1))
         # print(nbs.shape)
-        return nbs.transpose(0, 1, 2, 3)
+        return nbs.transpose(0, 2, 3, 1)
 
     def get_rewards(self, scape):
         ps = self.ps.astype(int)
@@ -213,17 +215,74 @@ class MazeSwarm(NeuralSwarm):
         super().update(scape, accelerations, obstacles=scape[1])
 
 
-dirs = [[-1, 0], [0, -1], [0, 1], [1, 0]]
+dirs = np.array([[1, 0], [0, 1], [-1, 0], [0, -1]])
 
 
 class DirectedMazeSwarm(MazeSwarm):
-    def init_ps(self):
-        super().init_ps()
-        self.dirs = np.random.randint(0, 4, self.n_pop)
 
-    def get_observations(self, scape, flatten=True):
-        ps = self.ps + (dirs[self.dirs] * self.fov)
-        return super().get_observations(scape, flatten, ps=ps)
+    def __init__(self, *args, **kwargs):
+        self.directions = None
+        super().__init__(*args, **kwargs)
+    
+    def reset(self, *args, **kwargs):
+        self.directions = np.zeros(self.n_pop, dtype=int)
+
+        # DEBUG rotation
+        # self.directions[:] = 3
+
+        super().reset(*args, **kwargs)
+
+    def get_observations(self, scape, flatten=True, padding_mode='wrap', surplus_padding=0):
+        # ps = self.ps + (dirs[self.directions] * self.fov)
+        ps = self.ps
+        map_obs = super().get_observations(scape, flatten, ps=ps, padding_mode=padding_mode, surplus_padding=surplus_padding)
+
+        # TODO: this would give separate map/direction observations, see TODO in DirectedMazeEnv
+#       obs = [{'map': mo, 'direction': d} for mo, d in zip(map_obs, self.directions)]
+
+        # For now we'll add a onehot-encoded direction to the map, beneath the player (should it occupy the whole layer?)
+        direction_layers = np.zeros((*map_obs.shape[:-1], 4), dtype=map_obs.dtype)
+        direction_layers[np.arange(self.n_pop), self.fov, self.fov, self.directions] = 1
+
+        # lining up render with printout
+        map_obs = np.flip(map_obs, axis=1)  # flip along x axis
+
+        obs = np.concatenate((map_obs, direction_layers), axis=-1)
+
+        # Rotate observation to match each agent's orientation (we've offset to make it look right when printing local 
+        # observations and rendering the environment.)
+        for i, d in enumerate(self.directions):
+
+            obs[i] = np.rot90(obs[i], k=d, axes=(0, 1))
+
+        # DEBUG: rotation
+#       v_obs = obs.transpose(0, 3, 1, 2)
+#       print(v_obs[0,0])
+#       print()
+#       print(v_obs[0,2])
+
+        return obs
+
+    def update(self, scape, accelerations=None, obstacles=None):
+        # NOTE: these accelerations actually correspond to turn/forward/still actions. We now convert them to
+        #  accelerations where appropriate.
+
+        # DEBUG:
+#       accelerations[:] = 3
+
+        # get rid of this extra (normally (x, y)) dimension
+        actions = accelerations[:, 0]
+
+        # turn right (-1 just a placeholder, we'll be overwritted in this function)
+        self.directions = np.where(actions == 0, (self.directions - 1) % 4, self.directions)
+        # turn left
+        self.directions = np.where(actions == 1, (self.directions + 1) % 4, self.directions)
+        # move forward or stay put (involving no acceleration)
+
+        # move forward, otherwise stay put
+        accelerations = np.where(np.stack((actions, actions), axis=-1) == 3, dirs[self.directions], (0, 0))
+
+        super().update(scape, accelerations, obstacles=scape[1])
 
 
 class GreedySwarm(Swarm):

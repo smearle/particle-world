@@ -30,7 +30,9 @@ start_color = (255, 255, 0)
 class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
     propelling themselves toward desirable regions in the fitness world."""
-    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False, fov=4):
+    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False, fov=4,
+                 rotated_observations=False):
+        self.rotated_observations=rotated_observations
         self.n_chan = n_chan
         if not pg_width:
             pg_width = width
@@ -42,12 +44,18 @@ class ParticleSwarmEnv(object):
         # self.fovs = [si+1 for si in range(n_policies)]
 
         if fully_observable:
-            # Fully observable map (given wrapping)
-            self.fovs = [math.floor(width/2) for si in range(n_policies)]
+            if not rotated_observations:
+                # just viewing the whole map, not centered at agent
+                self.fovs = [math.floor(width/2) for si in range(n_policies)]
+            else:
+                # viewing the whole map, centered at agent, guaranteed via padding
+                self.fovs = [math.floor(width) for si in range(n_policies)]
 
         else:
         # Partially observable map
             self.fovs = [fov for si in range(n_policies)]
+
+        self.patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
         self.particle_draw_size = 0.3
@@ -118,15 +126,16 @@ class ParticleSwarmEnv(object):
 
 
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
-    def __init__(self, width, swarm_cls, n_policies, n_pop, max_steps, pg_width=500, n_chan=1, fully_observable=False, fov=4):
+    def __init__(self, width, swarm_cls, n_policies, n_pop, pg_width=500, n_chan=1, fully_observable=False, fov=4,
+                 rotated_observations=False):
         super().__init__(
-            width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, fov=fov)
-        patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
+            width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, fov=fov,
+            rotated_observations=rotated_observations)
         self.actions = [(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1)]
 
         # Each agent observes 2D patch around itself. Each cell has multiple channels. 3D observation.
         # Map policies to agent observations.
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(n_chan, self.patch_ws[i], self.patch_ws[i]))
                                    for i in range(n_policies)}
         # self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
         # self.action_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(2,))
@@ -136,8 +145,9 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         self.action_spaces = {i: gym.spaces.Discrete(len(self.actions))
                               for i in range(n_policies)}
 
-        self.max_steps = max_steps
+        self.max_steps = self.get_max_steps()
         self.n_step = 0
+        self.dead_action = [0, 0]
 
     def set_policies(self, policies, trainer_config):
         # self.swarms = policies
@@ -158,7 +168,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
 #       batch_swarm_acts = {j: np.vstack([swarm_acts[j][i] for i in range(self.swarms[j].n_pop)])
 #                           for j in range(len(self.swarms))}
-        batch_swarm_acts = {i: np.vstack([swarm_acts[i][j] if (i, j) in actions else [0, 0] for j in range(self.swarms[i].n_pop)])
+        batch_swarm_acts = {i: np.vstack([swarm_acts[i][j] if (i, j) in actions else self.dead_action for j in range(self.swarms[i].n_pop)])
                             for i in range(len(self.swarms))}
         [swarm.update(scape=self.world, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
@@ -188,6 +198,11 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         rew = {(i, j): swarm_rewards[i][j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
         return rew
+
+    def get_max_steps(self):
+
+        # This is kind of arbitrary
+        return self._width **2 // 2
 
 
 def regret_fitness(regret_loss):
@@ -401,19 +416,6 @@ class ParticleEvalEnv(ParticleGymRLlib):
         return rewards
     
     
-# Convert to 3-channel probability distribution (or agent action)-type representation
-eval_mazes_probdists = {}
-for k, y in eval_mazes.items():
-    y = discrete_to_onehot(y)
-    z = np.empty((y.shape[0] - 1, y.shape[1], y.shape[2]))
-    z[:3] = y[:3]
-    z[2] -= y[3]
-    eval_mazes_probdists[k] = z
-
-eval_mazes_onehots = {}
-for k, y in eval_mazes.items():
-    eval_mazes_onehots[k] = discrete_to_onehot(y)
-
 
 class ParticleMazeEnv(ParticleGymRLlib):
     empty_chan = 0
@@ -430,33 +432,55 @@ class ParticleMazeEnv(ParticleGymRLlib):
         super().__init__(cfg)
         # TODO: maze-specific evaluation scenarios (will currently break)
         self.n_policies = n_policies = len(self.swarms)
-        self.patch_ws = patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
+        # self.patch_ws = patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
         # Observe empty, wall, and goal tiles (not start tiles)
-        if self.fully_observable:
-            n_chan = self.n_chan  # visible player
+        if self.fully_observable and not self.rotated_observations:
+            # If fully observable and not using rotation, the observe the player
+            # TODO: actually, we should observe player if *not translating*. Should add an option to toggle translation.
+            self.n_obs_chan = self.n_chan
             self.player_chan = -1
         else:
-            n_chan = self.n_chan - 1
+            # If not fully observable, or using rotation, then we translate relative to player's position and do not need
+            # to observe the player itself.
+            self.n_obs_chan = self.n_chan - 1
             self.player_chan = None
-        self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(patch_ws[i], patch_ws[i], n_chan))
+
+        self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], self.n_obs_chan))
                                    for i in range(n_policies)}
         self.observation_space = None
 
-        self.max_steps = ParticleMazeEnv.get_max_steps(self.width)
 
+    def get_particle_observations(self, padding_mode='wrap', surplus_padding=0):
 
-    def get_particle_observations(self):
-        if self.fully_observable:
-            obs = {(i, j): swarm.get_full_observations(
-                                    scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
-                                    flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
-                for j in range(swarm.n_pop)}
+        # Remove the spawn-point channel and replace the spawn point with an empty tile
+        obs_scape = np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:]))
+        obs_scape[self.empty_chan, self.start_idx[0], self.start_idx[1]] = 1
+
+        if self.fully_observable and not self.rotated_observations:
+            obs = {}
+            for i, swarm in enumerate(self.swarms):
+                obs_i = swarm.get_full_observations(
+                    scape=obs_scape,
+                    flatten=False,
+                    )
         else:
-            obs = {(i, j): swarm.get_observations(
-                                    scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
-                                    flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
-                for j in range(swarm.n_pop)}
+            obs = {}
+            for i, swarm in enumerate(self.swarms):
+                obs_i = swarm.get_observations(
+                    scape=obs_scape,
+                    flatten=False,
+                    padding_mode=padding_mode, 
+                    surplus_padding=surplus_padding,
+                    )
+
+        for j in range(swarm.n_pop):
+            obs[(i, j)] = obs_i[j]
+
+#           obs = {(i, j): swarm.get_observations(
+#                                   scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
+#                                   flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
+#               for j in range(swarm.n_pop)}
         return obs
 
 
@@ -534,6 +558,16 @@ class ParticleMazeEnv(ParticleGymRLlib):
         generator.world = self.world  # just for rendering
         return super().simulate(n_steps=n_steps, generator=generator, render=render, screen=screen, pg_scale=pg_scale, pg_delay=pg_delay)
 
+    def get_max_steps(self):
+        width = self.width
+
+        # Longest path between spawn and goal consists of the optimal zig-zag + hanging tile if width is odd
+        max_path = width * width // 2 + width % 2
+
+        # If agent does not receive full observations, it might have to explore dead-ends. Give it twice as much time 
+        # (though it may in fact need much more)
+        return max_path * 2
+
     def render(self, mode='human', pg_delay=0, pg_width=None):
         if not pg_width:
             pg_width = self.pg_width
@@ -562,23 +596,94 @@ class ParticleMazeEnv(ParticleGymRLlib):
         if mode == 'rgb':
             return arr
 
-    def get_max_steps(width=15):
-        # optimal zig-zag + hanging tile if width is odd
-        return width * width // 2 + width % 2
 
+def rotate(origin, point, angle):
+    """
+    Rotate a point counterclockwise by a given angle around a given origin.
+
+    The angle should be given in radians.
+    """
+    ox, oy = origin
+    px, py = point
+
+    qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
+    qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
+    return qx, qy
+
+# triangles facing left, down, right, up
+triangle = ((-5, -5), (-2, 0), (-5, 5), (5, 0))
+directed_triangles = [[rotate((0, 0), triangle[j], math.pi / 2 * i) for j in range(len(triangle))] for i in range(4)]
+
+triangle_scale = 2.6
 
 class DirectedMazeEnv(ParticleMazeEnv):
     def __init__(self, cfg):
         super().__init__(cfg)
-        if self.fully_observable:
-            n_chan = self.n_chan  # visible player
-        else:
-            n_chan = self.n_chan - 1
-        self.observation_spaces = {i: {
-            'map': gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], n_chan)),
-            'dir': gym.spaces.Discrete(4)}
+        self.dead_action = 3
+        self.actions = [0, 1, 2, 3]
+#       if self.fully_observable:
+#           n_chan = self.n_chan  # visible player
+#       else:
+#           n_chan = self.n_chan - 1
+
+# TODO: support distinct Box & Discrete observations, to be processed at separate points in the neural architecture?
+#  rllib/models/preprocessors.py seems to not consider this >:(
+
+#       self.observation_spaces = {i: gym.spaces.Dict({
+#           'map': gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], n_chan)),
+#           'direction': gym.spaces.Discrete(4)})
+#                                  for i in range(self.n_policies)}
+
+#       self.observation_spaces = {i: gym.spaces.Tuple((
+#           gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], n_chan)),
+#           gym.spaces.Discrete(4)))
+#                                  for i in range(self.n_policies)}
+
+        self.observation_spaces = {i: 
+            gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], self.n_obs_chan + 4))
                                    for i in range(self.n_policies)}
         self.action_spaces = {i : gym.spaces.Discrete(4) for i in range(self.n_policies)}
+
+
+    def render(self, mode='human', pg_delay=0, pg_width=None):
+        if not pg_width:
+            pg_width = self.pg_width
+        pg_scale = pg_width / self.width
+        if not self.screen:
+            self.screen = pygame.display.set_mode([pg_width, pg_width])
+        render_landscape(self.screen, -1 * self.world[1] + 1)
+        # Did the user click the window close button? Exit if so.
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        pygame.draw.rect(self.screen, goal_color, (self.goal_idx[0] * pg_scale, self.goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        pygame.draw.rect(self.screen, start_color, (self.start_idx[0] * pg_scale, self.start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        for pi, policy_i in enumerate(self.swarms):
+            ag_i = 0
+            for agent_pos, agent_direction in zip(policy_i.ps, policy_i.directions):
+                agent_pos = agent_pos.astype(int) + 0.5
+                points = [np.array(point) * triangle_scale + agent_pos * pg_scale for point in directed_triangles[agent_direction]]
+                pygame.draw.polygon(self.screen, player_colors[pi], points)
+                ag_i = (ag_i + 1) % 4
+        if mode == 'human':
+            pygame.display.update()
+            pygame.time.delay(pg_delay)
+            return True
+
+        arr = pygame.surfarray.array3d(self.screen)
+        if mode == 'rgb':
+            return arr
+
+    def get_particle_observations(self):
+        obs = super().get_particle_observations(padding_mode='constant', surplus_padding=self.fovs[0])
+        return obs
+
+    def get_max_steps(self):
+        max_steps = super().get_max_steps()
+
+        # Very imprecisely suppose the agent might have to turn at every other step along its route
+        return int(max_steps * 1.5)
 
 
 # TODO: ...
@@ -608,7 +713,7 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
         return obs_map
     
     def step(self, actions):
-        TT()
+        raise NotImplementedError
         if self.n_plan_step < self.max_plan_steps:
             self.aux_map += actions
         else:

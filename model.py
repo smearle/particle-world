@@ -71,7 +71,6 @@ class CustomRNNModel(TorchRNN, nn.Module):
         return th.reshape(self.value_branch(self._features), [-1])
 
     def forward(self, input_dict, state, seq_lens):
-        print(seq_lens)
         x = nn.functional.relu(self.conv(input_dict["obs"].permute(0, 3, 1, 2)))
         x = x.reshape(x.size(0), -1)
         return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)

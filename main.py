@@ -4,6 +4,7 @@ import math
 import os
 import pickle
 import random
+from re import A
 import sys
 from functools import partial
 from pdb import set_trace as TT
@@ -22,15 +23,15 @@ from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-from envs import ParticleMazeEnv, eval_mazes, full_obs_test_mazes
-from envs.env import MazeEnvForNCAgents
+from envs import ParticleMazeEnv, eval_mazes, full_obs_test_mazes, eval_mazes_onehots
+from envs.env import DirectedMazeEnv, MazeEnvForNCAgents
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils.utils import qdRLlibEval, qdpy_save_archive
 from qdpy_utils.individuals import TileFlipIndividual, NCAIndividual
 from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
 from rllib_utils.eval_worlds import rllib_evaluate_worlds
 from rllib_utils.utils import IdxCounter
-from swarm import NeuralSwarm, MazeSwarm
+from swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
 from visualize import visualize_train_stats
 
@@ -161,13 +162,17 @@ if __name__ == '__main__':
     parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
                         help="How many iterations to train the player. If -1, run until convergence.")
     parser.add_argument('-m', '--model', type=str, default=None)
-    parser.add_argument('-fov', '--field_of_view', type=int, default=4, help='How far agents can see in each direction.')
+    parser.add_argument('-fov', '--field_of_view', type=int, default=2, help='How far agents can see in each direction.')
     parser.add_argument('-lc', '--load_config', type=int, default=None, 
                         help="Load a dictionary of (automatically-generated) arguments. "
                         "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
     parser.add_argument('-tr', '--target_reward', type=int, default=0, 
                         help="Target reward the world should elicit from player if using the min_solvable objective "
                         "function.")
+    parser.add_argument('-ro', '--rotated_observations', action='store_true',
+                        help="Whether to use rotated observations. If so, the agent will have an action space consisting"
+                        "of moving forward, staying put, and turning left or right. It will perceive its orientation as a "
+                        "discrete space.")
     args = parser.parse_args()
 
     # This NCA-type model is meant to be used with full observations.
@@ -206,24 +211,40 @@ if __name__ == '__main__':
         max_total_bins = 1
 
     # swarm_cls = NeuralSwarm
-    swarm_cls = MazeSwarm
-    n_sim_steps = ParticleMazeEnv.get_max_steps(width=width)
+    if args.rotated_observations:
+        swarm_cls = DirectedMazeSwarm
+        env_cls = DirectedMazeEnv
+    else:
+        swarm_cls = MazeSwarm
+        env_cls = ParticleMazeEnv
 
+#   if args.model == 'nca':
+#       env_cls = MazeEnvForNCAgents
+#   else:
+#       env_cls = ParticleMazeEnv
+    
     # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
     # env = ParticleGymRLlib(
-    env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop, 'max_steps': n_sim_steps,
+    env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop,
          'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
          'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
-         'target_reward': args.target_reward}
+         'target_reward': args.target_reward, 'rotated_observations': args.rotated_observations}
 
-    if args.model == 'nca':
-        env_cls = MazeEnvForNCAgents
-    else:
-        env_cls = ParticleMazeEnv
 
     # Copying config here because we pop certain settings in env subclasses before passing to parent classes
     # TODO: this copying can happen in the env itself.
     env = env_cls(copy.copy(env_config))
+
+#   # DEBUG: rotation
+#   env.set_worlds(eval_mazes)
+#   obs = env.reset()
+#   for i in range(7):
+#       env.render()
+#       TT()
+#       obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
+#   TT()
+
+    n_sim_steps = env.max_steps
 
     generator = generator_cls(width=width, n_chan=env.n_chan)
 
@@ -257,7 +278,8 @@ if __name__ == '__main__':
                                              enjoy=args.enjoy, render=args.render, save_dir=save_dir,
                                              num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
                                              oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
-                                             model=args.model, env_config=env_config, fixed_worlds=args.fixed_worlds)
+                                             model=args.model, env_config=env_config, fixed_worlds=args.fixed_worlds,
+                                             rotated_observations=args.rotated_observations)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)

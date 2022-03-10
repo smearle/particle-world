@@ -1,6 +1,8 @@
 import itertools
 import numpy as np
 
+from utils import discrete_to_onehot
+
 
 eval_mazes = {
     # Empty room---easy (goal next to spawn)
@@ -113,3 +115,16 @@ for x, y in [(0, 1), (0, -2), (-1, 1), (-1, -2)]:
 
 eval_mazes.update(full_obs_test_mazes)
 
+
+# Convert to 3-channel probability distribution (or agent action)-type representation
+eval_mazes_probdists = {}
+for k, y in eval_mazes.items():
+    y = discrete_to_onehot(y)
+    z = np.empty((y.shape[0] - 1, y.shape[1], y.shape[2]))
+    z[:3] = y[:3]
+    z[2] -= y[3]
+    eval_mazes_probdists[k] = z
+
+eval_mazes_onehots = {}
+for k, y in eval_mazes.items():
+    eval_mazes_onehots[k] = discrete_to_onehot(y)
