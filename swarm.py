@@ -45,7 +45,7 @@ class Swarm(object):
         obs[np.arange(self.n_pop), -1, self.ps[:, 0].astype(int), self.ps[:, 1].astype(int)] = 1
         assert obs[:, -1, :, :].sum() == self.n_pop
 
-        return obs
+        return obs.transpose(0, 2, 3, 1)
 
     def get_observations(self, scape, flatten=True, ps=None, padding_mode='wrap', surplus_padding=0):
         """

@@ -19,7 +19,7 @@ from utils import update_individuals
 def qdRLlibEval(init_batch, toolbox, container, batch_size, niter, 
                 rllib_trainer, rllib_eval: bool, quality_diversity: bool, oracle_policy: bool, net_itr: int, gen_itr: int, play_itr: int,
                 cxpb: float=0.0, mutpb:float=1.0, stats=None, logbook=None,
-                halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None):
+                halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None, render=False):
     """Simple QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
     :param rllib_eval: #TODO
@@ -66,7 +66,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
             trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, idx_counter=idx_counter,
             quality_diversity=quality_diversity, oracle_policy=oracle_policy, net_itr=net_itr,
-            start_time=start_time, evaluate_only=False)
+            start_time=start_time, evaluate_only=False, render=render)
         # assert len(rllib_stats) == 1
 
     else:
@@ -136,7 +136,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         if rllib_eval:
             rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr, evaluate_only=False,
                 trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, idx_counter=idx_counter,
-                oracle_policy=oracle_policy, start_time=start_time, quality_diversity=quality_diversity)
+                oracle_policy=oracle_policy, start_time=start_time, quality_diversity=quality_diversity, render=render)
 
         else:
             world_stats = toolbox.map(toolbox.evaluate, invalid_ind)

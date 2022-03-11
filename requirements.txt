@@ -5,7 +5,8 @@ opencv-python
 pandas
 pygame
 ray[rllib]==1.9.2  # upgrading to 1.10 results in different train_batch length. Also evaluating only 1 world in all envs?
-ribs
+gym==0.21.0  # later versions seem to conflict with numpy
+# ribs
 tqdm
 ./submodules/pytorch-neat
 ./submodules/qdpy

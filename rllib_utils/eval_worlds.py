@@ -10,7 +10,7 @@ from rllib_utils.utils import get_env_world_heuristics
 
 def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
     quality_diversity=False, oracle_policy=False, calc_world_heuristics=False, calc_agent_stats=False, 
-    fixed_worlds=False):
+    fixed_worlds=False, render=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -33,6 +33,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         workers = trainer.evaluation_workers
     else:
         workers = trainer.workers
+    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items()} if render else None
     if not isinstance(list(worlds.values())[0], np.ndarray):
         worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
     # fitnesses = {k: [] for k in worlds}
@@ -63,7 +64,8 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
 
         # Assign envs to worlds
         workers.foreach_worker(
-            lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter)))
+            lambda worker: worker.foreach_env(
+                lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
 
         # If using oracle, manually load the world
         if oracle_policy:

@@ -14,7 +14,7 @@ from generator import NCAGenerator
 
 
 class DiscreteIndividual(Individual):
-    def __init__(self, width, n_chan, unique_chans=[2, 3]):
+    def __init__(self, width, n_chan, unique_chans=[2, 3], save_gen_sequence=False):
         Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
         self.width = width
         self.unique_chans = unique_chans
@@ -80,19 +80,20 @@ class TileFlipIndividual(DiscreteIndividual):
 
 
 class NCAIndividual(DiscreteIndividual):
-    def __init__(self, width, n_chan, unique_chans=[2, 3]):
+    def __init__(self, width, n_chan, unique_chans=[2, 3], save_gen_sequence=False):
         Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
+        self.save_gen_sequence = save_gen_sequence
         self.width = width
         self.unique_chans = unique_chans
         self.n_chan = n_chan
-        self.nca_generator = NCAGenerator(width, n_chan, 30)
+        self.nca_generator = NCAGenerator(width, n_chan, 30, save_gen_sequence=save_gen_sequence)
         self.generate()
         self.validate() 
 
     def generate(self):
-        self.nca_generator.generate()
-        onehot = self.nca_generator.world.numpy()
-        self.discrete = onehot[0].argmax(axis=0)
+        self.gen_sequence = [bd[0] for bd in self.nca_generator.generate()]
+        batch_discrete = self.nca_generator.discrete_world.numpy()
+        self.discrete = batch_discrete[0]
         self.validate()
 
     def mutate(self):

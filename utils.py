@@ -8,7 +8,7 @@ import pygame
 import ray
 from matplotlib import pyplot as plt
 from pygame.constants import KEYDOWN
-from ribs.visualize import grid_archive_heatmap
+# from ribs.visualize import grid_archive_heatmap
 from timeit import default_timer as timer
 
 from swarm import eval_fit

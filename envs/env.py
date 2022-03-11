@@ -44,12 +44,15 @@ class ParticleSwarmEnv(object):
         # self.fovs = [si+1 for si in range(n_policies)]
 
         if fully_observable:
-            if not rotated_observations:
-                # just viewing the whole map, not centered at agent
-                self.fovs = [math.floor(width/2) for si in range(n_policies)]
-            else:
-                # viewing the whole map, centered at agent, guaranteed via padding
-                self.fovs = [math.floor(width) for si in range(n_policies)]
+            # if not rotated_observations:
+
+            # just viewing the whole map, not centered at agent
+            self.fovs = [math.floor(width/2) for si in range(n_policies)]
+
+            # TODO: add a `translation` arg to toggle this (automatically True if not fully_observable)
+#           else:
+#               # viewing the whole map, centered at agent, guaranteed via padding
+#               self.fovs = [math.floor(width) for si in range(n_policies)]
 
         else:
         # Partially observable map
@@ -213,6 +216,7 @@ class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
         self.stats = []
         self.world = None
+        self.world_gen_sequence = None
         evaluate = cfg.pop("evaluate")
         self.need_world_reset = False
         self.obj_fn_str = cfg.pop('objective_function')
@@ -247,7 +251,7 @@ class ParticleGymRLlib(ParticleGym):
         self.last_world_key = self.world_key
         self.next_world = None
 
-    def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None):
+    def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
         # self.world_idx = 0
         if idx_counter:
             self.world_key = ray.get(idx_counter.get.remote(hash(self)))
@@ -257,6 +261,8 @@ class ParticleGymRLlib(ParticleGym):
         self.worlds = worlds
         if next_n_pop is not None:
             self.next_n_pop = next_n_pop
+        if world_gen_sequences is not None:
+            self.world_gen_sequence = world_gen_sequences[self.world_key]
 
     def set_world(self, world):
         """
@@ -366,62 +372,14 @@ class ParticleGymRLlib(ParticleGym):
             self.stats[-1][1][k] += v
 
         return rew
-
-
-# This is a dummy class not currently used, except by its parent ParticleGymRLlib, which borrows its methods when instantiating,
-# if in evaluation mode.
-class ParticleEvalEnv(ParticleGymRLlib):
-    """
-    An environment that assumes that a feed-forward (i.e. memoryless) neural network is "best" at the task of navigating
-    a continuous fitness world when it simply greedly moves to the best tile in its field of vision. Randomly generate
-    a map consisting of a neighborhood, and reward 1 when the policy moves to the tile with greatest value, otherwise 0.
-    Episodes last one step.
-    """
-    def __init__(self, **cfg):
-        """
-        :param fovs: The fields of vision of the policies (how far they can see in each direction.
-        """
-        super().__init__(**cfg)
-        raise Exception(f"{type(self)} is a dummy class.")
-
-    def reset(self):
-        """Generate uniform random fitness world, then set to 0 all tiles not in the initial field of vision of any agent."""
-        self.fitnesses = {}
-        og_scape = np.random.random((self.width, self.width))
-        # Note that we're calling set_world on ourselves. Normally this is called externally before reset
-        self.set_world_eval(og_scape, hash(self))
-        obs = super(ParticleGymRLlib, self).reset()
-        self.agent_ids = [agent_id for agent_id in obs]
-        # Note that this is weird, allows borrowing by parent class. Will break the
-        self.init_nbs = [swarm.get_observations(og_scape, flatten=False) for swarm in self.swarms]
-        landscape = np.ones(og_scape.shape)
-        for swarm, init_nb, fov in zip(self.swarms, self.init_nbs, self.fovs):
-            for ps, nb in zip(swarm.ps.astype(int), init_nb):
-                # TODO: vectorize this
-                landscape[ps[0] - fov: ps[0] + fov + 1, ps[1] - fov: ps[1] + fov + 1] = nb
-        self.set_landscape(landscape)
-        # obs = [np.reshape(nb, (nb.shape[0], nb.shape[1], -1)) for nb in self.init_nbs]
-        return obs
-
-    def get_eval_reward(self, og_get_reward):
-        """Reward for policies when their agents move the best tile that was in their initial field of vision."""
-        if not self.dones['__all__']:
-            return {agent_id: 0 for agent_id in self.agent_ids}
-        fovs = [int((nb[0].shape[0] - 1) / 2) for nb in self.init_nbs]
-        # nbs = [nb[fov - 1: fov + 2] for nb, fov in zip(self.init_nbs, fovs)]
-        nbs = self.init_nbs
-        # Condition is satisfied when
-        og_rewards = og_get_reward()
-        rewards = {agent_id: int(np.max(nb) == og_rewards[agent_id]) for agent_id, nb in zip(self.agent_ids, self.init_nbs)}
-        return rewards
-    
-    
+ 
 
 class ParticleMazeEnv(ParticleGymRLlib):
     empty_chan = 0
     wall_chan = 1
     start_chan = 2
     goal_chan = 3
+
     def __init__(self, cfg):
         cfg.update({'n_chan': 4})
         cfg['swarm_cls'] = cfg.get('swarm_cls', MazeSwarm)
@@ -435,14 +393,14 @@ class ParticleMazeEnv(ParticleGymRLlib):
         # self.patch_ws = patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
 
         # Observe empty, wall, and goal tiles (not start tiles)
-        if self.fully_observable and not self.rotated_observations:
-            # If fully observable and not using rotation, the observe the player
-            # TODO: actually, we should observe player if *not translating*. Should add an option to toggle translation.
+        if self.fully_observable and not self.translated_observations:
+            # If fully observable and not translating observations to center the player, then we must observe the 
+            # player.
             self.n_obs_chan = self.n_chan
             self.player_chan = -1
         else:
-            # If not fully observable, or using rotation, then we translate relative to player's position and do not need
-            # to observe the player itself.
+            # If not fully observable, or using rotation, then we translate relative to player's position and do not 
+            # need to observe the player itself.
             self.n_obs_chan = self.n_chan - 1
             self.player_chan = None
 
@@ -574,14 +532,34 @@ class ParticleMazeEnv(ParticleGymRLlib):
         pg_scale = pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([pg_width, pg_width])
-        render_landscape(self.screen, -1 * self.world[1] + 1)
+#       if self.n_step == 1 and self.world_gen_sequence is not None:
+#           pass
+#           for i in range(len(self.world_gen_sequence)):
+#               world = self.world_gen_sequence[i]
+#               w = np.zeros((self.width, self.width), dtype=np.int)
+#               w.fill(1)
+#               w[1:-1, 1:-1] = world
+#               start_idx = np.argwhere(w == 2)
+#               goal_idx = np.argwhere(w == 3)
+#               # assert len(self.start_idx) == 1
+#               # assert len(self.goal_idx) == 1
+#               start_idx = start_idx[0]
+#               goal_idx = goal_idx[0]
+#               world_flat = w
+#               onehot_world = discrete_to_onehot(w)
+#               self._render_level(onehot_world, start_idx, goal_idx, pg_scale, pg_delay, mode)
+#       else:
+        self._render_level(self.world, self.start_idx, self.goal_idx, pg_scale, pg_delay, mode)
+
+    def _render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode):
+        render_landscape(self.screen, -1 * world[1] + 1)
         # Did the user click the window close button? Exit if so.
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-        pygame.draw.rect(self.screen, goal_color, (self.goal_idx[0] * pg_scale, self.goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
-        pygame.draw.rect(self.screen, start_color, (self.start_idx[0] * pg_scale, self.start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        pygame.draw.rect(self.screen, goal_color, (goal_idx[0] * pg_scale, goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        pygame.draw.rect(self.screen, start_color, (start_idx[0] * pg_scale, start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
         for pi, policy_i in enumerate(self.swarms):
             for agent_pos in policy_i.ps:
                 agent_pos = agent_pos.astype(int) + 0.5
@@ -610,11 +588,12 @@ def rotate(origin, point, angle):
     qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
     return qx, qy
 
+
 # triangles facing left, down, right, up
 triangle = ((-5, -5), (-2, 0), (-5, 5), (5, 0))
 directed_triangles = [[rotate((0, 0), triangle[j], math.pi / 2 * i) for j in range(len(triangle))] for i in range(4)]
-
 triangle_scale = 2.6
+
 
 class DirectedMazeEnv(ParticleMazeEnv):
     def __init__(self, cfg):
@@ -644,6 +623,29 @@ class DirectedMazeEnv(ParticleMazeEnv):
                                    for i in range(self.n_policies)}
         self.action_spaces = {i : gym.spaces.Discrete(4) for i in range(self.n_policies)}
 
+    def _render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode):
+        render_landscape(self.screen, -1 * world[1] + 1)
+        # Did the user click the window close button? Exit if so.
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        pygame.draw.rect(self.screen, goal_color, (goal_idx[0] * pg_scale, goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        pygame.draw.rect(self.screen, start_color, (start_idx[0] * pg_scale, start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        for pi, policy_i in enumerate(self.swarms):
+            for agent_pos, agent_direction in policy_i.ps, policy_i.directions:
+                agent_pos = agent_pos.astype(int) + 0.5
+#               pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
+#                                  self.particle_draw_size * pg_scale)
+                pygame.draw.polygon(self.screen, player_colors[pi], directed_triangles[agent_direction])
+        if mode == 'human':
+            pygame.display.update()
+            pygame.time.delay(pg_delay)
+            return True
+
+        arr = pygame.surfarray.array3d(self.screen)
+        if mode == 'rgb':
+            return arr
 
     def render(self, mode='human', pg_delay=0, pg_width=None):
         if not pg_width:
@@ -718,3 +720,51 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
             self.aux_map += actions
         else:
             actions = actions[self.ps]
+
+
+## This is a dummy class not currently used, except by its parent ParticleGymRLlib, which borrows its methods when instantiating,
+## if in evaluation mode.
+#class ParticleEvalEnv(ParticleGymRLlib):
+#    """
+#    An environment that assumes that a feed-forward (i.e. memoryless) neural network is "best" at the task of navigating
+#    a continuous fitness world when it simply greedly moves to the best tile in its field of vision. Randomly generate
+#    a map consisting of a neighborhood, and reward 1 when the policy moves to the tile with greatest value, otherwise 0.
+#    Episodes last one step.
+#    """
+#    def __init__(self, **cfg):
+#        """
+#        :param fovs: The fields of vision of the policies (how far they can see in each direction.
+#        """
+#        super().__init__(**cfg)
+#        raise Exception(f"{type(self)} is a dummy class.")
+#
+#    def reset(self):
+#        """Generate uniform random fitness world, then set to 0 all tiles not in the initial field of vision of any agent."""
+#        self.fitnesses = {}
+#        og_scape = np.random.random((self.width, self.width))
+#        # Note that we're calling set_world on ourselves. Normally this is called externally before reset
+#        self.set_world_eval(og_scape, hash(self))
+#        obs = super(ParticleGymRLlib, self).reset()
+#        self.agent_ids = [agent_id for agent_id in obs]
+#        # Note that this is weird, allows borrowing by parent class. Will break the
+#        self.init_nbs = [swarm.get_observations(og_scape, flatten=False) for swarm in self.swarms]
+#        landscape = np.ones(og_scape.shape)
+#        for swarm, init_nb, fov in zip(self.swarms, self.init_nbs, self.fovs):
+#            for ps, nb in zip(swarm.ps.astype(int), init_nb):
+#                # TODO: vectorize this
+#                landscape[ps[0] - fov: ps[0] + fov + 1, ps[1] - fov: ps[1] + fov + 1] = nb
+#        self.set_landscape(landscape)
+#        # obs = [np.reshape(nb, (nb.shape[0], nb.shape[1], -1)) for nb in self.init_nbs]
+#        return obs
+#
+#    def get_eval_reward(self, og_get_reward):
+#        """Reward for policies when their agents move the best tile that was in their initial field of vision."""
+#        if not self.dones['__all__']:
+#            return {agent_id: 0 for agent_id in self.agent_ids}
+#        fovs = [int((nb[0].shape[0] - 1) / 2) for nb in self.init_nbs]
+#        # nbs = [nb[fov - 1: fov + 2] for nb, fov in zip(self.init_nbs, fovs)]
+#        nbs = self.init_nbs
+#        # Condition is satisfied when
+#        og_rewards = og_get_reward()
+#        rewards = {agent_id: int(np.max(nb) == og_rewards[agent_id]) for agent_id, nb in zip(self.agent_ids, self.init_nbs)}
+#        return rewards

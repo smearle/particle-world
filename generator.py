@@ -168,7 +168,8 @@ class SinCPPNGenerator(NNGenerator):
 
 
 class NCAGenerator(NNGenerator):
-    def __init__(self, width, n_chan, n_nca_steps):
+    def __init__(self, width, n_chan, n_nca_steps, save_gen_sequence=False):
+        self.save_gen_sequence = save_gen_sequence
         self.n_chan = n_chan
         self.n_nca_steps = n_nca_steps
         nca_model = GradlessNCA(n_chan)
@@ -184,19 +185,29 @@ class NCAGenerator(NNGenerator):
 
     def _reset(self):
         super()._reset(self.latent)
+        self.discrete_world = self.world.argmax(1)
 
     def _update(self):
         super()._update()
-        self.landscape = (self.world[0, 0] + 1) / 2  # for sine wave activation only!
+        # self.landscape = (self.world[0, 0] + 1) / 2  # for sine wave activation only!
+
+        # Note: we could have auxiliary (non-board-state) tiles here, in which case we won't want to argmax over them 
+        # like this.
+        self.discrete_world = self.world.argmax(1)
+
         return self.world
 
     def generate(self, render=False, screen=None, pg_delay=1):
         self._reset()
+        gen_sequence = [self.discrete_world]
         for _ in range(self.n_nca_steps):
             self._update()
+            if self.save_gen_sequence:
+                gen_sequence.append(self.discrete_world)
             if render:
                 self._render(screen=screen)
                 pygame.time.delay(pg_delay)
+        return gen_sequence
 
 
 def set_weights(nn, weights):

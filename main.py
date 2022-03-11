@@ -23,7 +23,7 @@ from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-from envs import ParticleMazeEnv, eval_mazes, full_obs_test_mazes, eval_mazes_onehots
+from envs import ParticleMazeEnv, eval_mazes, full_obs_test_mazes
 from envs.env import DirectedMazeEnv, MazeEnvForNCAgents
 from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils.utils import qdRLlibEval, qdpy_save_archive
@@ -81,7 +81,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
                       landscapes=training_worlds,
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
                       save_dir=save_dir, n_rllib_envs=num_rllib_envs, logbook=logbook, 
-                      quality_diversity=quality_diversity)
+                      quality_diversity=quality_diversity, render=args.render)
         # else:
         #     if itr % play_phase_len:
         # pass
@@ -95,7 +95,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
             rl_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
                 net_itr=net_itr, trainer=player_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, 
                 idx_counter=idx_counter, quality_diversity=quality_diversity, start_time=start_time,
-                calc_world_heuristics=False)
+                calc_world_heuristics=False, render=args.render)
 
         else:
             world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
@@ -173,6 +173,8 @@ if __name__ == '__main__':
                         help="Whether to use rotated observations. If so, the agent will have an action space consisting"
                         "of moving forward, staying put, and turning left or right. It will perceive its orientation as a "
                         "discrete space.")
+    parser.add_argument('-to', '--translated_observations', action='store_true', help='Whether to use translated '
+                        ' observations. This will always be the True when fully_observable is False.')
     args = parser.parse_args()
 
     # This NCA-type model is meant to be used with full observations.
@@ -210,6 +212,16 @@ if __name__ == '__main__':
             assert n_policies > 1
         max_total_bins = 1
 
+    if args.model == 'nca':
+        env_cls = MazeEnvForNCAgents
+    else:
+        if args.fully_observable:
+            swarm_cls = MazeSwarm
+            env_cls = ParticleMazeEnv
+        else:
+            swarm_cls = DirectedMazeSwarm
+            env_cls = DirectedMazeEnv
+
     # swarm_cls = NeuralSwarm
     if args.rotated_observations:
         swarm_cls = DirectedMazeSwarm
@@ -228,9 +240,9 @@ if __name__ == '__main__':
     env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop,
          'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
          'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
-         'target_reward': args.target_reward, 'rotated_observations': args.rotated_observations}
-
-
+         'target_reward': args.target_reward, 'rotated_observations': args.rotated_observations, 
+         'translated_observations': args.translated_observations}
+ 
     # Copying config here because we pop certain settings in env subclasses before passing to parent classes
     # TODO: this copying can happen in the env itself.
     env = env_cls(copy.copy(env_config))
@@ -288,7 +300,7 @@ if __name__ == '__main__':
 
     if args.fixed_worlds:
         # train_worlds = {0: generator.landscape}
-        train_worlds = full_obs_test_mazes
+        training_worlds = full_obs_test_mazes
 
     if args.load:
         if not args.fixed_worlds:
@@ -378,8 +390,8 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if args.fixed_worlds:
                 particle_trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(trainer=particle_trainer, worlds=train_worlds, calc_world_heuristics=False, 
-                                      fixed_worlds=args.fixed_worlds)
+                rllib_evaluate_worlds(trainer=particle_trainer, worlds=training_worlds, calc_world_heuristics=False, 
+                                      fixed_worlds=args.fixed_worlds, render=args.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
                 # particle_trainer.evaluate()
@@ -392,7 +404,7 @@ if __name__ == '__main__':
                 worlds = eval_mazes
             for i, elite in enumerate(worlds):
                 ret = rllib_evaluate_worlds(trainer=particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
-                                            evaluate_only=True, calc_world_heuristics=False)
+                                            evaluate_only=True, calc_world_heuristics=False, render=args.render)
             sys.exit()
 
         # Evaluate
@@ -423,7 +435,7 @@ if __name__ == '__main__':
         os.mkdir(save_dir)
 
     if args.fixed_worlds:
-        train_players(0, 1000, trainer=particle_trainer, landscapes=train_worlds, n_policies=n_policies,
+        train_players(0, 1000, trainer=particle_trainer, landscapes=training_worlds, n_policies=n_policies,
                       n_rllib_envs=num_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps, 
                       quality_diversity=args.quality_diversity, fixed_worlds=args.fixed_worlds,
                       # TODO: initialize logbook even if not evolving worlds
@@ -493,7 +505,7 @@ if __name__ == '__main__':
     toolbox = base.Toolbox()
     # toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
     # toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
-    toolbox.register("individual", generator_cls, width=env.width-2, n_chan=env.n_chan)
+    toolbox.register("individual", generator_cls, width=env.width-2, n_chan=env.n_chan, save_gen_sequence=args.render)
     # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
@@ -523,7 +535,7 @@ if __name__ == '__main__':
     # with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
     qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, rllib_eval=rllib_eval, net_itr=net_itr,
                         quality_diversity=args.quality_diversity, oracle_policy=args.oracle_policy, gen_itr=gen_itr,
-                        logbook=logbook, play_itr=play_itr)
+                        logbook=logbook, play_itr=play_itr, render=args.render)
     # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
     # the archive. (Crucially, it is mutable.)
     staleness_counter = [0]

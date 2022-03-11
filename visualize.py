@@ -2,7 +2,7 @@ import os
 import numpy as np
 from matplotlib import pyplot as plt
 from pdb import set_trace as TT
-from ribs.visualize import grid_archive_heatmap
+# from ribs.visualize import grid_archive_heatmap
 
 
 def visualize_pyribs(archive):

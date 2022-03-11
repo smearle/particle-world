@@ -26,7 +26,7 @@ from utils import get_solution
 
 
 def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
-                  idx_counter=None, logbook=None, quality_diversity=False, fixed_worlds=False):
+                  idx_counter=None, logbook=None, quality_diversity=False, fixed_worlds=False, render=False,):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     # toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
@@ -56,7 +56,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
             net_itr=net_itr, trainer=trainer, worlds=worlds, idx_counter=idx_counter, calc_agent_stats=True,
             start_time=start_time, evaluate_only=False, quality_diversity=quality_diversity, 
-            calc_world_heuristics=calc_world_heuristics, fixed_worlds=fixed_worlds)
+            calc_world_heuristics=calc_world_heuristics, fixed_worlds=fixed_worlds, render=render)
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rl_stats['episode_reward_mean']
 
@@ -169,12 +169,13 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
                 ModelCatalog.register_custom_model('paired', CustomRNNModel)
                 model_config = {'custom_model': 'paired'}
+            # TODO: this seems broken
             elif model == 'flood':
                 ModelCatalog.register_custom_model('flood', FloodMemoryModel)
                 model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
-            elif model == 'nca':
-                ModelCatalog.register_custom_model('nca', NCA)
-                model_config = {'custom_model': 'nca'}
+#           elif model == 'nca':
+#               ModelCatalog.register_custom_model('nca', NCA)
+#               model_config = {'custom_model': 'nca'}
 
             else:
                 raise NotImplementedError
