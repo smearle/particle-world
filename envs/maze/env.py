@@ -11,7 +11,7 @@ from ray import rllib
 from ray.rllib import MultiAgentEnv
 
 # from envs import eval_mazes
-from generator import render_landscape
+from generators.representations import render_landscape
 from generators.objectives import max_reward_fitness
 from swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
 from utils import discrete_to_onehot

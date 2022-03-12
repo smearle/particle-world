@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, TouchStone, eval_mazes, full_obs_test_mazes
 from envs.wrappers import make_env
-from generator import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
+from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils.utils import qdRLlibEval, qdpy_save_archive
 from qdpy_utils.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D
 from ray.tune.registry import register_env
@@ -200,6 +200,8 @@ if __name__ == '__main__':
     # Set the generator/individual, environment, and model class based on command-line arguments.
     generator_class = None
 
+    env_is_minerl = False
+
     if args.environment_class == 'ParticleMazeEnv':
         n_envs_per_worker = 6
 
@@ -236,6 +238,7 @@ if __name__ == '__main__':
             'translated_observations': args.translated_observations}
 
     elif args.environment_class == 'TouchStone':
+        env_is_minerl = True
         n_envs_per_worker = 1
 
         if args.generator_class == 'TileFlipIndividual':
@@ -274,32 +277,35 @@ if __name__ == '__main__':
 
     register_env('world_evolution_env', make_env)
  
+    # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
-    TT()
 
-#   ### DEBUGGING THE ENVIRONMENT ###
-#   if environment_class == ParticleMazeEnv:
-#       env.set_worlds(eval_mazes)
-#       obs = env.reset()
-#       for i in range(1000):
-#           env.render()
-#           obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
+    ### DEBUGGING THE ENVIRONMENT ###
+    if environment_class == ParticleMazeEnv:
+        env.set_worlds(eval_mazes)
+        obs = env.reset()
+        for i in range(1000):
+            env.render()
+            obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
 
-#   elif environment_class == TouchStone:
-#       env.set_worlds({'world_0': TileFlipIndividual3D(7, env.n_chan, unique_chans=env.unique_chans).discrete})
-#       obs = env.reset()
-#       done = False
-#       while not done:
-#           env.render()
-#           action = env.action_space.sample()
-#           # action = env.action_space.nooop()
-#           obs, rew, done, info = env.step(action)
+    elif environment_class == TouchStone:
+        env.set_worlds({'world_0': TileFlipIndividual3D(env.task.width-2, env.n_chan, unique_chans=env.unique_chans).discrete})
+        obs = env.reset()
+        done = False
+        for i in range(6000):
+            env.render()
+            action = env.action_space.sample()
+            # action = env.action_space.nooop()
+            print(i, done)
+            if done:
+                TT()
+            obs, rew, done, info = env.step(action)
 
 
     n_sim_steps = env.max_episode_steps
     unique_chans = env.unique_chans
 
-    generator = generator_class(width=width, n_chan=env.n_chan, unique_chans=unique_chans)
+    # generator = generator_class(width=width, n_chan=env.n_chan, unique_chans=unique_chans)
 
     # Don't need to know the dimension here since we'll simply call an individual's "mutate" method
     # initial_weights = generator.get_init_weights()
@@ -328,11 +334,11 @@ if __name__ == '__main__':
 
     particle_trainer = None if args.load and args.visualize else \
         init_particle_trainer(env, num_rllib_remote_workers=n_rllib_workers, n_rllib_envs=num_rllib_envs,
-                                             enjoy=args.enjoy, render=args.render, save_dir=save_dir,
-                                             num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
-                                             oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
-                                             model=args.model, env_config=env_config, fixed_worlds=args.fixed_worlds,
-                                             rotated_observations=args.rotated_observations)
+                            enjoy=args.enjoy, render=args.render, save_dir=save_dir,
+                            num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
+                            oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
+                            model=args.model, env_config=env_config, fixed_worlds=args.fixed_worlds,
+                            rotated_observations=args.rotated_observations, env_is_minerl=env_is_minerl)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
@@ -457,7 +463,7 @@ if __name__ == '__main__':
             qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
             # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
                                         # evaluate_only=True)
-            TT()
+            raise NotImplementedError
             sys.exit()
 
     # Train
@@ -546,7 +552,8 @@ if __name__ == '__main__':
     toolbox = base.Toolbox()
     # toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
     # toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
-    toolbox.register("individual", generator_class, width=env.width-2, n_chan=env.n_chan, save_gen_sequence=args.render)
+    toolbox.register("individual", generator_class, width=env.width-2, n_chan=env.n_chan, save_gen_sequence=args.render,
+                     unique_chans=env.unique_chans)
     # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
@@ -567,7 +574,7 @@ if __name__ == '__main__':
     results_infos['init_batch_size'] = init_batch_size
     results_infos['nb_iterations'] = nb_iterations
     results_infos['batch_size'] = batch_size
-    results_infos['mutation_pb'] = mutation_pb
+    # results_infos['mutation_pb'] = mutation_pb
     results_infos['eta'] = eta
 
     # Turn off exploration before evolving. Henceforth toggled before/after player training.

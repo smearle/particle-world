@@ -7,6 +7,7 @@ import ray
 
 from minerl.herobraine.env_spec import EnvSpec
 from envs.minecraft.touchstone import TouchStone
+from utils import discrete_to_onehot
 
 
 def make_env(env_config):
@@ -35,7 +36,7 @@ class MineRLWrapper(gym.Wrapper):
     def __init__(self, env):
         super(MineRLWrapper, self).__init__(env)
         self.env = env
-        self.width = self.task.width
+        self.width, self.height, self.depth = self.task.width, self.task.height, self.task.depth
         self.n_chan = len(self.task.block_types)
         self.unique_chans = self.task.unique_chans
         self.max_episode_steps = self.task.max_episode_steps
@@ -63,6 +64,22 @@ class MineRLWrapper(gym.Wrapper):
         self.need_world_reset = True
         # self.worlds = {idx: worlds[idx]}
         # print('set worlds ', worlds.keys())
+
+    def set_world(self, world):
+        """
+        Convert an encoding produced by the generator into a world map. The encoding has channels (empty, wall, start/goal)
+        :param world: Encoding, optimized directly or produced by a world-generator.
+        """
+        w = np.zeros((self.width, self.height, self.depth), dtype=np.int)
+        w.fill(1)
+        w[1:-1, 1:-1, 1:-1] = world
+        self.goal_idx = np.argwhere(w == self.task.goal_chan)
+        assert len(self.goal_idx) == 1
+        self.goal_idx = self.goal_idx[0]
+        # self.world_flat = w
+        # self.next_world = discrete_to_onehot(w)
+        self.next_world = w
+        self.need_world_reset = True
 
 
 class WorldEvolutionWrapper(gym.Wrapper):

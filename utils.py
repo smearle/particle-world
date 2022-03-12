@@ -263,7 +263,8 @@ def load_config(args, config_file):
     with open(config_file, 'r') as f:
         new_args = json.load(f)
     pp = PrettyPrinter(indent=4)
-    print(f'Loaded config:\n{pp.pprint(new_args)}')
+    print(f'Loaded config:')
+    pp.pprint(new_args)
     for k, v in new_args.items():
         setattr(args, k, v)
     return args

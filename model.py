@@ -189,7 +189,6 @@ class FloodSqueeze(nn.Module):
             sub = fig.add_subplot(4, 4, i + 1)
             sub.imshow(x[0, i, :, :].detach().numpy().transpose(1, 0))
         plt.show()
-        TT()
         pass
 
     def get_solution_length(self, input):
@@ -547,8 +546,6 @@ class FloodMemoryModel(TorchRNN, nn.Module):
             #  with dummy player-positions as appropriate.
 #           if player_pos[0].shape != (x.shape[0],):
 #               missing_seq_idxs = set(th.arange(x.shape[0])).difference(player_pos[0])
-#               TT()
-
 
             # NOTE: the assumption that we always have walls is key here. Otherwise we could end up with invalid indices
             # hid_neighb = x[player_pos[0], :, player_pos[1] - 1: player_pos[1] + 2, player_pos[2] - 1: player_pos[2] + 2]

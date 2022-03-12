@@ -1,5 +1,6 @@
 # NOTE: need pytorch=1.10.1 (or an rllib bug that attempts to validate env by looking at env.observation_space occurs)
 deap
+minerl  # might need to install this with `python -m pip install --upgrade minerl` ?
 neat-python
 opencv-python
 pandas

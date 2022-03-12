@@ -3,7 +3,7 @@ from pdb import set_trace as TT
 import numpy as np
 from qdpy.phenotype import Features, Fitness, Individual
 
-from generator import NCAGenerator
+from generators.representations import NCAGenerator
 
 
 # TODO:
@@ -89,7 +89,11 @@ class TileFlipIndividual2D(DiscreteIndividual):
 
 class TileFlipIndividual3D(DiscreteIndividual):
 
-    # TODO: allow for non cubes, you square.
+    # TODO: allow for non-cubes, you square.
+
+    def __init__(self, width, n_chan, unique_chans=[2, 3], save_gen_sequence=False):
+        super().__init__(width, n_chan, unique_chans, save_gen_sequence)
+
 
     def generate(self):
         self.discrete = np.random.randint(0, self.n_chan, size=(self.width, self.width, self.width))

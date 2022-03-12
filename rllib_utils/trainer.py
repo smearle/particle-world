@@ -4,6 +4,7 @@ import math
 import os
 from pathlib import Path
 from pdb import set_trace as TT
+import pprint
 import shutil
 from typing import Iterable
 
@@ -19,6 +20,7 @@ from ray.tune.logger import Logger
 from timeit import default_timer as timer
 
 from envs import eval_mazes
+from envs.minecraft.touchstone import TouchStone
 from model import FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rllib_utils.callbacks import RegretCallbacks
@@ -89,7 +91,8 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
 
 
 def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
-                          oracle_policy, fully_observable, idx_counter, model, env_config, fixed_worlds, rotated_observations):
+                          oracle_policy, fully_observable, idx_counter, model, env_config, fixed_worlds, 
+                          rotated_observations, env_is_minerl):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -125,6 +128,10 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
 
     # Create multiagent config dict if env is multi-agent
     if isinstance(env, MultiAgentEnv):
+
+        # TODO: make this general
+        n_policies = len(env.swarms)
+
         if oracle_policy:
             policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
                                                         action_space=env.action_spaces[i], config={})
@@ -144,6 +151,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         }
     else:
+        n_policies = 0
         multiagent_config = {}
 
     model_config = copy.copy(MODEL_DEFAULTS)
@@ -194,6 +202,12 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
     num_eval_envs = num_envs_per_worker
+
+    if env_is_minerl:
+        evaluation_interval = 0
+    else:
+        evaluation_interval = 10 if not enjoy else 10
+
     if enjoy:
         evaluation_num_episodes = num_eval_envs * 2
     # elif evaluate:
@@ -222,7 +236,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         "render_env": render if not enjoy else True,
 
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
-        "evaluation_interval": 10 if not enjoy else 10,
+        "evaluation_interval": evaluation_interval,
 
         "evaluation_num_workers": 0 if not (evaluate) else num_rllib_remote_workers,
 
@@ -254,10 +268,13 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         "train_batch_size": env.max_episode_steps * n_rllib_envs,
         "sgd_minibatch_size": env.max_episode_steps * n_rllib_envs if (enjoy or evaluate) and render else 128,
     }
+    pp = pprint.PrettyPrinter(indent=4)
+    print(f'Loading trainer with config:')
+    pp.pprint(trainer_config)
     trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
-    if not enjoy:
+    if not enjoy and not env_is_minerl:
         # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_key of each env will be incremented
         # by len(eval_mazes) each reset.
         eval_workers = trainer.evaluation_workers
@@ -273,7 +290,6 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         eval_workers.foreach_worker(
             lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
 
-    n_policies = len(env.swarms)
     for i in range(n_policies):
         n_params = 0
         param_dict = trainer.get_weights()[f'policy_{i}']
