@@ -1,0 +1,17 @@
+{
+    "exp_names": [
+        "0"
+    ],
+    "env_classes": [
+        "TouchStone"
+    ],
+    "gen_play_phase_lens": [
+        [-1, 10]
+    ],
+    "qd_objectives": [
+        [false, "max_reward"]
+    ],
+    "fo_models": [
+        [false, null]
+    ]
+}
