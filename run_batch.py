@@ -58,13 +58,13 @@ def main():
         batch_config = json.load(f)
     batch_config = namedtuple('batch_config', batch_config.keys())(**batch_config)
 
-    exp_sets = list(product(batch_config.exp_names, batch_config.gen_play_phase_lens, batch_config.qd_objectives,
+    exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.gen_play_phase_lens, batch_config.qd_objectives,
                             batch_config.fo_models))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
-        exp_name, (gen_phase_len, play_phase_len), (quality_diversity, objective), (fully_observable, model) = exp_set
-        if objective in ['min_solvable', 'regret']:
+        exp_name, env_cls, (gen_phase_len, play_phase_len), (quality_diversity, objective), (fully_observable, model) = exp_set
+        if objective in ['min_solvable', 'regret', 'max_reward']:
             n_policies = 1
         elif objective == 'contrastive':
             n_policies = 2
@@ -75,6 +75,7 @@ def main():
         
         exp_config = {
             'exp_name': exp_name,
+            'environment_class': env_cls,
             'gen_phase_len': gen_phase_len,
             'play_phase_len': play_phase_len,
             'quality_diversity': quality_diversity,

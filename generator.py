@@ -57,7 +57,7 @@ class FixedGenerator(Generator):
         pass
 
 
-class TileFlipGenerator(FixedGenerator):
+class TileFlipGenerator2D(FixedGenerator):
     def __init__(self, width, n_chan):
         super().__init__(width, n_chan)
         self.landscape = np.random.random((n_chan, width, width))
@@ -65,6 +65,16 @@ class TileFlipGenerator(FixedGenerator):
     def set_weights(self, w):
         # self.world = th.sigmoid(th.Tensor(w.reshape((width, width)))).numpy()
         self.landscape = w.reshape((self.n_chan, self.width, self.width))
+
+
+class TileFlipGenerator3D(FixedGenerator):
+    def __init__(self, width, n_chan):
+        super().__init__(width, n_chan)
+        self.landscape = np.random.random((n_chan, width, width, width))
+
+    def set_weights(self, w):
+        # self.world = th.sigmoid(th.Tensor(w.reshape((width, width)))).numpy()
+        self.landscape = w.reshape((self.n_chan, self.width, self.width, self.width))
 
 
 class Rastrigin(Generator):

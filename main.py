@@ -18,16 +18,17 @@ from deap import creator
 from deap import tools
 from qdpy import containers
 from qdpy.algorithms.deap import DEAPQDAlgorithm
-from qdpy.base import ParallelismManager
+# from qdpy.base import ParallelismManager
 from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-from envs import ParticleMazeEnv, eval_mazes, full_obs_test_mazes
-from envs.env import DirectedMazeEnv, MazeEnvForNCAgents
-from generator import TileFlipGenerator, SinCPPNGenerator, CPPN, Rastrigin, Hill
+from env_creator import make_env
+from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, TouchStone, eval_mazes, full_obs_test_mazes
+from generator import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils.utils import qdRLlibEval, qdpy_save_archive
-from qdpy_utils.individuals import TileFlipIndividual, NCAIndividual
+from qdpy_utils.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D
+from ray.tune.registry import register_env
 from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
 from rllib_utils.eval_worlds import rllib_evaluate_worlds
 from rllib_utils.utils import IdxCounter
@@ -123,6 +124,8 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('-ec', '--environment_class', type=str, default="ParticleMazeEnv", help="Which environment to "
+    "use (one of ParticleMazeEnv, TouchStone).")
     parser.add_argument('-l', '--load', action='store_true')
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-v', '--visualize', action='store_true',
@@ -192,8 +195,60 @@ if __name__ == '__main__':
         play_phase_len = args.play_phase_len
         n_pop = 5
     n_policies = args.n_policies
-    generator_cls = globals()[args.generator_class]
+
+
+    # Set the generator/individual, environment, and model class based on command-line arguments.
+    generator_class = None
+
+    if args.environment_class == 'ParticleMazeEnv':
+
+        # set the generator
+        if args.generator_class == 'TileFlipIndividual':
+            generator_class = TileFlipIndividual2D
+        else: raise NotImplementedError
+
+#       # set the environment, if specific to player-model
+#       if args.model == 'nca':
+#           environment_class = MazeEnvForNCAgents
+#       else:
+
+#       if args.fully_observable:
+#           swarm_cls = MazeSwarm
+#           environment_class = ParticleMazeEnv
+#       else:
+#           swarm_cls = DirectedMazeSwarm
+#           environment_class = DirectedMazeEnv
+
+
+#       # set the environment based on observation type
+        if args.rotated_observations:
+            swarm_cls = DirectedMazeSwarm
+            environment_class = DirectedMazeEnv
+        else:
+            swarm_cls = MazeSwarm
+            environment_class = ParticleMazeEnv
+
+        env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop,
+            'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
+            'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
+            'target_reward': args.target_reward, 'rotated_observations': args.rotated_observations, 
+            'translated_observations': args.translated_observations}
+
+    elif args.environment_class == 'TouchStone':
+        if args.generator_class == 'TileFlipIndividual':
+            generator_class = TileFlipIndividual3D
+        else: raise NotImplementedError
+
+        environment_class = TouchStone
+
+        env_config = {}
+
+    else:
+        raise Exception(f"Unrecognized environment class: {args.environment_class}")
+
+
     n_rllib_workers = args.num_proc
+
     if (args.enjoy or args.evaluate) and args.render:
         num_rllib_envs = 1
     else:
@@ -212,40 +267,14 @@ if __name__ == '__main__':
             assert n_policies > 1
         max_total_bins = 1
 
-    if args.model == 'nca':
-        env_cls = MazeEnvForNCAgents
-    else:
-        if args.fully_observable:
-            swarm_cls = MazeSwarm
-            env_cls = ParticleMazeEnv
-        else:
-            swarm_cls = DirectedMazeSwarm
-            env_cls = DirectedMazeEnv
+    make_env = partial(make_env, env_config=env_config)
 
-    # swarm_cls = NeuralSwarm
-    if args.rotated_observations:
-        swarm_cls = DirectedMazeSwarm
-        env_cls = DirectedMazeEnv
-    else:
-        swarm_cls = MazeSwarm
-        env_cls = ParticleMazeEnv
-
-#   if args.model == 'nca':
-#       env_cls = MazeEnvForNCAgents
-#   else:
-#       env_cls = ParticleMazeEnv
-    
-    # env = ParticleSwarmEnv(width=width, n_policies=n_policies, n_pop=n_pop)
-    # env = ParticleGymRLlib(
-    env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop,
-         'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
-         'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
-         'target_reward': args.target_reward, 'rotated_observations': args.rotated_observations, 
-         'translated_observations': args.translated_observations}
+    register_env('world_evolution_env', make_env)
  
     # Copying config here because we pop certain settings in env subclasses before passing to parent classes
     # TODO: this copying can happen in the env itself.
-    env = env_cls(copy.copy(env_config))
+    env = make_env(environment_class)
+    # env = environment_class(copy.copy(env_config))
 
 #   # DEBUG: rotation
 #   env.set_worlds(eval_mazes)
@@ -256,9 +285,10 @@ if __name__ == '__main__':
 #       obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
 #   TT()
 
-    n_sim_steps = env.max_steps
+    n_sim_steps = env.max_episode_steps
+    unique_chans = env.unique_chans
 
-    generator = generator_cls(width=width, n_chan=env.n_chan)
+    generator = generator_class(width=width, n_chan=env.n_chan, unique_chans=unique_chans)
 
     # Don't need to know the dimension here since we'll simply call an individual's "mutate" method
     # initial_weights = generator.get_init_weights()
@@ -280,7 +310,7 @@ if __name__ == '__main__':
     rllib_save_interval = 10
 
     # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
-    features_domain = [(0, env.max_steps - 1)] * nb_features  # The domain (min/max values) of the features
+    features_domain = [(0, env.max_episode_steps - 1)] * nb_features  # The domain (min/max values) of the features
     save_dir = os.path.join(args.outputDir, experiment_name)
 
     idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
@@ -483,12 +513,12 @@ if __name__ == '__main__':
     nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome
-    if generator_cls == TileFlipGenerator:
-        mutation_pb = 0.03
-    elif generator_cls == SinCPPNGenerator:
-        mutation_pb = 0.03
-    else:
-        mutation_pb = 0.1
+#   if generator_cls == TileFlipGenerator:
+#       mutation_pb = 0.03
+#   elif generator_cls == SinCPPNGenerator:
+#       mutation_pb = 0.03
+#   else:
+#       mutation_pb = 0.1
     eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
     ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
     # fitness_domain = [(0., 1.)]                # The domain (min/max values) of the fitness
@@ -505,7 +535,7 @@ if __name__ == '__main__':
     toolbox = base.Toolbox()
     # toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
     # toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
-    toolbox.register("individual", generator_cls, width=env.width-2, n_chan=env.n_chan, save_gen_sequence=args.render)
+    toolbox.register("individual", generator_class, width=env.width-2, n_chan=env.n_chan, save_gen_sequence=args.render)
     # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)

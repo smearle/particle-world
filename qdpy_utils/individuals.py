@@ -40,12 +40,20 @@ class DiscreteIndividual(Individual):
                 continue
             np.random.shuffle(idxs)
             idxs = idxs[:-1]
-            new_idxs = set(range(self.n_chan))
-            [new_idxs.remove(uc) for uc in self.unique_chans]
-            new_idxs = list(new_idxs)
-            self.discrete[idxs[:, 0], idxs[:, 1]] = np.random.choice(new_idxs, len(idxs))
+            nonunique_chans = set(range(self.n_chan))
+
+            # Get all channel indices that do not correspond to unique tile-types.
+            [nonunique_chans.remove(uc) for uc in self.unique_chans]
+            nonunique_chans = list(nonunique_chans)
+
+            # Replace surplus unique tiles with non-unique ones.
+            self.replace_surplus_unique_tiles(idxs, nonunique_chans)
+
         for c in self.unique_chans:
             assert np.sum(self.discrete == c) == 1
+
+    def replace_surplus_unique_tiles(self, unique_tile_idxs, nonunique_tile_chans):
+        self.discrete[unique_tile_idxs[:, 0], unique_tile_idxs[:, 1]] = np.random.choice(nonunique_tile_chans, len(unique_tile_idxs))
 
     def mutate(self):
         raise NotImplementedError
@@ -57,7 +65,7 @@ class DiscreteIndividual(Individual):
         return (self.__class__ == other.__class__ and np.all(self.discrete == other.discrete))
 
 
-class TileFlipIndividual(DiscreteIndividual):
+class TileFlipIndividual2D(DiscreteIndividual):
 
     def generate(self):
         self.discrete = np.random.randint(0, self.n_chan, size=(self.width, self.width))
@@ -77,6 +85,40 @@ class TileFlipIndividual(DiscreteIndividual):
             self.discrete[xy[0], xy[1]] = np.random.randint(self.n_chan)
         self.validate()
         return self, 
+
+
+class TileFlipIndividual3D(DiscreteIndividual):
+
+    # TODO: allow for non cubes, you square.
+
+    def generate(self):
+        self.discrete = np.random.randint(0, self.n_chan, size=(self.width, self.width, self.width))
+
+    def mutate(self):
+
+        # Keeping this mutation operator for backwards compatibility
+        n_mutate = np.random.randint(1, 5)
+
+        # But I think we can reliably do better with something like this? But then even this seems to get stuck and not
+        # identify the optimal zig-zag.
+        # n_mutate = int(abs(np.random.normal(1, 5)))
+
+        # Get the flattened indices of tiles to potentially mutate
+        xyzs = np.random.randint(0, self.width * self.width * self.width, n_mutate)
+
+        # Un-flatten the mutation indices
+        xyzs = np.unravel_index(xyzs, (self.width, self.width, self.width))
+
+        for xyz in xyzs:
+            self.discrete[xyz[0], xyz[1], xyz[2]] = np.random.randint(self.n_chan)
+
+        self.validate()
+
+        return self, 
+
+    def replace_surplus_unique_tiles(self, unique_tile_idxs, nonunique_tile_chans):
+        self.discrete[unique_tile_idxs[:, 0], unique_tile_idxs[:, 1], unique_tile_idxs[:, 2]] = \
+            np.random.choice(nonunique_tile_chans, len(unique_tile_idxs))
 
 
 class NCAIndividual(DiscreteIndividual):

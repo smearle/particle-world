@@ -33,7 +33,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         workers = trainer.evaluation_workers
     else:
         workers = trainer.workers
-    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items()} if render else None
+    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} if render else None
     if not isinstance(list(worlds.values())[0], np.ndarray):
         worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
     # fitnesses = {k: [] for k in worlds}

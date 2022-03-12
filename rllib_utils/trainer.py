@@ -10,6 +10,7 @@ from typing import Iterable
 import numpy as np
 import ray
 import torch as th
+from ray.rllib import MultiAgentEnv
 from ray.rllib.agents.ppo import ppo
 # from ray.tune.logger import pretty_print
 from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
@@ -17,9 +18,9 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import Logger
 from timeit import default_timer as timer
 
-from envs.env import ParticleGymRLlib, ParticleEvalEnv, eval_mazes
+from envs import eval_mazes
 from model import FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
-from paired_models.multigrid_models import MultigridRLlibNetwork
+# from paired_models.multigrid_models import MultigridRLlibNetwork
 from rllib_utils.callbacks import RegretCallbacks
 from rllib_utils.eval_worlds import rllib_evaluate_worlds
 from utils import get_solution
@@ -121,64 +122,74 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     logger_config.update({
         "log_dir": save_dir,
     })
-    if oracle_policy:
-        policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
-                                                     action_space=env.action_spaces[i], config={})
-                            for i, _ in enumerate(env.swarms)}
-        model_config = {}
-    else:
-        policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
-                         for i, swarm in enumerate(env.swarms)}
-        # Add the oracle (flood-fill convolutional model) for fast path-length computations. obs/act spaces are dummy
-        policies_dict.update({
-            'oracle': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[0], 
-            action_space=env.action_spaces[0], config={})
-            })
 
-        model_config = copy.copy(MODEL_DEFAULTS)
-        if fully_observable and model == 'strided_feedforward':
-            if rotated_observations:
-                model_config.update({
-                # Fully observable, translated and padded map
-                "conv_filters": [
-                    [32, [3, 3], 2], 
-                    [64, [3, 3], 2], 
-                    [128, [3, 3], 2], 
-                    [256, [3, 3], 2]
-                ],})
-            else:
-                model_config.update({
-                # Fully observable, non-translated map
-                "conv_filters": [
-                    [64, [3, 3], 2], 
-                    [128, [3, 3], 2], 
-                    [256, [3, 3], 2]
-                ],})
+    # Create multiagent config dict if env is multi-agent
+    if isinstance(env, MultiAgentEnv):
+        if oracle_policy:
+            policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
+                                                        action_space=env.action_spaces[i], config={})
+                                for i, _ in enumerate(env.swarms)}
+            model_config = {}
         else:
-            if model is None:
-                model_config.update({
-                    "use_lstm": True,
-                    "lstm_cell_size": 32,
-                    # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
-                    "conv_filters": [
-                        [16, [5, 5], 1], 
-                        [4, [3, 3], 1]],
-                    # "post_fcnet_hiddens": [32, 32],
+            policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
+                            for i, swarm in enumerate(env.swarms)}
+            # Add the oracle (flood-fill convolutional model) for fast path-length computations. obs/act spaces are dummy
+            policies_dict.update({
+                'oracle': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[0], 
+                action_space=env.action_spaces[0], config={})
                 })
-            elif model == 'paired':
-                # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
-                ModelCatalog.register_custom_model('paired', CustomRNNModel)
-                model_config = {'custom_model': 'paired'}
-            # TODO: this seems broken
-            elif model == 'flood':
-                ModelCatalog.register_custom_model('flood', FloodMemoryModel)
-                model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
+        multiagent_config = {
+            "policies": policies_dict,
+            "policy_mapping_fn":
+                lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
+        }
+    else:
+        multiagent_config = {}
+
+    model_config = copy.copy(MODEL_DEFAULTS)
+    if fully_observable and model == 'strided_feedforward':
+        if rotated_observations:
+            model_config.update({
+            # Fully observable, translated and padded map
+            "conv_filters": [
+                [32, [3, 3], 2], 
+                [64, [3, 3], 2], 
+                [128, [3, 3], 2], 
+                [256, [3, 3], 2]
+            ],})
+        else:
+            model_config.update({
+            # Fully observable, non-translated map
+            "conv_filters": [
+                [64, [3, 3], 2], 
+                [128, [3, 3], 2], 
+                [256, [3, 3], 2]
+            ],})
+    else:
+        if model is None:
+            model_config.update({
+                "use_lstm": True,
+                "lstm_cell_size": 32,
+                # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+                "conv_filters": [
+                    [16, [5, 5], 1], 
+                    [4, [3, 3], 1]],
+                # "post_fcnet_hiddens": [32, 32],
+            })
+        elif model == 'paired':
+            # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
+            ModelCatalog.register_custom_model('paired', CustomRNNModel)
+            model_config = {'custom_model': 'paired'}
+        # TODO: this seems broken
+        elif model == 'flood':
+            ModelCatalog.register_custom_model('flood', FloodMemoryModel)
+            model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
 #           elif model == 'nca':
 #               ModelCatalog.register_custom_model('nca', NCA)
 #               model_config = {'custom_model': 'nca'}
 
-            else:
-                raise NotImplementedError
+        else:
+            raise NotImplementedError
 
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
@@ -192,15 +203,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
 
     trainer_config = {
         "callbacks": RegretCallbacks,
-        "multiagent": {
-            "policies": policies_dict,
-            # the first tuple value is None -> uses default policy
-            # "car1": (None, particle_obs_space, particle_act_space, {"gamma": 0.85}),
-            # "car2": (None, particle_obs_space, particle_act_space, {"gamma": 0.99}),
-            # "traffic_light": (None, tl_obs_space, tl_act_space, {}),
-            "policy_mapping_fn":
-                lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
-        },
+        "multiagent": multiagent_config,
         "model": model_config,
         # "model": {
             # "custom_model": "nav_net",
@@ -211,7 +214,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # {
         # "custom_model": RLlibNN,
         # },
-        "env_config": env_config,
+        # "env_config": env_config,
         "num_gpus": num_gpus,
         "num_workers": num_rllib_remote_workers if not (enjoy or evaluate) else 0,
         "num_envs_per_worker": num_envs_per_worker,
@@ -246,12 +249,12 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # "lr": 0.1,
         # "log_level": "INFO",
         # "record_env": True,
-        "rollout_fragment_length": env.max_steps,
+        "rollout_fragment_length": env.max_episode_steps,
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
-        "train_batch_size": env.max_steps * n_rllib_envs,
-        "sgd_minibatch_size": env.max_steps * n_rllib_envs if (enjoy or evaluate) and render else 128,
+        "train_batch_size": env.max_episode_steps * n_rllib_envs,
+        "sgd_minibatch_size": env.max_episode_steps * n_rllib_envs if (enjoy or evaluate) and render else 128,
     }
-    trainer = ppo.PPOTrainer(env=type(env), config=trainer_config)
+    trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
     if not enjoy:
