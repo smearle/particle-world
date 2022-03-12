@@ -13,9 +13,6 @@ In TouchStone, the agent must touch stone.
 TOUCHSTONE_LENGTH = 8000
 
 
-def gen_rand_world(width, depth, height, block_types):
-    return np.random.randint(0, len(block_types), size=(width, depth, height))
-
 
 def generate_draw_cuboid_string(x1, y1, z1, x2, y2, z2, type_int, block_types):
     """ Generates a string that can be used to draw a cuboid of the specified type. 
@@ -25,18 +22,25 @@ def generate_draw_cuboid_string(x1, y1, z1, x2, y2, z2, type_int, block_types):
     return f"""<DrawCuboid x1="{x1}" y1="{y1}" z1="{z1}" x2="{x2}" y2="{y2}" z2="{z2}" type="{type_str}"/>"""
 
 
-class TouchStone(SimpleEmbodimentEnvSpec):
-    def __init__(self, dense, *args, **kwargs):
-        if 'name' not in kwargs:
-            kwargs['name'] = 'MLGWB-v0'
+def gen_init_world(width, depth, height, block_types):
+    # return np.random.randint(0, len(block_types), size=(width, depth, height))
+    return np.ones((width, depth, height), dtype=np.int32)
 
+
+class TouchStone(SimpleEmbodimentEnvSpec):
+    def __init__(self, *args, **kwargs):
+        if 'name' not in kwargs:
+            kwargs['name'] = 'TouchStone-v0'
+
+        # TODO: more than cubes!
         self.width, self.depth, self.height = 7, 7, 7
-        self.block_types = ['stone_block', 'dirt', 'air']
+        self.block_types = ['stone', 'dirt', 'air']
         self.n_chan = len(self.block_types)
         self.unique_chans = [0]
-        self.world_arr = gen_rand_world(self.width, self.depth, self.height, self.block_types)
         self.reward_range = (0, 100)
         self.metadata = None
+
+        self.world_arr = gen_init_world(self.width, self.depth, self.height, self.block_types)
 
         super(TouchStone, self).__init__(*args,
                     max_episode_steps=TOUCHSTONE_LENGTH,
@@ -47,7 +51,7 @@ class TouchStone(SimpleEmbodimentEnvSpec):
     def create_rewardables(self) -> List[Handler]:
         return [
                    handlers.RewardForTouchingBlockType([
-                       {'type': 'stone_block', 'behaviour': 'onceOnly',
+                       {'type': 'stone', 'behaviour': 'onceOnly',
                         'reward': 100.0},
                    ]),
                ]
@@ -55,7 +59,7 @@ class TouchStone(SimpleEmbodimentEnvSpec):
     def create_agent_handlers(self) -> List[Handler]:
         return [
             handlers.AgentQuitFromTouchingBlockType(
-                ["stone_block"]
+                ["stone"]
             )
         ]
 
@@ -88,14 +92,6 @@ class TouchStone(SimpleEmbodimentEnvSpec):
         return world_generators
 
 
-
-    def reset(self):
-        # self.world_arr = gen_rand_world(self.width, self.depth, self.height, self.block_types)
-
-        # self.n_episode += 1
-        return super().reset()
-
-
     def create_agent_start(self) -> List[Handler]:
         return [
             # make the agent start with these items
@@ -104,7 +100,7 @@ class TouchStone(SimpleEmbodimentEnvSpec):
                 # dict(type="diamond_pickaxe", quantity=1)
             ]),
             # make the agent start 90 blocks high in the air
-            handlers.AgentStartPlacement(0, 0, 0, 0, 0)
+            handlers.AgentStartPlacement(-1, 1, -1, 0, 0)
         ]
 
     def create_actionables(self) -> List[Handler]:

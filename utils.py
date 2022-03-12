@@ -2,6 +2,7 @@ import json
 import os
 from pdb import set_trace as TT
 import pickle
+from pprint import PrettyPrinter
 
 import numpy as np
 import pygame
@@ -261,7 +262,8 @@ def load_config(args, config_file):
     config_file = os.path.join('configs', 'auto', f'{config_file}.json')
     with open(config_file, 'r') as f:
         new_args = json.load(f)
-    print(f'Loaded config:\n{new_args}')
+    pp = PrettyPrinter(indent=4)
+    print(f'Loaded config:\n{pp.pprint(new_args)}')
     for k, v in new_args.items():
         setattr(args, k, v)
     return args

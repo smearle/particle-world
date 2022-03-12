@@ -214,7 +214,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # {
         # "custom_model": RLlibNN,
         # },
-        # "env_config": env_config,
+        "env_config": env_config,
         "num_gpus": num_gpus,
         "num_workers": num_rllib_remote_workers if not (enjoy or evaluate) else 0,
         "num_envs_per_worker": num_envs_per_worker,

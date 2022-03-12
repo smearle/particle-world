@@ -1,17 +1,57 @@
+import copy
+from pdb import set_trace as TT
+
 import gym
 import numpy as np
 import ray
+
+from minerl.herobraine.env_spec import EnvSpec
+from envs.minecraft.touchstone import TouchStone
+
+
+def make_env(env_config):
+    # Copying config here because we pop certain settings in env subclasses before passing to parent classes
+    env_config = copy.copy(env_config)
+
+    environment_class = env_config.pop('environment_class')
+
+    if issubclass(environment_class, EnvSpec):
+        env = gym.make("TouchStone-v0")
+        env =  MineRLWrapper(env)
+    else:
+        env = environment_class(env_config)
+
+    env = WorldEvolutionWrapper(env)
+
+    return env
+    
+
+def gen_init_world(width, depth, height, block_types):
+    # return np.random.randint(0, len(block_types), size=(width, depth, height))
+    return np.ones((width, depth, height), dtype=np.int32)
 
 
 class MineRLWrapper(gym.Wrapper):
     def __init__(self, env):
         super(MineRLWrapper, self).__init__(env)
         self.env = env
-        self.n_chan = len(self.blocks)
+        self.width = self.task.width
+        self.n_chan = len(self.task.block_types)
+        self.unique_chans = self.task.unique_chans
+        self.max_episode_steps = self.task.max_episode_steps
+        self.next_world = None
 
     def reset(self):
-        self.world_arr = self.next_world
+        if self.next_world is not None:
+            self.task.world_arr = self.next_world
+
         return super(MineRLWrapper, self).reset()
+
+    def step(self, actions):
+        obs, rew, done, info = super(MineRLWrapper, self).step(actions)
+        done = done or self.need_world_reset
+
+        return obs, rew, done, info
 
     def set_world(self, world):
         """

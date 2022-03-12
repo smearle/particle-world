@@ -23,8 +23,8 @@ from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-from env_creator import make_env
 from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, TouchStone, eval_mazes, full_obs_test_mazes
+from envs.wrappers import make_env
 from generator import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from qdpy_utils.utils import qdRLlibEval, qdpy_save_archive
 from qdpy_utils.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D
@@ -240,12 +240,14 @@ if __name__ == '__main__':
         else: raise NotImplementedError
 
         environment_class = TouchStone
-
+        touchstone = TouchStone()
+        touchstone.register()
         env_config = {}
 
     else:
         raise Exception(f"Unrecognized environment class: {args.environment_class}")
 
+    env_config.update({'environment_class': environment_class})
 
     n_rllib_workers = args.num_proc
 
@@ -267,23 +269,30 @@ if __name__ == '__main__':
             assert n_policies > 1
         max_total_bins = 1
 
-    make_env = partial(make_env, env_config=env_config)
-
     register_env('world_evolution_env', make_env)
  
-    # Copying config here because we pop certain settings in env subclasses before passing to parent classes
-    # TODO: this copying can happen in the env itself.
-    env = make_env(environment_class)
-    # env = environment_class(copy.copy(env_config))
+    env = make_env(env_config)
 
-#   # DEBUG: rotation
-#   env.set_worlds(eval_mazes)
-#   obs = env.reset()
-#   for i in range(7):
-#       env.render()
-#       TT()
-#       obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
-#   TT()
+
+
+#   ### DEBUGGING THE ENVIRONMENT ###
+#   if environment_class == ParticleMazeEnv:
+#       env.set_worlds(eval_mazes)
+#       obs = env.reset()
+#       for i in range(1000):
+#           env.render()
+#           obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
+
+#   elif environment_class == TouchStone:
+#       env.set_worlds({'world_0': TileFlipIndividual3D(7, env.n_chan, unique_chans=env.unique_chans).discrete})
+#       obs = env.reset()
+#       done = False
+#       while not done:
+#           env.render()
+#           action = env.action_space.sample()
+#           # action = env.action_space.nooop()
+#           obs, rew, done, info = env.step(action)
+
 
     n_sim_steps = env.max_episode_steps
     unique_chans = env.unique_chans
