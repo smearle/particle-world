@@ -201,6 +201,7 @@ if __name__ == '__main__':
     generator_class = None
 
     if args.environment_class == 'ParticleMazeEnv':
+        n_envs_per_worker = 6
 
         # set the generator
         if args.generator_class == 'TileFlipIndividual':
@@ -235,6 +236,8 @@ if __name__ == '__main__':
             'translated_observations': args.translated_observations}
 
     elif args.environment_class == 'TouchStone':
+        n_envs_per_worker = 1
+
         if args.generator_class == 'TileFlipIndividual':
             generator_class = TileFlipIndividual3D
         else: raise NotImplementedError
@@ -254,7 +257,7 @@ if __name__ == '__main__':
     if (args.enjoy or args.evaluate) and args.render:
         num_rllib_envs = 1
     else:
-        num_rllib_envs = n_rllib_workers * 6 if n_rllib_workers > 1 else 12
+        num_rllib_envs = n_rllib_workers * n_envs_per_worker if n_rllib_workers > 1 else 1
 
     if args.quality_diversity:
         # If using QD, objective score is determined by the fitness of an additional policy.
@@ -272,8 +275,7 @@ if __name__ == '__main__':
     register_env('world_evolution_env', make_env)
  
     env = make_env(env_config)
-
-
+    TT()
 
 #   ### DEBUGGING THE ENVIRONMENT ###
 #   if environment_class == ParticleMazeEnv:
