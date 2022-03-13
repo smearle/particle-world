@@ -106,8 +106,13 @@ class RegretCallbacks(DefaultCallbacks):
 
     def on_sample_end(self, *, worker: RolloutWorker, samples: SampleBatch, **kwargs):
         # print("returned sample batch of size {}".format(samples.count))
-        assert len(samples.policy_batches) == 1, "Regret objective only valid for single-policy scenario."
-        pol_batch = samples.policy_batches['policy_0']
+
+        # TODO: collect regret scores of multiple policies
+        if hasattr(samples, 'policy_batches'):
+            assert len(samples.policy_batches) == 1, "Regret objective only valid for single-policy scenario."
+            pol_batch = samples.policy_batches['policy_0']
+        else:
+            pol_batch = samples
 
 #       value_targets = pol_batch['value_targets']
 #       vf_preds = pol_batch['vf_preds']

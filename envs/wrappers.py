@@ -19,6 +19,11 @@ def make_env(env_config):
     if issubclass(environment_class, EnvSpec):
         env = gym.make("TouchStone-v0")
         env =  MineRLWrapper(env)
+
+        # DEBUG with built-in minerl environment
+        # env = gym.make("MineRLObtainDiamondDense-v0")
+        # env.max_episode_steps = 10000  # dummy
+        # env.unique_chans = []  # dummy
     else:
         env = environment_class(env_config)
 
@@ -45,14 +50,8 @@ class MineRLWrapper(gym.Wrapper):
     def reset(self):
         if self.next_world is not None:
             self.task.world_arr = self.next_world
-
-        return super(MineRLWrapper, self).reset()
-
-    def step(self, actions):
-        obs, rew, done, info = super(MineRLWrapper, self).step(actions)
-        done = done or self.need_world_reset
-
-        return obs, rew, done, info
+        obs = super(MineRLWrapper, self).reset()
+        return obs
 
     def set_world(self, world):
         """
@@ -61,7 +60,6 @@ class MineRLWrapper(gym.Wrapper):
         """
         # This will be set as the current world at the next reset
         self.next_world = world.reshape(self.width, self.width, self.width)
-        self.need_world_reset = True
         # self.worlds = {idx: worlds[idx]}
         # print('set worlds ', worlds.keys())
 
@@ -71,7 +69,7 @@ class MineRLWrapper(gym.Wrapper):
         :param world: Encoding, optimized directly or produced by a world-generator.
         """
         w = np.zeros((self.width, self.height, self.depth), dtype=np.int)
-        w.fill(1)
+        w.fill(self.task.empty_chan)
         w[1:-1, 1:-1, 1:-1] = world
         self.goal_idx = np.argwhere(w == self.task.goal_chan)
         assert len(self.goal_idx) == 1
@@ -79,13 +77,13 @@ class MineRLWrapper(gym.Wrapper):
         # self.world_flat = w
         # self.next_world = discrete_to_onehot(w)
         self.next_world = w
-        self.need_world_reset = True
 
 
 class WorldEvolutionWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.env = env
+        self.need_world_reset = False
 
 
     def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
@@ -105,3 +103,16 @@ class WorldEvolutionWrapper(gym.Wrapper):
         if world_gen_sequences is not None and len(world_gen_sequences) > 0:
             self.world_gen_sequence = world_gen_sequences[self.world_key]
 
+
+    def step(self, actions):
+        obs, rew, done, info = super().step(actions)
+
+        # TODO: adapt to multi-agent dones?
+        done = done or self.need_world_reset
+
+        return obs, rew, done, info
+
+
+    def reset(self):
+        self.need_world_reset = False
+        return super().reset()

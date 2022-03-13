@@ -127,7 +127,10 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     })
 
     # Create multiagent config dict if env is multi-agent
+    # Create models specialized for small-scale grid-worlds
+    # TODO: separate these tasks?
     if isinstance(env, MultiAgentEnv):
+        is_multiagent_env = True
 
         # TODO: make this general
         n_policies = len(env.swarms)
@@ -150,54 +153,55 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             "policy_mapping_fn":
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         }
-    else:
-        n_policies = 0
-        multiagent_config = {}
-
-    model_config = copy.copy(MODEL_DEFAULTS)
-    if fully_observable and model == 'strided_feedforward':
-        if rotated_observations:
-            model_config.update({
-            # Fully observable, translated and padded map
-            "conv_filters": [
-                [32, [3, 3], 2], 
-                [64, [3, 3], 2], 
-                [128, [3, 3], 2], 
-                [256, [3, 3], 2]
-            ],})
-        else:
-            model_config.update({
-            # Fully observable, non-translated map
-            "conv_filters": [
-                [64, [3, 3], 2], 
-                [128, [3, 3], 2], 
-                [256, [3, 3], 2]
-            ],})
-    else:
-        if model is None:
-            model_config.update({
-                "use_lstm": True,
-                "lstm_cell_size": 32,
-                # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+        model_config = copy.copy(MODEL_DEFAULTS)
+        if fully_observable and model == 'strided_feedforward':
+            if rotated_observations:
+                model_config.update({
+                # Fully observable, translated and padded map
                 "conv_filters": [
-                    [16, [5, 5], 1], 
-                    [4, [3, 3], 1]],
-                # "post_fcnet_hiddens": [32, 32],
-            })
-        elif model == 'paired':
-            # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
-            ModelCatalog.register_custom_model('paired', CustomRNNModel)
-            model_config = {'custom_model': 'paired'}
-        # TODO: this seems broken
-        elif model == 'flood':
-            ModelCatalog.register_custom_model('flood', FloodMemoryModel)
-            model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
-#           elif model == 'nca':
-#               ModelCatalog.register_custom_model('nca', NCA)
-#               model_config = {'custom_model': 'nca'}
-
+                    [32, [3, 3], 2], 
+                    [64, [3, 3], 2], 
+                    [128, [3, 3], 2], 
+                    [256, [3, 3], 2]
+                ],})
+            else:
+                model_config.update({
+                # Fully observable, non-translated map
+                "conv_filters": [
+                    [64, [3, 3], 2], 
+                    [128, [3, 3], 2], 
+                    [256, [3, 3], 2]
+                ],})
         else:
-            raise NotImplementedError
+            if model is None:
+                model_config.update({
+                    "use_lstm": True,
+                    "lstm_cell_size": 32,
+                    # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+                    "conv_filters": [
+                        [16, [5, 5], 1], 
+                        [4, [3, 3], 1]],
+                    # "post_fcnet_hiddens": [32, 32],
+                })
+            elif model == 'paired':
+                # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
+                ModelCatalog.register_custom_model('paired', CustomRNNModel)
+                model_config = {'custom_model': 'paired'}
+            # TODO: this seems broken
+            elif model == 'flood':
+                ModelCatalog.register_custom_model('flood', FloodMemoryModel)
+                model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
+    #           elif model == 'nca':
+    #               ModelCatalog.register_custom_model('nca', NCA)
+    #               model_config = {'custom_model': 'nca'}
+
+            else:
+                raise NotImplementedError
+    else:
+        is_multiagent_env = False
+        multiagent_config = {}
+        model_config = {}
+
 
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
     num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
@@ -290,13 +294,18 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         eval_workers.foreach_worker(
             lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
 
-    for i in range(n_policies):
+    if is_multiagent_env:
+        policy_names = [f'policy_{i}' for i in range(n_policies)]
+    else:
+        policy_names = ['default_policy']
+
+    for policy_name in policy_names:
         n_params = 0
-        param_dict = trainer.get_weights()[f'policy_{i}']
+        param_dict = trainer.get_weights()[policy_name]
         for v in param_dict.values():
             n_params += np.prod(v.shape)
-        print(f'policy_{i} has {n_params} parameters.')
-        print('model overview: \n', trainer.get_policy(f'policy_{i}').model)
+        print(f'{policy_name} has {n_params} parameters.')
+        print('model overview: \n', trainer.get_policy(f'{policy_name}').model)
     return trainer
 
 

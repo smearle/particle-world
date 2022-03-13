@@ -447,7 +447,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         self.goal_idx = self.goal_idx[0]
         self.world_flat = w
         self.next_world = discrete_to_onehot(w)
-        self.need_world_reset = True
+        # self.need_world_reset = True
 
     def step(self, actions):
 

@@ -8,6 +8,7 @@ from re import A
 import sys
 from functools import partial
 from pdb import set_trace as TT
+from time import sleep
 from PIL import Image
 
 import matplotlib.pyplot as plt
@@ -16,6 +17,7 @@ import ray
 from deap import base
 from deap import creator
 from deap import tools
+from minerl.herobraine.env_specs.obtain_specs import ObtainDiamond
 from qdpy import containers
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 # from qdpy.base import ParallelismManager
@@ -247,7 +249,12 @@ if __name__ == '__main__':
 
         environment_class = TouchStone
         touchstone = TouchStone()
-        touchstone.register()
+
+        # DEBUG (comparison with built-in minerl environment)
+        # environment_class = ObtainDiamond
+        # touchstone = ObtainDiamond(dense=True)
+
+        touchstone.register()  # Need to register since this is a custom env.
         env_config = {}
 
     else:
@@ -280,26 +287,29 @@ if __name__ == '__main__':
     # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
 
-    ### DEBUGGING THE ENVIRONMENT ###
-    if environment_class == ParticleMazeEnv:
-        env.set_worlds(eval_mazes)
-        obs = env.reset()
-        for i in range(1000):
-            env.render()
-            obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
+#   ### DEBUGGING THE ENVIRONMENT ###
+#   if environment_class == ParticleMazeEnv:
+#       env.set_worlds(eval_mazes)
+#       obs = env.reset()
+#       for i in range(1000):
+#           env.render()
+#           obs, _, _, _ = env.step({ak: env.action_spaces[0].sample() for ak in obs})
 
-    elif environment_class == TouchStone:
-        env.set_worlds({'world_0': TileFlipIndividual3D(env.task.width-2, env.n_chan, unique_chans=env.unique_chans).discrete})
-        obs = env.reset()
-        done = False
-        for i in range(6000):
-            env.render()
-            action = env.action_space.sample()
-            # action = env.action_space.nooop()
-            print(i, done)
-            if done:
-                TT()
-            obs, rew, done, info = env.step(action)
+#   # elif environment_class == ObtainDiamond:
+#   elif environment_class == TouchStone:
+#       init_world = TileFlipIndividual3D(env.task.width-2, env.n_chan, unique_chans=env.unique_chans).discrete
+#       # env.set_worlds({'world_0': init_world})
+#       obs = env.reset()
+#       done = False
+#       for i in range(6000):
+#           env.render()
+#           action = env.action_space.sample()
+#           sleep(0.5)
+#           # action = env.action_space.nooop()
+#           print(i, done)
+#           if done:
+#               TT()
+#           obs, rew, done, info = env.step(action)
 
 
     n_sim_steps = env.max_episode_steps
