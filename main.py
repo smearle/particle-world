@@ -286,6 +286,8 @@ if __name__ == '__main__':
  
     # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
+    TT()
+
 
 #   ### DEBUGGING THE ENVIRONMENT ###
 #   if environment_class == ParticleMazeEnv:

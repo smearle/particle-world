@@ -80,6 +80,9 @@ class MineRLWrapper(gym.Wrapper):
 
 
 class WorldEvolutionWrapper(gym.Wrapper):
+    """A wrapper facilitating world-evolution in a gym environment, allowing an external process to set the world (i.e.,
+    the level layout), and collect statistics of interest (e.g., a player-agent's performance or "regret" on that 
+    world)."""
     def __init__(self, env):
         super().__init__(env)
         self.env = env

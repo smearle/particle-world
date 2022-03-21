@@ -21,7 +21,7 @@ from timeit import default_timer as timer
 
 from envs import eval_mazes
 from envs.minecraft.touchstone import TouchStone
-from model import FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
+from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rllib_utils.callbacks import RegretCallbacks
 from rllib_utils.eval_worlds import rllib_evaluate_worlds
@@ -154,53 +154,57 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         }
         model_config = copy.copy(MODEL_DEFAULTS)
-        if fully_observable and model == 'strided_feedforward':
-            if rotated_observations:
-                model_config.update({
-                # Fully observable, translated and padded map
-                "conv_filters": [
-                    [32, [3, 3], 2], 
-                    [64, [3, 3], 2], 
-                    [128, [3, 3], 2], 
-                    [256, [3, 3], 2]
-                ],})
-            else:
-                model_config.update({
-                # Fully observable, non-translated map
-                "conv_filters": [
-                    [64, [3, 3], 2], 
-                    [128, [3, 3], 2], 
-                    [256, [3, 3], 2]
-                ],})
-        else:
-            if model is None:
-                model_config.update({
-                    "use_lstm": True,
-                    "lstm_cell_size": 32,
-                    # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
-                    "conv_filters": [
-                        [16, [5, 5], 1], 
-                        [4, [3, 3], 1]],
-                    # "post_fcnet_hiddens": [32, 32],
-                })
-            elif model == 'paired':
-                # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
-                ModelCatalog.register_custom_model('paired', CustomRNNModel)
-                model_config = {'custom_model': 'paired'}
-            # TODO: this seems broken
-            elif model == 'flood':
-                ModelCatalog.register_custom_model('flood', FloodMemoryModel)
-                model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
-    #           elif model == 'nca':
-    #               ModelCatalog.register_custom_model('nca', NCA)
-    #               model_config = {'custom_model': 'nca'}
-
-            else:
-                raise NotImplementedError
     else:
         is_multiagent_env = False
         multiagent_config = {}
         model_config = {}
+
+    if env_is_minerl:
+        ModelCatalog.register_custom_model('minerl', CustomConvRNNModel)
+        model_config = {'custom_model': 'minerl'}
+    elif fully_observable and model == 'strided_feedforward':
+        if rotated_observations:
+            model_config.update({
+            # Fully observable, translated and padded map
+            "conv_filters": [
+                [32, [3, 3], 2], 
+                [64, [3, 3], 2], 
+                [128, [3, 3], 2], 
+                [256, [3, 3], 2]
+            ],})
+        else:
+            model_config.update({
+            # Fully observable, non-translated map
+            "conv_filters": [
+                [64, [3, 3], 2], 
+                [128, [3, 3], 2], 
+                [256, [3, 3], 2]
+            ],})
+    else:
+        if model is None:
+            model_config.update({
+                "use_lstm": True,
+                "lstm_cell_size": 32,
+                # "fcnet_hiddens": [32, 32],  # Looks like this is unused when use_lstm is True
+                "conv_filters": [
+                    [16, [5, 5], 1], 
+                    [4, [3, 3], 1]],
+                # "post_fcnet_hiddens": [32, 32],
+            })
+        elif model == 'paired':
+            # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
+            ModelCatalog.register_custom_model('paired', CustomRNNModel)
+            model_config = {'custom_model': 'paired'}
+        # TODO: this seems broken
+        elif model == 'flood':
+            ModelCatalog.register_custom_model('flood', FloodMemoryModel)
+            model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
+#           elif model == 'nca':
+#               ModelCatalog.register_custom_model('nca', NCA)
+#               model_config = {'custom_model': 'nca'}
+
+        else:
+            raise NotImplementedError
 
 
     num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
