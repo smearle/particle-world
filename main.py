@@ -393,7 +393,7 @@ if __name__ == '__main__':
                         i, j = grid.index_grid(g.features)
                         env.set_world(g.discrete)
                         env.reset()
-                        im = env.render(mode='rgb', pg_width=world_im_width)
+                        im = env.render(mode='rgb', pg_width=world_im_width, render_player=True)
                         im_grid[i * world_im_width: (i + 1) * world_im_width, j * world_im_width: (j + 1) * world_im_width] = im
 
                 # otherwise, render a grid of elite levels
@@ -410,7 +410,7 @@ if __name__ == '__main__':
                         i, j = gi // n_world_width, gi % n_world_width
                         env.set_world(g.discrete)
                         env.reset()
-                        im = env.render(mode='rgb', pg_width=world_im_width)
+                        im = env.render(mode='rgb', pg_width=world_im_width, render_player=True)
                         im_grid[j * world_im_width: (j + 1) * world_im_width, i * world_im_width: (i + 1) * world_im_width] = im
 
                         # To visualize ranking of fitnesses
@@ -475,6 +475,8 @@ if __name__ == '__main__':
             qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
             # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
                                         # evaluate_only=True)
+            
+            # TODO: save (per-world) stats
             raise NotImplementedError
             sys.exit()
 

@@ -129,7 +129,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     # Create multiagent config dict if env is multi-agent
     # Create models specialized for small-scale grid-worlds
     # TODO: separate these tasks?
-    if isinstance(env, MultiAgentEnv):
+    if issubclass(type(env.unwrapped), MultiAgentEnv):
         is_multiagent_env = True
 
         # TODO: make this general
@@ -282,7 +282,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
-    if not enjoy and not env_is_minerl:
+    if not enjoy and not env_is_minerl:  # TODO: eval worlds in minerl
         # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_key of each env will be incremented
         # by len(eval_mazes) each reset.
         eval_workers = trainer.evaluation_workers
@@ -295,6 +295,8 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # FIXME: Sometimes hash-to-idx dict is not set by the above call?
         assert ray.get(idx_counter.scratch.remote())
         # Assign envs to worlds
+        eval_workers.foreach_worker(
+            lambda worker: worker.foreach_env(lambda env: print(type(env))))
         eval_workers.foreach_worker(
             lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
 

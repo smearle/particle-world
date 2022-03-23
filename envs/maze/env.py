@@ -86,7 +86,7 @@ class ParticleSwarmEnv(object):
     def step_swarms(self):
         [s.update(scape=self.world) for s in self.swarms]
 
-    def render(self, mode='human', pg_delay=0):
+    def render(self, mode='human', pg_delay=0, render_player=True):
         pg_scale = self.pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([self.pg_width, self.pg_width])
@@ -96,11 +96,12 @@ class ParticleSwarmEnv(object):
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-        for pi, policy_i in enumerate(self.swarms):
-            for agent_pos in policy_i.ps:
-                agent_pos = agent_pos.astype(int) + 0.5
-                pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
-                                   self.particle_draw_size * pg_scale)
+        if render_player:
+            for pi, policy_i in enumerate(self.swarms):
+                for agent_pos in policy_i.ps:
+                    agent_pos = agent_pos.astype(int) + 0.5
+                    pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
+                                    self.particle_draw_size * pg_scale)
         pygame.display.update()
         pygame.time.delay(pg_delay)
         arr = pygame.surfarray.array3d(self.screen)
@@ -132,9 +133,11 @@ class ParticleSwarmEnv(object):
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     def __init__(self, width, swarm_cls, n_policies, n_pop, pg_width=500, n_chan=1, fully_observable=False, fov=4,
                  rotated_observations=False, translated_observations=False):
-        super().__init__(
+        ParticleSwarmEnv.__init__(self, 
             width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, fov=fov,
             rotated_observations=rotated_observations)
+        MultiAgentEnv.__init__(self)
+        
         self.actions = [(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1)]
 
         # Each agent observes 2D patch around itself. Each cell has multiple channels. 3D observation.
@@ -352,7 +355,10 @@ class ParticleGymRLlib(ParticleGym):
         rew = super().get_reward()
 
         if len(self.stats) == 0:
+
+            # We have cleared stats, which means we need to assign new world and reset (adding a new entry to stats)
             assert self.need_world_reset
+
             return rew
 
         # Store rewards so that we can compute world fitness according to progress over duration of level
@@ -370,13 +376,25 @@ class ParticleMazeEnv(ParticleGymRLlib):
     unique_chans = [start_chan, goal_chan]
 
     def __init__(self, cfg):
-        cfg.update({'n_chan': 4})
+        n_chan = 4
+        cfg.update({'n_chan': n_chan})
         cfg['swarm_cls'] = cfg.get('swarm_cls', MazeSwarm)
+        width = cfg['width']
+
         self.evaluate = cfg.get('evaluate')
         self.fully_observable = cfg.get('fully_observable')
+        self.translated_observations = cfg.get('translated_observations')
         if self.evaluate:
             self.eval_maze_i = 0
         super().__init__(cfg)
+
+        # Set this broken dummy world only to placate RLlib during dummy reset. Immediately after, we should set_worlds,
+        # which will instigate another reset at the next step.
+        dummy_world = np.zeros((width-2, width-2))
+        dummy_world[1, 1] = self.start_chan
+        dummy_world[2, 2] = self.goal_chan
+        self.set_world(dummy_world)
+
         # TODO: maze-specific evaluation scenarios (will currently break)
         self.n_policies = n_policies = len(self.swarms)
         # self.patch_ws = patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
@@ -515,7 +533,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         # (though it may in fact need much more)
         return max_path * 2
 
-    def render(self, mode='human', pg_delay=0, pg_width=None):
+    def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True):
         if not pg_width:
             pg_width = self.pg_width
         pg_scale = pg_width / self.width
@@ -581,7 +599,7 @@ def rotate(origin, point, angle):
 # triangles facing left, down, right, up
 triangle = ((-5, -5), (-2, 0), (-5, 5), (5, 0))
 directed_triangles = [[rotate((0, 0), triangle[j], math.pi / 2 * i) for j in range(len(triangle))] for i in range(4)]
-triangle_scale = 2.6
+triangle_scale = 0.08
 
 
 class DirectedMazeEnv(ParticleMazeEnv):
@@ -636,7 +654,7 @@ class DirectedMazeEnv(ParticleMazeEnv):
         if mode == 'rgb':
             return arr
 
-    def render(self, mode='human', pg_delay=0, pg_width=None):
+    def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True):
         if not pg_width:
             pg_width = self.pg_width
         pg_scale = pg_width / self.width
@@ -650,13 +668,14 @@ class DirectedMazeEnv(ParticleMazeEnv):
                 sys.exit()
         pygame.draw.rect(self.screen, goal_color, (self.goal_idx[0] * pg_scale, self.goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
         pygame.draw.rect(self.screen, start_color, (self.start_idx[0] * pg_scale, self.start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
-        for pi, policy_i in enumerate(self.swarms):
-            ag_i = 0
-            for agent_pos, agent_direction in zip(policy_i.ps, policy_i.directions):
-                agent_pos = agent_pos.astype(int) + 0.5
-                points = [np.array(point) * triangle_scale + agent_pos * pg_scale for point in directed_triangles[agent_direction]]
-                pygame.draw.polygon(self.screen, player_colors[pi], points)
-                ag_i = (ag_i + 1) % 4
+        if render_player:
+            for pi, policy_i in enumerate(self.swarms):
+                ag_i = 0
+                for agent_pos, agent_direction in zip(policy_i.ps, policy_i.directions):
+                    agent_pos = agent_pos.astype(int) + 0.5
+                    points = [np.array(point) * triangle_scale * pg_scale + agent_pos * pg_scale for point in directed_triangles[agent_direction]]
+                    pygame.draw.polygon(self.screen, player_colors[pi], points)
+                    ag_i = (ag_i + 1) % 4
         if mode == 'human':
             pygame.display.update()
             pygame.time.delay(pg_delay)

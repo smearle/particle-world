@@ -4,6 +4,7 @@ from pdb import set_trace as TT
 import gym
 import numpy as np
 import ray
+from ray.rllib import MultiAgentEnv
 
 from minerl.herobraine.env_spec import EnvSpec
 from envs.minecraft.touchstone import TouchStone
@@ -27,7 +28,10 @@ def make_env(env_config):
     else:
         env = environment_class(env_config)
 
-    env = WorldEvolutionWrapper(env)
+    if issubclass(environment_class, MultiAgentEnv):
+        env = WorldEvolutionMultiAgentWrapper(env)
+    else:
+        env = WorldEvolutionWrapper(env)
 
     return env
     
@@ -98,13 +102,18 @@ class WorldEvolutionWrapper(gym.Wrapper):
         else:
             self.world_key = np.random.choice(list(worlds.keys()))
 
+        # FIXME: hack
+        self.unwrapped.world_key = self.world_key
+
         # Assign this world to myself.
         self.set_world(worlds[self.world_key])
-        self.worlds = worlds
+        self.worlds = self.unwrapped.worlds = worlds
         if next_n_pop is not None:
             self.next_n_pop = next_n_pop
         if world_gen_sequences is not None and len(world_gen_sequences) > 0:
             self.world_gen_sequence = world_gen_sequences[self.world_key]
+
+        self.need_world_reset = self.unwrapped.need_world_reset = True
 
 
     def step(self, actions):
@@ -119,3 +128,10 @@ class WorldEvolutionWrapper(gym.Wrapper):
     def reset(self):
         self.need_world_reset = False
         return super().reset()
+
+
+class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
+    def __init__(self, env):
+        WorldEvolutionWrapper.__init__(self, env)
+        self.env = env
+        # MultiAgentEnv.__init__(self)

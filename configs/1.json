@@ -12,6 +12,6 @@
         [false, "min_solvable"]
     ],
     "fo_models": [
-        [false, "paired"]
+        [true, "paired"]
     ]
 }
