@@ -1,5 +1,6 @@
 # Each policy can have a different configuration (including custom model).
 import copy
+from functools import partial
 import math
 import os
 from pathlib import Path
@@ -28,7 +29,7 @@ from rllib_utils.eval_worlds import rllib_evaluate_worlds
 from utils import get_solution
 
 
-def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, n_sim_steps, 
+def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, cfg, n_sim_steps, 
                   idx_counter=None, logbook=None, quality_diversity=False, fixed_worlds=False, render=False,):
     trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
     # toggle_exploration(trainer, explore=True, n_policies=n_policies)
@@ -48,7 +49,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         else:
             assert isinstance(landscapes, Iterable)
             world_keys = list(range(len(landscapes)))
-        world_keys = np.random.choice(world_keys, n_rllib_envs, replace=replace)
+        world_keys = np.random.choice(world_keys, cfg.archive_size, replace=replace)
         # curr_lands = np.array(landscapes)[world_keys]
         curr_lands = [landscapes[wid] for wid in world_keys]
         worlds = {i: l for i, l in enumerate(curr_lands)}
@@ -92,7 +93,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
 
 def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
                           oracle_policy, fully_observable, idx_counter, model, env_config, fixed_worlds, 
-                          rotated_observations, env_is_minerl):
+                          rotated_observations, env_is_minerl, cfg):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -129,7 +130,9 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     # Create multiagent config dict if env is multi-agent
     # Create models specialized for small-scale grid-worlds
     # TODO: separate these tasks?
+    model_config = copy.copy(MODEL_DEFAULTS)
     if issubclass(type(env.unwrapped), MultiAgentEnv):
+    # if isinstance(env, MultiAgentEnv):
         is_multiagent_env = True
 
         # TODO: make this general
@@ -153,15 +156,13 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             "policy_mapping_fn":
                 lambda agent_id, episode, worker, **kwargs: f'policy_{agent_id[0]}',
         }
-        model_config = copy.copy(MODEL_DEFAULTS)
     else:
         is_multiagent_env = False
         multiagent_config = {}
-        model_config = {}
 
     if env_is_minerl:
         ModelCatalog.register_custom_model('minerl', CustomConvRNNModel)
-        model_config = {'custom_model': 'minerl'}
+        model_config.update({'custom_model': 'minerl'})
     elif fully_observable and model == 'strided_feedforward':
         if rotated_observations:
             model_config.update({
@@ -223,8 +224,10 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     else:
         evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs)
 
+    regret_callbacks = partial(RegretCallbacks, regret_objective=cfg.objective_function=='regret')
+
     trainer_config = {
-        "callbacks": RegretCallbacks,
+        "callbacks": regret_callbacks,
         "multiagent": multiagent_config,
         "model": model_config,
         # "model": {

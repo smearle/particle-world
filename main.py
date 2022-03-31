@@ -61,7 +61,7 @@ fitness_domain = [(-np.inf, np.inf)]
 
 
 def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, 
-                          save_dir, quality_diversity, stats):
+                          save_dir, quality_diversity, stats, cfg):
     # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
 #   if args.objective_function == "min_solvable":
 #       max_possible_generator_fitness = n_sim_steps - 1 / n_pop
@@ -83,7 +83,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
         net_itr = train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
                       landscapes=training_worlds,
                       idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
-                      save_dir=save_dir, n_rllib_envs=num_rllib_envs, logbook=logbook, 
+                      save_dir=save_dir, n_rllib_envs=num_rllib_envs, cfg=cfg, logbook=logbook, 
                       quality_diversity=quality_diversity, render=args.render)
         # else:
         #     if itr % play_phase_len:
@@ -182,6 +182,10 @@ if __name__ == '__main__':
                         ' observations. This will always be the True when fully_observable is False.')
     args = parser.parse_args()
 
+    # TODO: do this better?
+    cfg = args
+    # cfg.archive_size = 100  
+
     # This NCA-type model is meant to be used with full observations.
     if args.model == 'flood':
         assert args.fully_observable
@@ -267,7 +271,9 @@ if __name__ == '__main__':
     if (args.enjoy or args.evaluate) and args.render:
         num_rllib_envs = 1
     else:
-        num_rllib_envs = n_rllib_workers * n_envs_per_worker if n_rllib_workers > 1 else 1
+        num_rllib_envs = n_rllib_workers * n_envs_per_worker if n_rllib_workers > 1 else (1 if env_is_minerl else 12)
+
+    cfg.archive_size = num_rllib_envs
 
     if args.quality_diversity:
         # If using QD, objective score is determined by the fitness of an additional policy.
@@ -286,7 +292,6 @@ if __name__ == '__main__':
  
     # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
-    TT()
 
 
 #   ### DEBUGGING THE ENVIRONMENT ###
@@ -350,11 +355,12 @@ if __name__ == '__main__':
                             num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
                             oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
                             model=args.model, env_config=env_config, fixed_worlds=args.fixed_worlds,
-                            rotated_observations=args.rotated_observations, env_is_minerl=env_is_minerl)
+                            rotated_observations=args.rotated_observations, env_is_minerl=env_is_minerl, cfg=cfg)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
 
+    # If doing QD (i.e. there is more than one bin), then we have 1 individual per bin.
     max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
 
     if args.fixed_worlds:
@@ -504,7 +510,7 @@ if __name__ == '__main__':
         sys.exit()
 
     def iteration_callback(iteration, net_itr, play_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, 
-                           container, logbook, stats, oracle_policy=False, quality_diversity=False):
+                           container, logbook, stats, cfg, oracle_policy=False, quality_diversity=False):
         net_itr_lst = net_itr
         play_itr_lst = play_itr
         assert len(net_itr_lst) == 1 == len(play_itr_lst)
@@ -527,7 +533,7 @@ if __name__ == '__main__':
         net_itr = phase_switch_callback(net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr, 
                               player_trainer=particle_trainer, container=container, 
                               toolbox=toolbox, logbook=logbook, idx_counter=idx_counter, stale_generators=stale, 
-                              save_dir=save_dir, quality_diversity=quality_diversity, stats=stats)
+                              save_dir=save_dir, quality_diversity=quality_diversity, stats=stats, cfg=cfg)
         net_itr_lst[0] = net_itr
         play_itr_lst[0] = play_itr
         return net_itr
@@ -603,7 +609,7 @@ if __name__ == '__main__':
     staleness_counter = [0]
     callback = partial(iteration_callback, toolbox=toolbox, rllib_eval=rllib_eval, 
                         staleness_counter=staleness_counter, save_dir=save_dir,
-                        quality_diversity=args.quality_diversity)
+                        quality_diversity=args.quality_diversity, cfg=cfg)
     # Create a QD algorithm
     algo = DEAPQDAlgorithm(toolbox, grid, init_batch_siz=init_batch_size,
                             batch_size=batch_size, niter=nb_iterations,

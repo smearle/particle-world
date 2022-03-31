@@ -197,8 +197,10 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         return dones
 
     def get_particle_observations(self):
-        return {(i, j): swarm.get_observations(scape=self.world, flatten=False)[j] for i, swarm in enumerate(self.swarms)
+        obs = {(i, j): swarm.get_observations(scape=self.world, flatten=False)[j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
+
+        return obs
 
     def get_reward(self):
         swarm_rewards = [swarm.get_rewards(self.world, self.n_step, self.max_episode_steps) for swarm in self.swarms]
@@ -218,7 +220,13 @@ def regret_fitness(regret_loss):
 
 class ParticleGymRLlib(ParticleGym):
     def __init__(self, cfg):
+        # This will be a history of statistics for each world that this environment has evaluated. 
+        # Of the form: [('world_key', {
+        #                               ('policy_id', 'player_id): reward, ...}
+        #                          ), ...]
+        # TODO: clean up this data structure.
         self.stats = []
+
         self.world = None
         self.world_gen_sequence = None
         evaluate = cfg.pop("evaluate")
@@ -290,7 +298,6 @@ class ParticleGymRLlib(ParticleGym):
         # self.world_idx = (self.world_idx + 1) % len(self.worlds)
 
         obs = super().reset()
-
         self.stats.append((self.world_key, {agent_id: 0 for agent_id in obs}))
 
         # This should be getting flushed out regularly
@@ -352,6 +359,7 @@ class ParticleGymRLlib(ParticleGym):
         return qd_stats
 
     def get_reward(self):
+        """Return the per-player rewards for training RL agents."""
         rew = super().get_reward()
 
         if len(self.stats) == 0:
@@ -361,7 +369,8 @@ class ParticleGymRLlib(ParticleGym):
 
             return rew
 
-        # Store rewards so that we can compute world fitness according to progress over duration of level
+        # Store rewards so that we can compute world fitness according to progress over duration of level. Might need
+        # separate rewards from multiple policies.
         for k, v in rew.items():
             self.stats[-1][1][k] += v
 
@@ -422,15 +431,23 @@ class ParticleMazeEnv(ParticleGymRLlib):
         obs_scape = np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:]))
         obs_scape[self.empty_chan, self.start_idx[0], self.start_idx[1]] = 1
 
+        obs = {}
+
+        # If level is fully observable, and we are not rotating observations, then we observe the whole map, including
+        # an additional channel for the player.
         if self.fully_observable and not self.rotated_observations:
-            obs = {}
+            swarms_obs = []
             for i, swarm in enumerate(self.swarms):
                 obs_i = swarm.get_full_observations(
                     scape=obs_scape,
                     flatten=False,
                     )
+                swarms_obs.append(obs_i)
+        # Otherwise, we get a local observation, centered on the player, of the surrounding area. Note that if the level
+        # is fully observable, with rotated observations, we basically take a very large, padded, local observation, and
+        # rotate it.
         else:
-            obs = {}
+            swarms_obs = []
             for i, swarm in enumerate(self.swarms):
                 obs_i = swarm.get_observations(
                     scape=obs_scape,
@@ -438,14 +455,20 @@ class ParticleMazeEnv(ParticleGymRLlib):
                     padding_mode=padding_mode, 
                     surplus_padding=surplus_padding,
                     )
+                swarms_obs.append(obs_i)
 
-        for j in range(swarm.n_pop):
-            obs[(i, j)] = obs_i[j]
+        # TODO: we could also have full observation and rotation without translation.
+        # e.g.: with 1 as player and 2 as wall...
+        # [0 0 2]  --player turns right-->  [2 2 2] 
+        # [0 0 2]                           [0 0 0]
+        # [1 0 2]                           [0 0 1]
 
-#           obs = {(i, j): swarm.get_observations(
-#                                   scape=np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:])),
-#                                   flatten=False)[j].transpose(1, 2, 0) for i, swarm in enumerate(self.swarms)
-#               for j in range(swarm.n_pop)}
+        # Collect the observations of each swarm, flatten them into a dictionary with (swarm_is, player_id) tuples as
+        # keys.
+        for i, (obs_i, swarm) in enumerate(zip(swarms_obs, self.swarms)):
+            for j in range(swarm.n_pop):
+                obs[(i, j)] = obs_i[j]
+
         return obs
 
 
@@ -603,6 +626,11 @@ triangle_scale = 0.08
 
 
 class DirectedMazeEnv(ParticleMazeEnv):
+    """A maze environment in which agents are egocentric or "rotated".
+    
+    Agents can turn left and right, and move forward and backward. Their observation is a one-hot encoding of the 
+    neighborhood that surrounds them, rotated to that they are "looking forward."
+    """
     def __init__(self, cfg):
         super().__init__(cfg)
         self.dead_action = 3

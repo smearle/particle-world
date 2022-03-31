@@ -42,6 +42,7 @@ def gen_init_world(width, depth, height, block_types):
 
 
 class MineRLWrapper(gym.Wrapper):
+    """An environment wrapper specific to minerl."""
     def __init__(self, env):
         super(MineRLWrapper, self).__init__(env)
         self.env = env
@@ -51,10 +52,15 @@ class MineRLWrapper(gym.Wrapper):
         self.max_episode_steps = self.task.max_episode_steps
         self.next_world = None
 
+        # FIXME: kind of a hack. Should support Dict observation space.
+        # self.observation_space = self.observation_space.spaces['pov']
+        # self.unwrapped.observation_space = self.observation_space
+
     def reset(self):
         if self.next_world is not None:
             self.task.world_arr = self.next_world
         obs = super(MineRLWrapper, self).reset()
+        TT()
         return obs
 
     def set_world(self, world):
@@ -94,7 +100,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
 
     def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
-
+        
         # Figure out which world to evaluate.
         # self.world_idx = 0
         if idx_counter:

@@ -14,8 +14,9 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
-    :param trainer:
-    :param worlds:
+
+    :param trainer: an rllib trainer, holding policy networks, and training/evaluation workers with environments.
+    :param worlds: a dictionary of words on which to simulate gameplay.
     :param idx_counter:
     :param evaluate_only: If True, we are not training, just evaluating some trained players/generators. (Normally,
     during training, we also evaluate at regular intervals. This won't happen here.) If True, we do not collect stats
@@ -124,8 +125,8 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             for stat_tpl in stat_lst:
                 world_key = stat_tpl[0]
                 if world_key in new_fits:
-                    assert fixed_worlds or evaluate_only, "Should not have redundant world evaluations inside this "
-                    "function unless training on fixed worlds or doing evaluation/enjoyment."
+                    assert fixed_worlds or evaluate_only, ("Should not have redundant world evaluations inside this "
+                    "function unless training on fixed worlds or doing evaluation/enjoyment.")
                     # We'll create a list of stats from separate runs, though we're not doing anything with this for now
                     new_fits[world_key] = [new_fits[world_key]] + [stat_tpl[1:]]
                 else:

@@ -12,6 +12,9 @@ from ray.rllib.utils.typing import AgentID, PolicyID
 
 
 class RegretCallbacks(DefaultCallbacks):
+    def __init__(self, *args, regret_objective=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.regret_objective = regret_objective
 
 #   def on_episode_step(
 #       self,
@@ -88,7 +91,6 @@ class RegretCallbacks(DefaultCallbacks):
  #      unique_world_keys = np.unique([infos[t]["world_key"] for t in range(len(infos))])
  #      assert len(unique_world_keys) == 1, "Our assumption that each trajectory corresponds to a single world has been violated."
 
- #      # Compute the positive value loss, as in ACCEL (https://arxiv.org/pdf/2203.01302.pdf) and PLR (https://arxiv.org/pdf/2010.03934.pdf)
  #      
 
 ##      # TODO: vectorize this
@@ -105,10 +107,15 @@ class RegretCallbacks(DefaultCallbacks):
  #      worker.foreach_env(lambda env: env.set_regret_loss(pos_val_losses))
 
     def on_sample_end(self, *, worker: RolloutWorker, samples: SampleBatch, **kwargs):
-        # print("returned sample batch of size {}".format(samples.count))
+        """Compute a proxy for the "regret" of each policy, i.e. its distance from optimal performance.
+        
+        This is achieved by computing positive value loss, as in ACCEL (https://arxiv.org/pdf/2203.01302.pdf) and PLR 
+        (https://arxiv.org/pdf/2010.03934.pdf)"""
+        if not self.regret_objective:
+            return
 
-        # TODO: collect regret scores of multiple policies
         if hasattr(samples, 'policy_batches'):
+            # TODO: collect regret scores of multiple policies
             assert len(samples.policy_batches) == 1, "Regret objective only valid for single-policy scenario."
             pol_batch = samples.policy_batches['policy_0']
         else:
