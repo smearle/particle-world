@@ -147,6 +147,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
         # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
+            assert len(world_stats) == len(idxs)
             world_id = len(world_stats)
         else:
             world_id += len(new_world_stats)

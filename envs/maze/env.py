@@ -42,6 +42,7 @@ class ParticleSwarmEnv(object):
         self.swarms = None
         self.width = width
         self.n_pop = n_pop
+        self.n_policies = n_policies
         # self.fovs = [si+1 for si in range(n_policies)]
 
         if fully_observable:
@@ -132,7 +133,7 @@ class ParticleSwarmEnv(object):
 
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     def __init__(self, width, swarm_cls, n_policies, n_pop, pg_width=500, n_chan=1, fully_observable=False, fov=4,
-                 rotated_observations=False, translated_observations=False):
+                 rotated_observations=False, translated_observations=False, **env_config):
         ParticleSwarmEnv.__init__(self, 
             width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, fov=fov,
             rotated_observations=rotated_observations)
@@ -181,14 +182,14 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         obs = self.get_particle_observations()
         # Dones before rewards, in case reward is different e.g. at the last step
         self.dones = self.get_dones()
-        rew = self.get_reward()
-        self.dones.update({(i, j): rew[(i, j)] > 0 for i, j in rew})
-        info = {agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs}
+        self.rew = self.get_reward()
+        self.dones.update({(i, j): self.rew[(i, j)] > 0 for i, j in self.rew})
+        info = {}
         self.n_step += 1
         assert self.world is not None
 #       print(rew)
         # print(dones)
-        return obs, rew, self.dones, info
+        return obs, self.rew, self.dones, info
 
     def get_dones(self):
         dones = {(i, j): False for i, swarm in enumerate(self.swarms)
@@ -203,6 +204,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         return obs
 
     def get_reward(self):
+        """Return the per-player rewards for training RL agents."""
         swarm_rewards = [swarm.get_rewards(self.world, self.n_step, self.max_episode_steps) for swarm in self.swarms]
         rew = {(i, j): swarm_rewards[i][j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
@@ -225,43 +227,29 @@ class ParticleGymRLlib(ParticleGym):
         #                               ('policy_id', 'player_id): reward, ...}
         #                          ), ...]
         # TODO: clean up this data structure.
-        self.stats = []
+        # self.stats = []
 
-        self.world = None
-        self.world_gen_sequence = None
         evaluate = cfg.pop("evaluate")
-        self.need_world_reset = False
-        self.obj_fn_str = cfg.pop('objective_function')
+        # self.need_world_reset = False
         self.fully_observable = cfg.get('fully_observable')
-        self.regret_losses = []
+        # self.regret_losses = []
 
         # Global knowledge of number of eval envs for incrementing eval world idx
         self.num_eval_envs = cfg.pop('num_eval_envs', None)
         if self.evaluate:
             assert self.num_eval_envs is not None
 
-        # Target reward world should elicit if using min_solvable objective
-        trg_rew = cfg.pop('target_reward', 0)
-
         super().__init__(**cfg)
-        self.next_n_pop = self.n_pop
-        obj_fn = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
+        # self.next_n_pop = self.n_pop
         
-        if obj_fn == min_solvable_fitness:
-            # TODO: this is specific to the maze subclass
-            # The maximum reward
-            max_rew = self.max_episode_steps
-            obj_fn = partial(obj_fn, max_rew=max_rew, trg_rew=trg_rew)
-        self.objective_function = obj_fn
-
         # if evaluate:
             # Agents should be able to reach any tile within the initial neighborhood by a shortest path.
             # self.max_steps = max(self.fovs) * 2
             # self.reset = partial(ParticleEvalEnv.reset, self)
             # self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
-        self.world_key = None
-        self.last_world_key = self.world_key
-        self.next_world = None
+#       self.world_key = None
+#       self.last_world_key = self.world_key
+#       self.next_world = None
 
     def set_world(self, world):
         """
@@ -270,15 +258,13 @@ class ParticleGymRLlib(ParticleGym):
         """
         # This will be set as the current world at the next reset
         self.next_world = world.reshape(self.width, self.width)
-        self.need_world_reset = True
         # self.worlds = {idx: worlds[idx]}
         # print('set worlds ', worlds.keys())
 
     def get_dones(self):
         dones = super().get_dones()
 
-        # We'll take an additional step in the old world, then reset. Not the best but it works.
-        dones['__all__'] = dones['__all__'] or self.need_world_reset
+        dones['__all__'] = dones['__all__']  # or self.need_world_reset
         return dones
 
     def set_world_eval(self, world: np.array, idx):
@@ -287,10 +273,11 @@ class ParticleGymRLlib(ParticleGym):
         self.set_landscape(self.world)
 
     def reset(self):
-        self.n_pop = self.next_n_pop
         self.world = self.next_world
-        # self.next_world = None
-        self.need_world_reset = False
+        # self.n_pop = self.next_n_pop
+        # self.world = self.next_world
+        self.next_world = None
+        # self.need_world_reset = False
         # print('reset w/ worlds', self.worlds.keys())
         # world_idx = list(self.worlds.keys())[self.world_idx]
         # world = self.worlds[world_idx]
@@ -298,84 +285,13 @@ class ParticleGymRLlib(ParticleGym):
         # self.world_idx = (self.world_idx + 1) % len(self.worlds)
 
         obs = super().reset()
-        self.stats.append((self.world_key, {agent_id: 0 for agent_id in obs}))
+        # self.stats.append((self.world_key, {agent_id: 0 for agent_id in obs}))  # attempting to move stats to WorldEvolutionWrappep
 
         # This should be getting flushed out regularly
         # assert len(self.stats) <= 100
 
         return obs
 
-    def set_regret_loss(self, losses):
-        if self.last_world_key not in losses:
-            # assert self.evaluate, 'Samples should cover all simultaneously evaluated worlds except during evaluation.'
-            return
-        loss = losses[self.last_world_key]
-        self.regret_losses.append((self.last_world_key, loss))
-
-    def get_world_stats(self, evaluate=False, quality_diversity=False):
-        """
-        Return the fitness (and behavior characteristics) achieved by the world after an episode of simulation. Note
-        that this only returns the fitness of the latest episode.
-        """
-        # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
-        # reset() call occurs on the first step (resulting in max_steps - 1).
-        if not evaluate:
-            # print(f'get world stats at step {self.n_step}')
-            assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
-
-        n_pop = self.swarms[0].ps.shape[0]
-        qd_stats = []
-
-        if not evaluate:
-            assert len(self.stats) == 1
-
-        for (world_key, agent_rewards), (world_key_2, regret_loss) in zip(self.stats, self.regret_losses):
-            assert world_key == world_key_2
-
-            # Convert agent to policy rewards
-            swarm_rewards = [[agent_rewards[(i, j)] for j in range(n_pop)] for i in range(len(self.swarms))]
-
-            # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
-            # stats are of the form (world_key, qdpy_stats, policy_rewards)
-            if quality_diversity:
-                # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
-                world_stats = {world_key: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
-            else:
-                # Objective and placeholder measures
-                if self.obj_fn_str == 'regret':
-                    obj = self.objective_function(regret_loss)
-                else:
-                    obj = self.objective_function(swarm_rewards)
-                world_stats = (world_key, ((obj,), [0, 0]))
-
-            # Add per-policy stats
-            world_stats = (*world_stats, [np.mean(sr) for sr in swarm_rewards])
-
-            qd_stats.append(world_stats)
-
-        self.stats = []
-        self.regret_losses = []
-
-        return qd_stats
-
-    def get_reward(self):
-        """Return the per-player rewards for training RL agents."""
-        rew = super().get_reward()
-
-        if len(self.stats) == 0:
-
-            # We have cleared stats, which means we need to assign new world and reset (adding a new entry to stats)
-            assert self.need_world_reset
-
-            return rew
-
-        # Store rewards so that we can compute world fitness according to progress over duration of level. Might need
-        # separate rewards from multiple policies.
-        for k, v in rew.items():
-            self.stats[-1][1][k] += v
-
-        return rew
- 
 
 class ParticleMazeEnv(ParticleGymRLlib):
     empty_chan = 0
@@ -516,22 +432,6 @@ class ParticleMazeEnv(ParticleGymRLlib):
         # since the new world key is set right before reset. During eval, this is actually the last world_key, since
         # reset happens before the end of the evaluate() batch.
         # print(f"reset world {self.world_key} on step {self.n_step}")
-        self.last_world_key = self.world_key
-
-        # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
-        if self.evaluate:
-            world_keys = list(self.worlds.keys())
-            # print('eval\n')
-            # FIXME: maybe inefficient to call index
-            self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]
-            self.set_world(self.worlds[self.world_key])
-#           w = eval_mazes_onehots[self.eval_maze_i].astype(int)
-#           self.start_idx = np.argwhere(w[2:3] == 1)[0, 1:]
-#           self.goal_idx = np.argwhere(w[3:4] == 1)[0, 1:]
-#           self.next_world = w
-#           
-#           # Unfancy,
-#           self.eval_maze_i = (self.eval_maze_i + 1) % len(eval_mazes)
 
         obs = super().reset()
 

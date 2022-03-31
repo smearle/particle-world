@@ -238,7 +238,7 @@ if __name__ == '__main__':
             environment_class = ParticleMazeEnv
 
         env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop,
-            'pg_width': pg_width, 'evaluate': args.evaluate, 'objective_function': args.objective_function, 
+            'pg_width': pg_width, 'evaluate': args.evaluate, 
             'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
             'target_reward': args.target_reward, 'rotated_observations': args.rotated_observations, 
             'translated_observations': args.translated_observations}
@@ -264,7 +264,7 @@ if __name__ == '__main__':
     else:
         raise Exception(f"Unrecognized environment class: {args.environment_class}")
 
-    env_config.update({'environment_class': environment_class})
+    env_config.update({'environment_class': environment_class, 'args': args})
 
     n_rllib_workers = args.num_proc
 
@@ -475,12 +475,13 @@ if __name__ == '__main__':
         # Evaluate
         if args.evaluate:
             worlds = eval_mazes
-            rllib_stats = particle_trainer.evaluate()
-            qd_stats = particle_trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
-                lambda env: env.get_world_stats(evaluate=True, quality_diversity=args.quality_diversity)))
-            qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
-            # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
-                                        # evaluate_only=True)
+            for i in range(10):
+                rllib_stats = particle_trainer.evaluate()
+                qd_stats = particle_trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
+                    lambda env: env.get_world_stats(evaluate=True, quality_diversity=args.quality_diversity)))
+                qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
+                # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
+                                            # evaluate_only=True)
             
             # TODO: save (per-world) stats
             raise NotImplementedError

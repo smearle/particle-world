@@ -258,6 +258,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         "evaluation_num_episodes": evaluation_num_episodes,
             # if not (evaluate or enjoy) else len(eval_mazes) + 1,
 
+        # TODO: run the right number of episodes s.t. we simulate on each map the same number of times
         "evaluation_config": {
             "env_config": {
                 # "n_pop": 1,
@@ -276,6 +277,8 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # "record_env": True,
         "rollout_fragment_length": env.max_episode_steps,
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
+
+        # TODO: try increasing batch size to ~500k, expect a few minutes update time
         "train_batch_size": env.max_episode_steps * n_rllib_envs,
         "sgd_minibatch_size": env.max_episode_steps * n_rllib_envs if (enjoy or evaluate) and render else 128,
     }

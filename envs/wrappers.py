@@ -1,4 +1,5 @@
 import copy
+from functools import partial
 from pdb import set_trace as TT
 
 import gym
@@ -8,6 +9,7 @@ from ray.rllib import MultiAgentEnv
 
 from minerl.herobraine.env_spec import EnvSpec
 from envs.minecraft.touchstone import TouchStone
+from swarm import min_solvable_fitness
 from utils import discrete_to_onehot
 
 
@@ -29,9 +31,9 @@ def make_env(env_config):
         env = environment_class(env_config)
 
     if issubclass(environment_class, MultiAgentEnv):
-        env = WorldEvolutionMultiAgentWrapper(env)
+        env = WorldEvolutionMultiAgentWrapper(env, env_config)
     else:
-        env = WorldEvolutionWrapper(env)
+        env = WorldEvolutionWrapper(env, env_config)
 
     return env
     
@@ -51,6 +53,12 @@ class MineRLWrapper(gym.Wrapper):
         self.unique_chans = self.task.unique_chans
         self.max_episode_steps = self.task.max_episode_steps
         self.next_world = None
+        self.n_pop = 1
+        self.n_policies = 1
+        self.n_step = 0
+
+        # TODO: minecraft-specific eval maps
+        self.evaluate = False
 
         # FIXME: kind of a hack. Should support Dict observation space.
         self.observation_space = self.observation_space.spaces['pov']
@@ -61,8 +69,10 @@ class MineRLWrapper(gym.Wrapper):
         return obs['pov']
 
     def reset(self):
-        if self.next_world is not None:
-            self.task.world_arr = self.next_world
+        self.world = self.next_world
+        self.next_world = None
+        if self.world is not None:
+            self.task.world_arr = self.world
         obs = super(MineRLWrapper, self).reset()
         obs = self.process_observation(obs)
 
@@ -71,18 +81,19 @@ class MineRLWrapper(gym.Wrapper):
     def step(self, action):
         obs, rew, done, info = super().step(action)
         obs = self.process_observation(obs)
+        self.n_step += 1
 
         return obs, rew, done, info
 
-    def set_world(self, world):
-        """
-        Set the world (from some external process, e.g. world-generator optimization), and set the env to be reset at
-        the next step.
-        """
-        # This will be set as the current world at the next reset
-        self.next_world = world.reshape(self.width, self.width, self.width)
-        # self.worlds = {idx: worlds[idx]}
-        # print('set worlds ', worlds.keys())
+#   def set_world(self, world):
+#       """
+#       Set the world (from some external process, e.g. world-generator optimization), and set the env to be reset at
+#       the next step.
+#       """
+#       # This will be set as the current world at the next reset
+#       self.next_world = world.reshape(self.width, self.width, self.width)
+#       # self.worlds = {idx: worlds[idx]}
+#       # print('set worlds ', worlds.keys())
 
     def set_world(self, world):
         """
@@ -106,10 +117,33 @@ class WorldEvolutionWrapper(gym.Wrapper):
     """A wrapper facilitating world-evolution in a gym environment, allowing an external process to set the world (i.e.,
     the level layout), and collect statistics of interest (e.g., a player-agent's performance or "regret" on that 
     world)."""
-    def __init__(self, env):
+    def __init__(self, env, env_cfg):
         super().__init__(env)
+        self.agent_ids = [(i, j) for i in range(self.n_pop) for j in range(self.n_policies)]
         self.env = env
         self.need_world_reset = False
+        self.stats = []
+        self.regret_losses = []
+        self.world_key = None
+        self.last_world_key = self.world_key
+        self.world = None
+        self.world_gen_sequence = None
+        self.next_world = None
+        args = env_cfg.get('args')
+
+        # Target reward world should elicit if using min_solvable objective
+        trg_rew = args.target_reward
+
+        self.obj_fn_str = args.objective_function
+        obj_fn = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
+        if obj_fn == min_solvable_fitness:
+
+            # FIXME: This is never true! Also this is specific to the maze subclass
+            # The maximum reward
+            max_rew = self.max_episode_steps
+
+            obj_fn = partial(obj_fn, max_rew=max_rew, trg_rew=trg_rew)
+        self.objective_function = obj_fn
 
 
     def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
@@ -122,7 +156,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             self.world_key = np.random.choice(list(worlds.keys()))
 
         # FIXME: hack
-        self.unwrapped.world_key = self.world_key
+        # self.unwrapped.world_key = self.world_key
 
         # Assign this world to myself.
         self.set_world(worlds[self.world_key])
@@ -134,24 +168,145 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
         self.need_world_reset = self.unwrapped.need_world_reset = True
 
+# TODO: we should be able to do this in a wrapper.
+#   def set_world(self, world):
+#       """Set self.next_world. At reset, set self.world = self.next_world."""
+#       raise NotImplementedError('Implement set_world in domain-specific wrapper or environment.')
 
     def step(self, actions):
-        obs, rew, done, info = super().step(actions)
+        obs, rews, done, info = super().step(actions)
+        self.log_rewards(rews)
+        self.n_step += 1
 
-        # TODO: adapt to multi-agent dones?
+        # We'll take an additional step in the old world, then reset. Not the best but it works.
         done = done or self.need_world_reset
 
-        return obs, rew, done, info
+        # Not using this?
+        # info.update({agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs})
 
+        return obs, rews, done, info
+
+    def log_rewards(self, rew):
+        """Log rewards for each agent on each world."""
+        if len(self.stats) > 0:
+            self.stats[-1][1][(0, 0)] += rew
+
+    def reset_stats(self):
+        self.stats.append([self.world_key, {k: 0 for k in self.agent_ids}])
 
     def reset(self):
+        print(f'Resetting world {self.world_key} at step {self.n_step}.')
+        self.last_world_key = self.world_key
         self.need_world_reset = False
-        return super().reset()
+        obs = super().reset()
+        self.reset_stats()
+
+        # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
+        if self.evaluate:
+            world_keys = list(self.worlds.keys())
+            # print('eval\n')
+            # FIXME: maybe inefficient to call index
+            self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]
+            self.set_world(self.worlds[self.world_key])
+
+        self.n_step = 0
+
+        return obs
+
+    def set_regret_loss(self, losses):
+        if self.last_world_key not in losses:
+            # assert self.evaluate, 'Samples should cover all simultaneously evaluated worlds except during evaluation.'
+            return
+        loss = losses[self.last_world_key]
+        self.regret_losses.append((self.last_world_key, loss))
+
+    def get_world_stats(self, evaluate=False, quality_diversity=False):
+        """
+        Return the fitness (and behavior characteristics) achieved by the world after an episode of simulation. Note
+        that this only returns the fitness of the latest episode.
+        """
+        # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
+        # reset() call occurs on the first step (resulting in max_steps - 1).
+        if not evaluate:
+            print(f'get world stats at step {self.n_step} with max step {self.max_episode_steps}')
+            # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
+
+        qd_stats = []
+
+        if not evaluate:
+            # assert len(self.stats) == 1
+            print(f'stats: {self.stats}')
+
+        for i, (world_key, agent_rewards) in enumerate( self.stats):
+            world_key_2, regret_loss = self.regret_losses[i] if len(self.regret_losses) > 0 else (None, None)
+            
+            # FIXME: Mismatched world keys between agent_rewards and regret_losses during evaluation. Ignoring so we can
+            #  render all eval mazes
+            if not self.evaluate \
+                and world_key_2:  # i.e. we have a regret loss
+                    assert world_key == world_key_2
+
+            # Convert agent to policy rewards
+            swarm_rewards = [[agent_rewards[(i, j)] for j in range(self.n_pop)] for i in range(self.n_policies)]
+
+            # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
+            # stats are of the form (world_key, qdpy_stats, policy_rewards)
+            if quality_diversity:
+                # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
+                world_stats = {world_key: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
+            else:
+                # Objective and placeholder measures
+                if self.obj_fn_str == 'regret':
+                    obj = self.objective_function(regret_loss)
+                else:
+                    obj = self.objective_function(swarm_rewards)
+                world_stats = (world_key, ((obj,), [0, 0]))
+
+            # Add per-policy stats
+            world_stats = (*world_stats, [np.mean(sr) for sr in swarm_rewards])
+
+            qd_stats.append(world_stats)
+
+        self.stats = []
+        self.regret_losses = []
+
+        return qd_stats
+
+    def validate_stats(self):
+        if len(self.stats) == 0:
+
+            # I guess we don't keep stats while evaluating...?
+            if self.evaluate:
+                pass
+
+            # We have cleared stats, which means we need to assign new world and reset (adding a new entry to stats)
+            if not self.evaluate:
+                assert self.need_world_reset
 
 
-# TODO: this (?)
 class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
-    def __init__(self, env):
-        WorldEvolutionWrapper.__init__(self, env)
+    """Wrap underlying MultiAgentEnv's as MultiAgentEnv's so that rllibn will recognize them as such."""
+    def __init__(self, env, env_config):
+        WorldEvolutionWrapper.__init__(self, env, env_config)
         self.env = env
         # MultiAgentEnv.__init__(self)
+
+    def clear_stats(self):
+        self.stats.append((self.world_key, {agent_id: 0 for agent_id in self.agent_ids}))
+
+    def step(self, actions):
+        obs, rews, dones, infos = self.env.step(actions)
+        self.validate_stats()
+        self.log_rewards(rews)
+        dones['__all__'] = dones['__all__'] or self.need_world_reset
+        self.n_step += 1
+
+        return obs, rews, dones, infos
+
+    def log_rewards(self, rews):
+        """Log rewards for each agent on each world."""
+        # Store rewards so that we can compute world fitness according to progress over duration of level. Might need
+        # separate rewards from multiple policies.
+        if len(self.stats) > 0:
+            for k, v in rews.items():
+                self.stats[-1][1][k] += v

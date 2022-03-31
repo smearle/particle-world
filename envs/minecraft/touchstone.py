@@ -182,7 +182,7 @@ In TouchStone, the agent must touch stone.
 """
 
 # TODO: put this in a config or something!
-TOUCHSTONE_LENGTH = 128
+TOUCHSTONE_LENGTH = 256
 
 
 class TouchStone(SimpleEmbodimentEnvSpec):
@@ -213,17 +213,24 @@ class TouchStone(SimpleEmbodimentEnvSpec):
 
         super(TouchStone, self).__init__(*args,
                     max_episode_steps=TOUCHSTONE_LENGTH,
-                    reward_threshold=100.0,
+                    reward_threshold=np.inf,
                     **kwargs)
 
 
     def create_rewardables(self) -> List[Handler]:
         return [
                    handlers.RewardForTouchingBlockType([
-                       {'type': 'stone', 'behaviour': 'onceOnly',
+                       {'type': 'dirt', 'behavour': 'onlyOne',
                         'reward': 1},
                    ]),
                ]
+
+    def create_rewardables(self) -> List[Handler]:
+        return [
+            handlers.RewardForCollectingItems([
+                dict(type="dirt", amount=1, reward=1.0),
+            ])
+        ]
 
     def create_agent_handlers(self) -> List[Handler]:
         return [

@@ -9,7 +9,7 @@
         [-1, 10]
     ],
     "qd_objectives": [
-        [false, "max_reward"]
+        [false, "min_solvable"]
     ],
     "fo_models": [
         [false, null]
