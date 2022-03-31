@@ -99,8 +99,6 @@ class TileFlipIndividual3D(DiscreteIndividual):
         self.discrete = np.random.randint(0, self.n_chan, size=(self.width, self.width, self.width))
 
     def mutate(self):
-
-        # Keeping this mutation operator for backwards compatibility
         n_mutate = np.random.randint(1, 5)
 
         # But I think we can reliably do better with something like this? But then even this seems to get stuck and not

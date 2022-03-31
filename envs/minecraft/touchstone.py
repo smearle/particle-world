@@ -59,7 +59,7 @@ def gen_init_world(width, depth, height, block_types):
 #            handlers.PlaceBlock(['none', 'dirt'],
 #                                _other='none', _default='none')]
 #
-#    # john rl nyu microsfot van roy and ian osband
+#    # john rl nyu microsoft van roy and ian osband
 #
 #    def create_rewardables(self) -> List[Handler]:
 #        return [
@@ -181,7 +181,8 @@ TOUCHSTONE_DOC = """
 In TouchStone, the agent must touch stone.
 """
 
-TOUCHSTONE_LENGTH = 8000
+# TODO: put this in a config or something!
+TOUCHSTONE_LENGTH = 128
 
 
 class TouchStone(SimpleEmbodimentEnvSpec):
@@ -197,12 +198,13 @@ class TouchStone(SimpleEmbodimentEnvSpec):
         self.width, self.depth, self.height = 14, 14, 14
         self.block_types = [
             'air',
-            # 'dirt', 
+            'dirt', 
             'stone', 
             ]
         block_type_chan_idxs = {bt: i for i, bt in enumerate(self.block_types)}
         self.n_chan = len(self.block_types)
-        unique_block_types = ['stone']
+        # unique_block_types = ['stone']
+        unique_block_types = []
         self.unique_chans = [block_type_chan_idxs[bt] for bt in unique_block_types]
         self.goal_chan = block_type_chan_idxs['stone']
         self.empty_chan = block_type_chan_idxs['air']
@@ -233,17 +235,6 @@ class TouchStone(SimpleEmbodimentEnvSpec):
     def is_from_folder(self, folder: str) -> bool:
         return folder == 'touchstone'
 
-#class MLGWB(SimpleEmbodimentEnvSpec):
-#    def __init__(self, *args, **kwargs):
-#        if 'name' not in kwargs:
-#            kwargs['name'] = 'MLGWB-v0'
-#
-#        self.n_episode = 0
-#        super().__init__(*args,
-#                    max_episode_steps=MLGWB_LENGTH,
-#                    reward_threshold=100.0,
-#                    **kwargs)
-
     def create_server_world_generators(self):
         world_arr = self.world_arr
         world_generators = [
@@ -262,7 +253,6 @@ class TouchStone(SimpleEmbodimentEnvSpec):
         ]
         # print(f'world generators: {world_generators}')
         return world_generators
-
 
     def create_agent_start(self) -> List[Handler]:
         return [

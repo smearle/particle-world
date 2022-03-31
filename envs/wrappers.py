@@ -53,15 +53,26 @@ class MineRLWrapper(gym.Wrapper):
         self.next_world = None
 
         # FIXME: kind of a hack. Should support Dict observation space.
-        # self.observation_space = self.observation_space.spaces['pov']
+        self.observation_space = self.observation_space.spaces['pov']
         # self.unwrapped.observation_space = self.observation_space
+
+    def process_observation(self, obs):
+        # FIXME: kind of a hack. Should support Dict observation space.
+        return obs['pov']
 
     def reset(self):
         if self.next_world is not None:
             self.task.world_arr = self.next_world
         obs = super(MineRLWrapper, self).reset()
-        TT()
+        obs = self.process_observation(obs)
+
         return obs
+
+    def step(self, action):
+        obs, rew, done, info = super().step(action)
+        obs = self.process_observation(obs)
+
+        return obs, rew, done, info
 
     def set_world(self, world):
         """
@@ -79,13 +90,15 @@ class MineRLWrapper(gym.Wrapper):
         :param world: Encoding, optimized directly or produced by a world-generator.
         """
         w = np.zeros((self.width, self.height, self.depth), dtype=np.int)
+
+        # TODO: fill this with walls/bedrock or some such, and ensure the agent spawns in the corner
         w.fill(self.task.empty_chan)
         w[1:-1, 1:-1, 1:-1] = world
-        self.goal_idx = np.argwhere(w == self.task.goal_chan)
-        assert len(self.goal_idx) == 1
-        self.goal_idx = self.goal_idx[0]
-        # self.world_flat = w
-        # self.next_world = discrete_to_onehot(w)
+#       self.goal_idx = np.argwhere(w == self.task.goal_chan)
+#       assert len(self.goal_idx) == 1
+#       self.goal_idx = self.goal_idx[0]
+#       # self.world_flat = w
+#       # self.next_world = discrete_to_onehot(w)
         self.next_world = w
 
 
@@ -100,7 +113,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
 
     def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
-        
+
         # Figure out which world to evaluate.
         # self.world_idx = 0
         if idx_counter:
@@ -136,6 +149,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         return super().reset()
 
 
+# TODO: this (?)
 class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
     def __init__(self, env):
         WorldEvolutionWrapper.__init__(self, env)

@@ -112,8 +112,9 @@ class CustomConvRNNModel(TorchRNN, nn.Module):
 
         # self.obs_size = get_preprocessor(obs_space)(obs_space).size
         obs_shape = obs_space.shape
-        TT()
-        self.pre_fc_size = obs_shape[-2] / 8 * obs_shape[-3] / 8 * conv_filters
+
+        # Size of the activation after conv_3
+        self.pre_fc_size = obs_shape[-2] // 8 * obs_shape[-3] // 8 * conv_filters
         self.fc_size = fc_size
         self.lstm_state_size = lstm_state_size
 
@@ -147,10 +148,13 @@ class CustomConvRNNModel(TorchRNN, nn.Module):
         return th.reshape(self.value_branch(self._features), [-1])
 
     def forward(self, input_dict, state, seq_lens):
-        x = nn.functional.relu(self.conv_1(input_dict["obs"].permute(0, 3, 1, 2)))
+        input = input_dict["obs"].permute(0, 3, 1, 2).float()
+        x = nn.functional.relu(self.conv_1(input))
         x = nn.functional.relu(self.conv_2(x))
         x = nn.functional.relu(self.conv_3(x))
         x = x.reshape(x.size(0), -1)
+
+        # This ends up being fed into forward_rnn()
         return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)
 
 
