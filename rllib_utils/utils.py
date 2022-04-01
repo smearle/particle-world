@@ -1,13 +1,44 @@
 import math
+from pdb import set_trace as TT
 import numpy as np
-from utils import get_solution
+from utils import discrete_to_onehot, get_solution
 
 import ray
+import torch as th
 
 
-def get_env_world_heuristics(trainer):
-    """Get heuristics for all the worlds currently loaded in the environments managed by the trainer."""
+def get_archive_world_complexity(archive, trainer):
+    """Compute (a proxy) for the complexity of all of the worlds currently stored in the archive.
+    """
+    # TODO: This flood performs fast parallelized BFS. Validate it against BFS and use it instead!
     flood_model = trainer.get_policy('oracle').model
+
+    # Compute path-length of each individual where it has not been computed previously.
+#   path_lengths_old = [ind.path_length if hasattr(ind, "path_length") else len(get_solution(ind.discrete)) \
+#       for ind in archive]
+    path_lengths = [ind.path_length if hasattr(ind, "path_length") else \
+        flood_model.get_solution_length(th.Tensor(discrete_to_onehot(ind.discrete)[None,...])) \
+        for ind in archive]
+    
+    # Assign individuals their corresponding path-length if it was not computed previously.
+    [setattr(ind, "path_length", pl) for ind, pl in zip(archive, path_lengths) if not hasattr(ind, "path_length")]
+
+    mean_path_length = np.mean(path_lengths)
+    min_path_length = np.min(path_lengths)
+    max_path_length = np.max(path_lengths)
+    # std_path_length = np.std(path_lengths)
+    return {
+        'mean_path_length': mean_path_length,
+        'min_path_length': min_path_length,
+        'max_path_length': max_path_length,
+    }
+
+
+def get_env_world_complexity(trainer):
+    """Compute (a proxy) for the complexity of all of the worlds currently loaded in rllib environments in the trainer.
+    """
+    # TODO: This flood performs fast parallelized BFS. Validate it against BFS and use it instead!
+    # flood_model = trainer.get_policy('oracle').model
 
     # This is conveniently parallelized by rllib for us.
     path_lengths = trainer.workers.foreach_worker(

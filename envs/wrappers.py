@@ -9,7 +9,7 @@ from ray.rllib import MultiAgentEnv
 
 from minerl.herobraine.env_spec import EnvSpec
 from envs.minecraft.touchstone import TouchStone
-from envs.maze.swarm import min_solvable_fitness
+from envs.maze.swarm import min_solvable_fitness, contrastive_fitness  # , regret_fitness
 from utils import discrete_to_onehot
 
 
@@ -138,8 +138,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
         obj_func = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
         if obj_func == min_solvable_fitness:
 
-            # FIXME: This is never true! Also this is specific to the maze subclass
-            # The maximum reward
+            # TODO: get this directly from the environment.
+            # The maximum reward (specific to maze environment)
             max_rew = 1
 
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)

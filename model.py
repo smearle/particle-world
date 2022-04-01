@@ -287,6 +287,7 @@ class FloodSqueeze(nn.Module):
 class FloodFill(nn.Module):
     def __init__(self, empty_chan=0, wall_chan=1, src_chan=2, trg_chan=3):
         super(FloodFill, self).__init__()
+        self.src_chan = src_chan
         self.trg_chan = trg_chan
         self.n_in_chans = n_in_chans = 4
         n_hid_chans = n_in_chans + 2

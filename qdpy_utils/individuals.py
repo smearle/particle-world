@@ -14,6 +14,7 @@ from generators.representations import NCAGenerator
 
 
 class DiscreteIndividual(Individual):
+    """An evolvable individual (i.e. a genotype/phenotype pair), with a 2D discrete array of integers."""
     def __init__(self, width, n_chan, unique_chans=[2, 3], save_gen_sequence=False):
         Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
         self.width = width

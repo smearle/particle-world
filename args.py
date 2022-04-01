@@ -6,7 +6,8 @@ def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('-ec', '--environment_class', type=str, default="ParticleMazeEnv", help="Which environment to "
     "use (one of ParticleMazeEnv, TouchStone).")
-    parser.add_argument('-l', '--load', action='store_true')
+    parser.add_argument('-lo', '--load', action='store_true')
+    parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-v', '--visualize', action='store_true',
                         help="If reloading an experiment, produce plots, etc. "

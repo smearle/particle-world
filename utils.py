@@ -12,8 +12,6 @@ from pygame.constants import KEYDOWN
 # from ribs.visualize import grid_archive_heatmap
 from timeit import default_timer as timer
 
-from envs.maze.swarm import eval_fit
-
 
 def nnb(ps):
     d_xy = ((ps[None, :, :] - ps[:, None, :]) ** 2).sum(axis=-1)
@@ -35,13 +33,6 @@ def symmetry(x):
     # symmetry = np.abs(np.flip(x[:w // 2], 0) - x[w // 2:]).sum() + \
     #            np.abs(np.flip(x[:, :h // 2], 1) - x[:, h // 2:]).sum()
     return (1 - symm / (w * h)).item()
-
-
-def fit_dist(pops, scape):
-    '''n-1 distances in mean fitness, determining the ranking of n populations.'''
-    assert len(pops) == 2
-    inter_dist = [eval_fit(pi.ps, scape).mean() - eval_fit(pj.ps, scape).mean()
-                  for j, pj in enumerate(pops) for pi in pops[j + 1:]]
 
 
 # def animate_nca(generator):
@@ -187,7 +178,6 @@ def discrete_to_onehot(a):
     return np.eye(n_val)[a].transpose(2, 0, 1)
 
 
-
 adj_coords_2d = np.array([
     [1, 0],
     [0, 1],
@@ -236,25 +226,29 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
 
 def update_individuals(individuals, qd_stats):
     qd_stats = [qd_stats[k] for k in range(len(qd_stats))]
+    # print(f"updating individuals with new qd stats: {qd_stats}")
+
+    # FIXME: this breaks QD, because we get each policy's reward as elements of a list. Instead we need 
+    # [(reward of policy 1,), [rew 2, rew3]), ...]
     for ind, s in zip(individuals, qd_stats):
         ind.fitness.values = s[0]
         ind.features = s[1]
 
 
-def get_experiment_name(args):
-    if args.fixed_worlds:
-        exp_name = f'fixedWorlds_{args.n_policies}-pol_'
+def get_experiment_name(cfg):
+    if cfg.fixed_worlds:
+        exp_name = f'fixedWorlds_{cfg.n_policies}-pol_'
     else:
-        if args.quality_diversity:
+        if cfg.quality_diversity:
             exp_name = 'qd'
         else:
-            exp_name = f'{args.objective_function}'
-        exp_name += f'_{args.n_policies}-pol_{args.gen_phase_len}-gen_{args.play_phase_len}-play'
-    if args.fully_observable:
+            exp_name = f'{cfg.objective_function}'
+        exp_name += f'_{cfg.n_policies}-pol_{cfg.gen_phase_len}-gen_{cfg.play_phase_len}-play'
+    if cfg.fully_observable:
         exp_name += '_fullObs'
-    if args.model is not None:
-        exp_name += f'_mdl-{args.model}'
-    exp_name += f'_{args.exp_name}'
+    if cfg.model is not None:
+        exp_name += f'_mdl-{cfg.model}'
+    exp_name += f'_{cfg.exp_name}'
     return exp_name
 
 

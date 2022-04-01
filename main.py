@@ -5,6 +5,7 @@ import os
 import pickle
 import random
 from re import A
+import shutil
 import sys
 from functools import partial
 from pdb import set_trace as TT
@@ -258,10 +259,16 @@ if __name__ == '__main__':
 
     if args.load:
         if not args.fixed_worlds:
-            fname = 'latest-0'
             # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
-            with open(os.path.join(save_dir, f"{fname}.p"), "rb") as f:
+            fname = 'latest-0.p'
+            loadfile_name = os.path.join(save_dir, fname)
+
+            if not os.path.isfile(loadfile_name):
+                raise Exception(f'{loadfile_name} is not a file, cannot load.')
+
+            with open(os.path.join(loadfile_name), "rb") as f:
                 data = pickle.load(f)
+
             # with open(f'runs/{args.experimentName}/learn.pickle', 'rb') as f:
             #     supp_data = pickle.load(f)
             #     policies = supp_data['policies']
@@ -378,18 +385,32 @@ if __name__ == '__main__':
 
     # Train
     else:
+        # If we're not loading, and not overwriting, and the relevant ``save_dir`` exists, then raise Exception.
+        if not cfg.overwrite :
+            if os.path.exists(save_dir):
+                raise Exception(f"The save directory '{save_dir}' already exists. Use --overwrite to overwrite it.")
+
+        # Remove the save directory if it exists and we are overwriting.
+        else:
+            print(f"Overwriting save directory '{save_dir}'.")
+            shutil.rmtree(save_dir)
+        
+        # Create the new save directory.
+        os.mkdir(save_dir)
+
+        # If not loading, do some initial setup for world evolution if applicable.
         if not args.fixed_worlds:
-            # Initialize these if not reloading
+            # Initialize these counters if not reloading.
             gen_itr = 0
             play_itr = 0
             net_itr = 0
-            # Create container
+            # Create empty container.
             grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
                                 fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
+
+        # TODO: use this when ``fixed_worlds``...?
         logbook = None
 
-    if not os.path.isdir(save_dir):
-        os.mkdir(save_dir)
 
     if args.fixed_worlds:
         train_players(0, 1000, trainer=trainer, worlds=training_worlds,

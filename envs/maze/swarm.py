@@ -420,6 +420,14 @@ def contrastive_fitness(fits):
     return fit
 
 
+# # Deprecated. We would be accepting fitnesses as an argument, in theory.
+# def fit_dist(pops, scape):
+#     '''n-1 distances in mean fitness, determining the ranking of n populations.'''
+#     assert len(pops) == 2
+#     inter_dist = [eval_fit(pi.ps, scape).mean() - eval_fit(pj.ps, scape).mean()
+#                   for j, pj in enumerate(pops) for pi in pops[j + 1:]]
+
+
 def min_solvable_fitness(rews, max_rew, trg_rew=0):
     """ A fitness function rewarding levels that result in the least non-zero reward.
     :param rews: a list of lists of rewards achieved by distinct agents from distinct populations (length 1 or greater)

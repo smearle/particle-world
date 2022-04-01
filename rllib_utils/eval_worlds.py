@@ -6,7 +6,7 @@ from timeit import default_timer as timer
 import torch as th
 
 from ray.tune.logger import pretty_print
-from rllib_utils.utils import get_env_world_heuristics
+from rllib_utils.utils import get_archive_world_complexity
 
 
 def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
@@ -118,10 +118,10 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
         logbook_stats = {'iteration': net_itr}
         stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
         # if i == 0:
-        if calc_world_heuristics:
-            # TODO: only getting these heuristics on the subset of maps on which we train, at the moment
-            env_world_heuristics = get_env_world_heuristics(trainer)
-            logbook_stats.update({f'{k}Path': env_world_heuristics[f'{k}_path_length'] for k in stat_keys})
+#       if calc_world_heuristics:
+#           # TODO: only getting these heuristics on the subset of maps on which we train, at the moment
+#           env_world_heuristics = get_env_world_complexity(trainer)
+#           logbook_stats.update({f'{k}Path': env_world_heuristics[f'{k}_path_length'] for k in stat_keys})
         if is_training_player and not evaluate_only:
             logbook_stats.update({
                 f'{k}Rew': last_rl_stats[f'episode_reward_{k}'] for k in stat_keys})

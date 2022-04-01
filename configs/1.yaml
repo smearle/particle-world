@@ -1,0 +1,27 @@
+{
+    "exp_names": [
+        "0"
+    ],
+    "env_classes": [
+        "ParticleMazeEnv"
+    ],
+    "gen_play_phase_lens": [
+        [1, 1],
+    ],
+
+    # List of [n_policies: int, quality_diversity: bool, objective: str] hyperparameters. If quality_diversity is True, 
+    # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
+    # measure" policies, 1 "protagonist" who provides the objective).
+    "npol_qd_objectives": [
+        [1, false, "min_solvable"],
+        # [1, false, "regret"],
+        # [2, false, "contrastive"],
+        # [3, true, null],
+    ],
+    
+    # List of pairs of [fully_observable: bool, model_name: str] hyperparameters
+    "fo_models": [
+        [false, "paired"],
+        # [true, "paired"],
+    ]
+}

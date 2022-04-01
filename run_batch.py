@@ -9,6 +9,7 @@ from itertools import product
 import json
 import os
 import re
+import yaml
 
 from cross_eval import vis_cross_eval
 from utils import get_experiment_name
@@ -52,6 +53,7 @@ def main():
     parser.add_argument('-cpus', '--num_cpus', type=int, default=12)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
+    parser.add_argument('-lo', '--load', action='store_true')
     parser.add_argument('-bc', '--batch_config', type=str, default='0')
     args = parser.parse_args()
     job_time = 48
@@ -59,24 +61,27 @@ def main():
     num_gpus = 0 if args.visualize else args.num_gpus
     render = True if args.enjoy else args.render
     
-    with open(os.path.join('configs', args.batch_config + '.json')) as f:
-        batch_config = json.load(f)
+    with open(os.path.join('configs', args.batch_config + '.yaml')) as f:
+        # batch_config = json.load(f)
+        batch_config = yaml.safe_load(f)
     batch_config = namedtuple('batch_config', batch_config.keys())(**batch_config)
 
-    exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.gen_play_phase_lens, batch_config.qd_objectives,
-                            batch_config.fo_models))
+    exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.gen_play_phase_lens, 
+                            batch_config.npol_qd_objectives, batch_config.fo_models))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
-        exp_name, env_cls, (gen_phase_len, play_phase_len), (quality_diversity, objective), (fully_observable, model) = exp_set
-        if objective in ['min_solvable', 'regret', 'max_reward']:
-            n_policies = 1
-        elif objective == 'contrastive':
-            n_policies = 2
-        elif quality_diversity:
-            n_policies = 3
-        else:
-            raise NotImplementedError
+        exp_name, env_cls, (gen_phase_len, play_phase_len), (n_policies, quality_diversity, objective), (fully_observable, model) = exp_set
+
+        # Just for reference in terms of what's currently explicitly supported/expected:
+#       if objective in ['min_solvable', 'regret', 'max_reward']:
+#           n_policies = 1
+#       elif objective == 'contrastive':
+#           n_policies = 2
+#       elif quality_diversity:
+#           n_policies = 3
+#       else:
+#           raise NotImplementedError
         
         exp_config = {
             'exp_name': exp_name,
@@ -87,11 +92,13 @@ def main():
             'objective_function': objective,
             'n_policies': n_policies,
             'fully_observable': fully_observable,
+            'rotated_observations': True,
             'model': model,
             'num_proc': num_cpus,
             'num_gpus': num_gpus,
             'visualize': args.visualize,
-            'load': not args.overwrite,
+            'overwrite': args.overwrite,
+            'load': args.load,
             'enjoy': args.enjoy,
             'evaluate': args.evaluate,
             'render': render,
