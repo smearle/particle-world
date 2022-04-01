@@ -11,4 +11,6 @@ gym==0.21.0  # later versions seem to conflict with numpy
 # ribs
 tqdm
 ./submodules/pytorch-neat
-./submodules/qdpy
+
+# Install this in editable mode in setup.sh
+# ./submodules/qdpy

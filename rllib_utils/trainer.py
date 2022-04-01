@@ -68,7 +68,7 @@ def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=Non
         calc_world_heuristics = (i == 0)
 
         rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
-            net_itr=net_itr, trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, calc_agent_stats=True,
+            net_itr=net_itr, trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, is_training_player=True,
             start_time=start_time, calc_world_heuristics=calc_world_heuristics)
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rl_stats['episode_reward_mean']
@@ -284,8 +284,13 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         },
     }
     pp = pprint.PrettyPrinter(indent=4)
+
+    # Log the trainer config, excluding overly verbose entries (i.e. Box observation space printouts).
+    trainer_config_loggable = trainer_config.copy()
+    trainer_config_loggable.pop('multiagent')
     print(f'Loading trainer with config:')
     pp.pprint(trainer_config)
+
     trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs

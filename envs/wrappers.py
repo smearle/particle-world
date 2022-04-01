@@ -135,18 +135,22 @@ class WorldEvolutionWrapper(gym.Wrapper):
         trg_rew = args.target_reward
 
         self.obj_fn_str = args.objective_function
-        obj_fn = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
-        if obj_fn == min_solvable_fitness:
+        obj_func = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
+        if obj_func == min_solvable_fitness:
 
             # FIXME: This is never true! Also this is specific to the maze subclass
             # The maximum reward
-            max_rew = self.max_episode_steps
+            max_rew = 1
 
-            obj_fn = partial(obj_fn, max_rew=max_rew, trg_rew=trg_rew)
-        self.objective_function = obj_fn
+            obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
+        self.objective_function = obj_func
 
 
     def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
+        """Assign a ``next_world`` to the environment, which will be loaded after the next step.
+        
+        We set flag ``need_world_reset`` to True, so that the next step will return done=True, and the environment will
+        be reset, at which point, ``next_world`` will be loaded."""
 
         # Figure out which world to evaluate.
         # self.world_idx = 0
@@ -196,11 +200,12 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.stats.append([self.world_key, {k: 0 for k in self.agent_ids}])
 
     def reset(self):
+        """Reset the environment. This will also load the next world."""
         # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
+
+        # We are now resetting and loading the next world. So we switch this flag off.
         self.need_world_reset = False
-        obs = super().reset()
-        self.reset_stats()
 
         # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
         if self.evaluate:
@@ -210,6 +215,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
             self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]
             self.set_world(self.worlds[self.world_key])
 
+        obs = super().reset()
+        self.reset_stats()
         self.n_step = 0
 
         return obs

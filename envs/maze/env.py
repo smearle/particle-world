@@ -132,6 +132,11 @@ class ParticleSwarmEnv(object):
 
 
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
+
+    # TODO: support multiple impassable channels / tile types.
+    wall_chan = None
+    goal_chan = None
+
     def __init__(self, width, swarm_cls, n_policies, n_pop, pg_width=500, n_chan=1, fully_observable=False, field_of_view=4,
                  rotated_observations=False, translated_observations=False, **env_config):
         ParticleSwarmEnv.__init__(self, 
@@ -170,7 +175,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         return obs
 
     def step(self, actions):
-        actions = {k: self.actions[v] for k, v in actions.items()}
+        actions = {agent_key: self.actions[act] for agent_key, act in actions.items()}
         assert self.world is not None
         swarm_acts = {i: {} for i in range(len(self.swarms))}
         [swarm_acts[i].update({j: action}) for (i, j), action in actions.items()]
@@ -178,7 +183,12 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 #                           for j in range(len(self.swarms))}
         batch_swarm_acts = {i: np.vstack([swarm_acts[i][j] if (i, j) in actions else self.dead_action for j in range(self.swarms[i].n_pop)])
                             for i in range(len(self.swarms))}
-        [swarm.update(scape=self.world, accelerations=batch_swarm_acts[i]) for i, swarm in enumerate(self.swarms)]
+
+        # TODO: support multiple impassable channels / tile types
+        obstacles = None if not self.wall_chan else self.world[self.wall_chan, ...]
+
+        [swarm.update(scape=self.world, actions=batch_swarm_acts[i], obstacles=obstacles) 
+            for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
         # Dones before rewards, in case reward is different e.g. at the last step
         self.dones = self.get_dones()
@@ -205,7 +215,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 
     def get_reward(self):
         """Return the per-player rewards for training RL agents."""
-        swarm_rewards = [swarm.get_rewards(self.world, self.n_step, self.max_episode_steps) for swarm in self.swarms]
+        swarm_rewards = [swarm.get_rewards(self.world, self.goal_chan, self.n_step, self.max_episode_steps) for swarm in self.swarms]
         rew = {(i, j): swarm_rewards[i][j] for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
         return rew
@@ -267,10 +277,10 @@ class ParticleGymRLlib(ParticleGym):
         dones['__all__'] = dones['__all__']  # or self.need_world_reset
         return dones
 
-    def set_world_eval(self, world: np.array, idx):
-        self.world_key = idx
-        self.set_world(world)
-        self.set_landscape(self.world)
+#   def set_world_eval(self, world: np.array, idx):
+#       self.world_key = idx
+#       self.set_world(world)
+#       self.set_landscape(self.world)
 
     def reset(self):
         self.world = self.next_world
@@ -391,25 +401,37 @@ class ParticleMazeEnv(ParticleGymRLlib):
     def set_world(self, world):
         """
         Convert an encoding produced by the generator into a world map. The encoding has channels (empty, wall, start/goal)
+
         :param world: Encoding, optimized directly or produced by a world-generator.
         """
-        w = np.zeros((self.width, self.width), dtype=np.int)
-        w.fill(1)
-        w[1:-1, 1:-1] = world
-        self.start_idx = np.argwhere(w == 2)
-        self.goal_idx = np.argwhere(w == 3)
+        next_world = np.zeros((self.width, self.width), dtype=np.int)
+        next_world.fill(1)
+        next_world[1:-1, 1:-1] = world
+        self.start_idx = np.argwhere(next_world == 2)
+        self.goal_idx = np.argwhere(next_world == 3)
+
+        # Double-check we only have one spawn/goal point.
         assert len(self.start_idx) == 1
         assert len(self.goal_idx) == 1
+
+        # NOTE: We set the positions of the spawn/goal immediately, but only "queue up" the world to be properly 
+        #   loaded at the next reset. So we need to ensure that we reset immediately after this.
+        # FIXME: Queue these up in a similar way. Potential buggy goal-reaching in our final step before reset?
+        # Store the spawn/goal coordinates.
         self.start_idx = self.start_idx[0]
         self.goal_idx = self.goal_idx[0]
-        self.world_flat = w
-        self.next_world = discrete_to_onehot(w)
-        # self.need_world_reset = True
+        self.world_flat = next_world
+
+        # Queue up the next world, ready for loading.
+        self.next_world = discrete_to_onehot(next_world)
 
     def step(self, actions):
 
         obs, rew, done, info = super().step(actions)
         # print(f"step {self.n_step} world {self.world_key}, done: {done}, max steps {self.max_steps}")
+
+#       if not np.all([agent_key not in self.dead for agent_key in actions]):
+#           TT()
 
         [obs.pop(k) for k in self.dead if k in obs]
         [rew.pop(k) for k in self.dead if k in rew]
@@ -424,7 +446,9 @@ class ParticleMazeEnv(ParticleGymRLlib):
         [s.update(scape=self.world, obstacles=self.world) for s in self.swarms]
 
     def reset(self):
+        # These are the agents who have won the game, and will not be taking further observations/actions.
         self.dead = set({})
+
         # FIXME: redundant observations are being taken here
         # print(f'reset world {self.world_key} on step {self.n_step}')
 

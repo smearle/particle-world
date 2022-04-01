@@ -26,10 +26,13 @@ from timeit import default_timer as timer
 from tqdm import tqdm
 from args import init_parser
 
-from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, TouchStone, eval_mazes, full_obs_test_mazes
+from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, TouchStone, eval_mazes, full_obs_test_mazes, \
+    ghost_action_test_maze
 from envs.wrappers import make_env
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
-from qdpy_utils.utils import qdRLlibEval, qdpy_save_archive
+from qdpy_utils.utils import qdpy_save_archive
+from qdpy_utils.evolve import qdRLlibEval
+from qdpy_utils.callbacks import iteration_callback
 from qdpy_utils.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D
 from ray.tune.registry import register_env
 from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
@@ -60,73 +63,13 @@ creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
 fitness_domain = [(-np.inf, np.inf)]
 
 
-def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container, toolbox, logbook, idx_counter, stale_generators, 
-                          save_dir, quality_diversity, stats, cfg):
-    # Run a round of player training, either at fixed intervals (every gen_phase_len generations)
-#   if args.objective_function == "min_solvable":
-#       max_possible_generator_fitness = n_sim_steps - 1 / n_pop
-#       optimal_generators = logbook.select("avg")[-1] >= max_possible_generator_fitness - 1e-3
-#   else:
-    optimal_generators = False
-
-    # No player training if we're using the optimal player-policies
-    if args.oracle_policy:
-        return net_itr
-
-    if gen_itr > 0 and (gen_phase_len != -1 and gen_itr % gen_phase_len == 0 or stale_generators or optimal_generators):
-        qdpy_save_archive(container=container, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook, save_dir=save_dir)
-        training_worlds = sorted(container, key=lambda i: i.fitness.values[0], reverse=True)
-        if quality_diversity:
-            # Eliminate impossible worlds
-            training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
-            training_worlds *= math.ceil(n_rllib_envs / len(training_worlds))
-        net_itr = train_players(net_itr=net_itr, play_phase_len=cfg.play_phase_len, trainer=player_trainer, 
-                                worlds=training_worlds, idx_counter=idx_counter, cfg=cfg, logbook=logbook)
-        # else:
-        #     if itr % play_phase_len:
-        # pass
-        start_time = timer()
-        invalid_ind = [ind for ind in container]
-        container.clear_all()
-
-        # After player training, the reckoning: re-evaluate all worlds with new policies
-        net_itr -= 1
-        if cfg.rllib_eval:
-            rl_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
-                net_itr=net_itr, trainer=player_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, 
-                idx_counter=idx_counter, start_time=start_time,
-                calc_world_heuristics=False, cfg=cfg)
-
-        else:
-            world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
-
-        world_stats = {k: ws[0] for k, ws in world_stats.items()}
-        update_individuals(invalid_ind, world_stats)
-        
-
-        # Store batch in container
-        nb_updated = container.update(invalid_ind, issue_warning=True)
-        if nb_updated == 0:
-            raise ValueError(
-                "No individual could be added back to the QD container when re-evaluating after player training.")
-
-        record = stats.compile(container) if stats else {}
-        logbook_stats.update({
-            'iteration': net_itr, 'containerSize': container.size_str(), 'evals': len(invalid_ind), 'nbUpdated': nb_updated,
-            'elapsed': timer() - start_time, **record,
-        })
-        logbook.record(**logbook_stats)
-        print(logbook.stream)
-        net_itr += 1
-    return net_itr
-
-
 if __name__ == '__main__':
     parser = init_parser()
     args = parser.parse_args()
 
     # TODO: do this better?
     cfg = args
+    cfg.qdpy_save_interval = 100
     cfg.archive_size = 100
     cfg.translated_observations = True
 
@@ -219,7 +162,8 @@ if __name__ == '__main__':
         n_rllib_envs = args.n_rllib_workers * n_envs_per_worker if args.n_rllib_workers > 1 \
             else (1 if env_is_minerl else 12)
 
-    args.n_rllib_envs = n_rllib_envs
+    # args.n_rllib_envs = n_rllib_envs
+    args.n_rllib_envs = 1
     register_env('world_evolution_env', make_env)
 
     # Dummy env, to get various parameters defined inside the env, or for debugging.
@@ -298,10 +242,11 @@ if __name__ == '__main__':
         # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
         features_domain = [(0, env.max_episode_steps - 1)] * nb_features  # The domain (min/max values) of the features
 
-        # If doing QD (i.e. there is more than one bin), then we have 1 individual per bin.
-        max_items_per_bin = 1 if max_total_bins != 1 else n_rllib_envs  # The number of items in each bin of the grid
+        # If doing QD (i.e. there is more than one bin), then we have 1 individual per bin. Otherwise, we have 1 bin,
+        # and all the individuals in the archive are in this bin.
+        max_items_per_bin = 1 if max_total_bins != 1 else cfg.archive_size  # The number of items in each bin of the grid
 
-    particle_trainer = None if args.load and args.visualize else \
+    trainer = None if args.load and args.visualize else \
         init_particle_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
@@ -309,7 +254,8 @@ if __name__ == '__main__':
 
     if args.fixed_worlds:
         # train_worlds = {0: generator.landscape}
-        training_worlds = full_obs_test_mazes
+        # training_worlds = full_obs_test_mazes
+        training_worlds = ghost_action_test_maze
 
     if args.load:
         if not args.fixed_worlds:
@@ -389,7 +335,7 @@ if __name__ == '__main__':
                 model_checkpoint_path = f.read()
             # else:
                 # model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{args.loadIteration:06d}/checkpoint-{args.loadIteration}')
-            particle_trainer.load_checkpoint(model_checkpoint_path)
+            trainer.load_checkpoint(model_checkpoint_path)
             print(f'Loaded model checkopint at {model_checkpoint_path}')
 
 
@@ -398,8 +344,8 @@ if __name__ == '__main__':
 
             # TODO: support multiple fixed worlds
             if args.fixed_worlds:
-                particle_trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(trainer=particle_trainer, worlds=training_worlds, calc_world_heuristics=False, 
+                trainer.workers.local_worker().set_policies_to_train([])
+                rllib_evaluate_worlds(trainer=trainer, worlds=training_worlds, calc_world_heuristics=False, 
                                       fixed_worlds=args.fixed_worlds, render=args.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
@@ -412,7 +358,7 @@ if __name__ == '__main__':
             if args.evaluate:
                 worlds = eval_mazes
             for i, elite in enumerate(worlds):
-                ret = rllib_evaluate_worlds(trainer=particle_trainer, worlds={i: elite}, idx_counter=idx_counter,
+                ret = rllib_evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
                                             evaluate_only=True, calc_world_heuristics=False, render=args.render)
             sys.exit()
 
@@ -420,8 +366,8 @@ if __name__ == '__main__':
         if args.evaluate:
             worlds = eval_mazes
             for i in range(10):
-                rllib_stats = particle_trainer.evaluate()
-                qd_stats = particle_trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
+                rllib_stats = trainer.evaluate()
+                qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=True, quality_diversity=args.quality_diversity)))
                 qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
                 # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
@@ -447,49 +393,18 @@ if __name__ == '__main__':
         os.mkdir(save_dir)
 
     if args.fixed_worlds:
-        train_players(0, 1000, trainer=particle_trainer, worlds=training_worlds,
+        train_players(0, 1000, trainer=trainer, worlds=training_worlds,
                       # TODO: initialize logbook even if not evolving worlds
                       logbook=None, cfg=cfg)
         sys.exit()
-
-    def iteration_callback(iteration, net_itr, play_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, 
-                           container, logbook, stats, cfg, oracle_policy=False, quality_diversity=False):
-        net_itr_lst = net_itr
-        play_itr_lst = play_itr
-        assert len(net_itr_lst) == 1 == len(play_itr_lst)
-        net_itr = net_itr_lst[0]
-        play_itr = play_itr_lst[0]
-
-        gen_itr = iteration
-        idx_counter = ray.get_actor('idx_counter')
-        if net_itr % qdpy_save_interval == 0:
-            qdpy_save_archive(container=container, play_itr=play_itr, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=save_dir)
-        time_until_stale = 10
-        no_update = np.array(logbook.select('nbUpdated')[-1:]) == 0
-        if no_update:
-            staleness_counter[0] += 1
-        else:
-            staleness_counter[0] = 0
-        stale = staleness_counter[0] >= time_until_stale
-        if stale:
-            staleness_counter[0] = 0
-        net_itr = phase_switch_callback(net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr, 
-                              player_trainer=particle_trainer, container=container, 
-                              toolbox=toolbox, logbook=logbook, idx_counter=idx_counter, stale_generators=stale, 
-                              save_dir=save_dir, quality_diversity=quality_diversity, stats=stats, cfg=cfg)
-        net_itr_lst[0] = net_itr
-        play_itr_lst[0] = play_itr
-        return net_itr
-
-    qdpy_save_interval = 100
 
     # Algorithm parameters
     # dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
     # assert (dimension >= 2)
     assert (nb_features >= 1)
 
-    init_batch_size = n_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
-    batch_size = n_rllib_envs  # The number of evaluations in each subsequent batch
+    init_batch_size = cfg.n_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
+    batch_size = cfg.n_rllib_envs  # The number of evaluations in each subsequent batch
     nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome
@@ -544,14 +459,13 @@ if __name__ == '__main__':
     # toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
 
     # with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
-    qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, cfg=cfg, net_itr=net_itr,
+    qd_algo = partial(qdRLlibEval, rllib_trainer=trainer, cfg=cfg, net_itr=net_itr,
                       gen_itr=gen_itr, logbook=logbook, play_itr=play_itr)
     # The staleness counter will be incremented whenever a generation of evolution does not result in any update to
     # the archive. (Crucially, it is mutable.)
     staleness_counter = [0]
     callback = partial(iteration_callback, toolbox=toolbox, cfg=cfg,
-                        staleness_counter=staleness_counter, save_dir=save_dir,
-                        quality_diversity=args.quality_diversity)
+                        staleness_counter=staleness_counter, trainer=trainer)
     # Create a QD algorithm
     algo = DEAPQDAlgorithm(toolbox, grid, init_batch_siz=init_batch_size,
                             batch_size=batch_size, niter=nb_iterations,

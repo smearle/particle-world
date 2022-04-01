@@ -10,10 +10,15 @@ from rllib_utils.utils import get_env_world_heuristics
 
 
 def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
-                          calc_world_heuristics=False, calc_agent_stats=False):
+                          calc_world_heuristics=False, is_training_player=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
+
+    If we are running a QD experiment (cfg.quality_diversity), we'll return measures corresponding
+    to fitnesses of distinct populations, and an objective corresponding to fitness of an additional "protagonist"
+    population. Otherwise, return placeholder measures, and an objective corresponding to a contrastive measure of
+    population fitnesses.
 
     :param trainer: an rllib trainer, holding policy networks, and training/evaluation workers with environments.
     :param worlds: a dictionary of words on which to simulate gameplay.
@@ -21,10 +26,8 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
     :param evaluate_only: If True, we are not training, just evaluating some trained players/generators. (Normally,
     during training, we also evaluate at regular intervals. This won't happen here.) If True, we do not collect stats
     about generator fitness.
-    :param quality_diversity: Whether we are running a QD experiment, in which case we'll return measures corresponding
-    to fitnesses of distinct populations, and an objective corresponding to fitness of an additional "protagonist"
-    population. Otherwise, return placeholder measures, and an objective corresponding to a contrastive measure of
-    population fitnesses.
+    :param is_training_player: (bool) Whether we are currently training the player (i.e. its weights are unfrozen and 
+        rllib is set to train it). If so, we will print/log relevant stats.
     :return:
     """
     if start_time is None:
@@ -94,14 +97,15 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
                 stats = trainer.evaluate()
             else:
                 stats = trainer.train()
-                log_result = {k: v for k, v in stats.items() if k in cfg.log_keys}
-                log_result['info: learner:'] = stats['info']['learner']
+#               if is_training_player:
+#                   log_result = {k: v for k, v in stats.items() if k in cfg.log_keys}
+#                   log_result['info: learner:'] = stats['info']['learner']
 
-                # FIXME: sometimes timesteps_this_iter is 0. Maybe a ray version problem? Weird.
-                log_result['fps'] = stats['timesteps_this_iter'] / stats['time_this_iter_s']
+#                   # FIXME: sometimes timesteps_this_iter is 0. Maybe a ray version problem? Weird.
+#                   log_result['fps'] = stats['timesteps_this_iter'] / stats['time_this_iter_s']
 
-                print('-----------------------------------------')
-                print(pretty_print(log_result))
+#                   print('-----------------------------------------')
+#                   print(pretty_print(log_result))
             # print(pretty_print(stats))
             rl_stats.append(stats)
 
@@ -115,9 +119,10 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
         stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
         # if i == 0:
         if calc_world_heuristics:
+            # TODO: only getting these heuristics on the subset of maps on which we train, at the moment
             env_world_heuristics = get_env_world_heuristics(trainer)
             logbook_stats.update({f'{k}Path': env_world_heuristics[f'{k}_path_length'] for k in stat_keys})
-        if calc_agent_stats and not evaluate_only:
+        if is_training_player and not evaluate_only:
             logbook_stats.update({
                 f'{k}Rew': last_rl_stats[f'episode_reward_{k}'] for k in stat_keys})
         if 'evaluation' in last_rl_stats:

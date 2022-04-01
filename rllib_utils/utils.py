@@ -6,10 +6,14 @@ import ray
 
 
 def get_env_world_heuristics(trainer):
+    """Get heuristics for all the worlds currently loaded in the environments managed by the trainer."""
     flood_model = trainer.get_policy('oracle').model
+
+    # This is conveniently parallelized by rllib for us.
     path_lengths = trainer.workers.foreach_worker(
         # lambda w: w.foreach_env(lambda e: flood_model.get_solution_length(th.Tensor(e.world[None,...]))))
         lambda w: w.foreach_env(lambda e: len(get_solution(e.world_flat))))
+
     path_lengths = [p for worker_paths in path_lengths for p in worker_paths]
     mean_path_length = np.mean(path_lengths)
     min_path_length = np.min(path_lengths)
