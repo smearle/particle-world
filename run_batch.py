@@ -1,3 +1,8 @@
+"""Run a batch of experiments, either in sequence on a local machine, or in parallel on a SLURM cluster.
+
+The `--batch_config` command will point to a set of hyperparemeters, which are specified in a JSON file in the `configs`
+directory.
+"""
 import argparse
 from collections import namedtuple
 from itertools import product

@@ -17,9 +17,9 @@ from utils import update_individuals
 
 
 def qdRLlibEval(init_batch, toolbox, container, batch_size, niter, 
-                rllib_trainer, rllib_eval: bool, quality_diversity: bool, oracle_policy: bool, net_itr: int, gen_itr: int, play_itr: int,
+                rllib_trainer, net_itr: int, gen_itr: int, play_itr: int, cfg,
                 cxpb: float=0.0, mutpb:float=1.0, stats=None, logbook=None,
-                halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None, render=False):
+                halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None):
     """Simple QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
     :param rllib_trainer: RLlib trainer object.
     :param rllib_eval: #TODO
@@ -62,11 +62,10 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     # Evaluate all individuals
     invalid_ind = init_batch
 
-    if rllib_eval:
+    if cfg.rllib_eval:
         rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
-            trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, idx_counter=idx_counter,
-            quality_diversity=quality_diversity, oracle_policy=oracle_policy, net_itr=net_itr,
-            start_time=start_time, evaluate_only=False, render=render)
+            trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, cfg=cfg, idx_counter=idx_counter,
+            net_itr=net_itr, start_time=start_time)
         # assert len(rllib_stats) == 1
 
     else:
@@ -133,10 +132,10 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         # Evaluate the individuals with an invalid fitness
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
-        if rllib_eval:
-            rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr, evaluate_only=False,
+        if cfg.rllib_eval:
+            rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr,
                 trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, idx_counter=idx_counter,
-                oracle_policy=oracle_policy, start_time=start_time, quality_diversity=quality_diversity, render=render)
+                start_time=start_time, cfg=cfg)
 
         else:
             world_stats = toolbox.map(toolbox.evaluate, invalid_ind)

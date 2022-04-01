@@ -12,7 +12,7 @@ from pygame.constants import KEYDOWN
 # from ribs.visualize import grid_archive_heatmap
 from timeit import default_timer as timer
 
-from swarm import eval_fit
+from envs.maze.swarm import eval_fit
 
 
 def nnb(ps):

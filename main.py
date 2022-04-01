@@ -24,6 +24,7 @@ from qdpy.algorithms.deap import DEAPQDAlgorithm
 from qdpy.plots import plotGridSubplots
 from timeit import default_timer as timer
 from tqdm import tqdm
+from args import init_parser
 
 from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, TouchStone, eval_mazes, full_obs_test_mazes
 from envs.wrappers import make_env
@@ -34,7 +35,7 @@ from ray.tune.registry import register_env
 from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
 from rllib_utils.eval_worlds import rllib_evaluate_worlds
 from rllib_utils.utils import IdxCounter
-from swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
+from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
 from visualize import visualize_train_stats
 
@@ -48,7 +49,6 @@ n_nca_steps = 10
 pg_width = 500
 pg_scale = pg_width / width
 # swarm_type = MemorySwarm
-rllib_eval = True
 
 generator_phase = True  # Do we start by evolving generators, or training players?
 
@@ -79,12 +79,9 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
         if quality_diversity:
             # Eliminate impossible worlds
             training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
-            training_worlds *= math.ceil(num_rllib_envs / len(training_worlds))
-        net_itr = train_players(net_itr=net_itr, play_phase_len=play_phase_len, trainer=player_trainer,
-                      landscapes=training_worlds,
-                      idx_counter=idx_counter, n_policies=n_policies, n_pop=n_pop, n_sim_steps=n_sim_steps, 
-                      save_dir=save_dir, n_rllib_envs=num_rllib_envs, cfg=cfg, logbook=logbook, 
-                      quality_diversity=quality_diversity, render=args.render)
+            training_worlds *= math.ceil(n_rllib_envs / len(training_worlds))
+        net_itr = train_players(net_itr=net_itr, play_phase_len=cfg.play_phase_len, trainer=player_trainer, 
+                                worlds=training_worlds, idx_counter=idx_counter, cfg=cfg, logbook=logbook)
         # else:
         #     if itr % play_phase_len:
         # pass
@@ -94,11 +91,11 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
 
         # After player training, the reckoning: re-evaluate all worlds with new policies
         net_itr -= 1
-        if rllib_eval:
+        if cfg.rllib_eval:
             rl_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
                 net_itr=net_itr, trainer=player_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, 
-                idx_counter=idx_counter, quality_diversity=quality_diversity, start_time=start_time,
-                calc_world_heuristics=False, render=args.render)
+                idx_counter=idx_counter, start_time=start_time,
+                calc_world_heuristics=False, cfg=cfg)
 
         else:
             world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
@@ -125,66 +122,16 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, player_trainer, container,
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-ec', '--environment_class', type=str, default="ParticleMazeEnv", help="Which environment to "
-    "use (one of ParticleMazeEnv, TouchStone).")
-    parser.add_argument('-l', '--load', action='store_true')
-    parser.add_argument('-en', '--enjoy', action='store_true')
-    parser.add_argument('-v', '--visualize', action='store_true',
-                        help="If reloading an experiment, produce plots, etc. "
-                             "to visualize progress.")
-    # parser.add_argument('-seq', '--sequential', help='not parallel', action='store_true')
-    # parser.add_argument('--max_total_bins', type=int, default=1, help="Maximum number of bins in the grid")
-    parser.add_argument('-p', '--parallelismType', type=str, default='None',
-                        help="Type of parallelism to use (none, multiprocessing, concurrent, multithreading, scoop)")
-    parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
-    # parser.add_argument('-li', '--loadIteration', default=-1, type=int)
-    parser.add_argument('-a', '--algo', default='me')
-    parser.add_argument('-exp', '--exp_name', default='test')
-    parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
-                                                                           "skipping the world-generation phase.")
-    parser.add_argument('-g', '--generator_class', type=str, default="TileFlipIndividual",
-                        help="An evolvable representation of the environment (or environment-generator(?))."
-                        )
-    parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
-    parser.add_argument('-np', '--num_proc', type=int, default=0, help="Number of RLlib workers. Each uses 1 CPU core.")
-    parser.add_argument('-gpus', '--num_gpus', type=int, default=1, help="How many GPUs to use for training.")
-    parser.add_argument('-ev', '--evaluate', action='store_true', help="Whether to evaluate trained agents/worlds and"
-                                                                       "collect relevant stats.")
-    parser.add_argument('-qd', '--quality_diversity', action='store_true',
-                        help='Search for a grid of levels with dimensions (measures) given by the fitness of distinct '
-                             'policies, and objective score given by the inverse fitness of an additional policy.')
-    parser.add_argument('-obj', '--objective_function', type=str, default=None,
-                        help='If not using quality diversity, the name of the fitness function that will compute world'
-                             'fitness based on population-wise rewards.')
-    parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
-    parser.add_argument('-op', '--oracle_policy', action='store_true', help="Whether to use the oracle (optimal) policy, and"
-                                                                      "thereby focus on validating generator-evolution.")
-    parser.add_argument('-fo', '--fully_observable', action='store_true',
-                        help="Whether to use a fully observable environment.")
-    parser.add_argument('-gp', '--gen_phase_len', type=int, default=-1,
-                        help="How many generations to evolve worlds (generator). If -1, run until convergence.")
-    parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
-                        help="How many iterations to train the player. If -1, run until convergence.")
-    parser.add_argument('-m', '--model', type=str, default=None)
-    parser.add_argument('-fov', '--field_of_view', type=int, default=2, help='How far agents can see in each direction.')
-    parser.add_argument('-lc', '--load_config', type=int, default=None, 
-                        help="Load a dictionary of (automatically-generated) arguments. "
-                        "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
-    parser.add_argument('-tr', '--target_reward', type=int, default=0, 
-                        help="Target reward the world should elicit from player if using the min_solvable objective "
-                        "function.")
-    parser.add_argument('-ro', '--rotated_observations', action='store_true',
-                        help="Whether to use rotated observations. If so, the agent will have an action space consisting"
-                        "of moving forward, staying put, and turning left or right. It will perceive its orientation as a "
-                        "discrete space.")
-    parser.add_argument('-to', '--translated_observations', action='store_true', help='Whether to use translated '
-                        ' observations. This will always be the True when fully_observable is False.')
+    parser = init_parser()
     args = parser.parse_args()
 
     # TODO: do this better?
     cfg = args
-    # cfg.archive_size = 100  
+    cfg.archive_size = 100
+    cfg.translated_observations = True
+
+    # Whether to use rllib trainer to perform evaluations of evolved worlds.
+    cfg.rllib_eval = True
 
     # This NCA-type model is meant to be used with full observations.
     if args.model == 'flood':
@@ -239,7 +186,7 @@ if __name__ == '__main__':
 
         env_config = {'width': width, 'swarm_cls': swarm_cls, 'n_policies': n_policies, 'n_pop': n_pop,
             'pg_width': pg_width, 'evaluate': args.evaluate, 
-            'fully_observable': args.fully_observable, 'fov': args.field_of_view, 'num_eval_envs': 1, 
+            'fully_observable': args.fully_observable, 'field_of_view': args.field_of_view, 'num_eval_envs': 1, 
             'target_reward': args.target_reward, 'rotated_observations': args.rotated_observations, 
             'translated_observations': args.translated_observations}
 
@@ -266,32 +213,31 @@ if __name__ == '__main__':
 
     env_config.update({'environment_class': environment_class, 'args': args})
 
-    n_rllib_workers = args.num_proc
-
     if (args.enjoy or args.evaluate) and args.render:
-        num_rllib_envs = 1
+        n_rllib_envs = 1
     else:
-        num_rllib_envs = n_rllib_workers * n_envs_per_worker if n_rllib_workers > 1 else (1 if env_is_minerl else 12)
+        n_rllib_envs = args.n_rllib_workers * n_envs_per_worker if args.n_rllib_workers > 1 \
+            else (1 if env_is_minerl else 12)
 
-    cfg.archive_size = num_rllib_envs
-
-    if args.quality_diversity:
-        # If using QD, objective score is determined by the fitness of an additional policy.
-        assert n_policies > 1
-        # Fitness function is fixed for QD experiments.
-        assert args.objective_function is None
-        max_total_bins = 169  # so that we're guaranteed to have at least 12 non-impossible worlds (along the diagonal)
-    else:
-        # If not running a QD experiment, we must specify an objective function.
-        assert args.objective_function is not None
-        if args.objective_function == "contrastive":
-            assert n_policies > 1
-        max_total_bins = 1
-
+    args.n_rllib_envs = n_rllib_envs
     register_env('world_evolution_env', make_env)
- 
+
     # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
+
+    n_sim_steps = env.max_episode_steps
+    unique_chans = env.unique_chans
+    experiment_name = get_experiment_name(args)
+    load = args.load
+    total_play_itrs = 50000
+    multi_proc = args.parallelismType != 'None'
+    rllib_save_interval = 10
+    save_dir = os.path.join(args.outputDir, experiment_name)
+    cfg.save_dir = save_dir
+    cfg.env_is_minerl = env_is_minerl
+    cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
+
+    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
 
 
 #   ### DEBUGGING THE ENVIRONMENT ###
@@ -318,50 +264,48 @@ if __name__ == '__main__':
 #               TT()
 #           obs, rew, done, info = env.step(action)
 
+    # If we're doing world evolution, set this up.
+    if not args.fixed_worlds:
+        if args.quality_diversity:
+            # If using QD, objective score is determined by the fitness of an additional policy.
+            assert n_policies > 1
+            # Fitness function is fixed for QD experiments.
+            assert args.objective_function is None
+            max_total_bins = 169  # so that we're guaranteed to have at least 12 non-impossible worlds (along the diagonal)
+        else:
+            # If not running a QD experiment, we must specify an objective function.
+            assert args.objective_function is not None
+            if args.objective_function == "contrastive":
+                assert n_policies > 1
+            max_total_bins = 1
 
-    n_sim_steps = env.max_episode_steps
-    unique_chans = env.unique_chans
+        # generator = generator_class(width=width, n_chan=env.n_chan, unique_chans=unique_chans)
 
-    # generator = generator_class(width=width, n_chan=env.n_chan, unique_chans=unique_chans)
-
-    # Don't need to know the dimension here since we'll simply call an individual's "mutate" method
-    # initial_weights = generator.get_init_weights()
+        # Don't need to know the dimension here since we'll simply call an individual's "mutate" method
+        # initial_weights = generator.get_init_weights()
     
-    experiment_name = get_experiment_name(args)
-    load = args.load
-    total_play_itrs = 50000
-    multi_proc = args.parallelismType != 'None'
-    n_emitters = 5
-    batch_size = 30
+        n_emitters = 5
+        batch_size = 30
 
-    if args.quality_diversity:
-        # Define grid in terms of fitness of all policies (save 1, for fitness)
-        nb_features = n_policies - 1
-    else:
-        nb_features = 2  # The number of features to take into account in the container
-    bins_per_dim = int(pow(max_total_bins, 1. / nb_features))
-    nb_bins = (bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
-    rllib_save_interval = 10
+        if args.quality_diversity:
+            # Define grid in terms of fitness of all policies (save 1, for fitness)
+            nb_features = n_policies - 1
+        else:
+            nb_features = 2  # The number of features to take into account in the container
+        bins_per_dim = int(pow(max_total_bins, 1. / nb_features))
+        nb_bins = (bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
 
-    # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
-    features_domain = [(0, env.max_episode_steps - 1)] * nb_features  # The domain (min/max values) of the features
-    save_dir = os.path.join(args.outputDir, experiment_name)
+        # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
+        features_domain = [(0, env.max_episode_steps - 1)] * nb_features  # The domain (min/max values) of the features
 
-    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
+        # If doing QD (i.e. there is more than one bin), then we have 1 individual per bin.
+        max_items_per_bin = 1 if max_total_bins != 1 else n_rllib_envs  # The number of items in each bin of the grid
 
     particle_trainer = None if args.load and args.visualize else \
-        init_particle_trainer(env, num_rllib_remote_workers=n_rllib_workers, n_rllib_envs=num_rllib_envs,
-                            enjoy=args.enjoy, render=args.render, save_dir=save_dir,
-                            num_gpus=args.num_gpus, evaluate=args.evaluate, idx_counter=idx_counter,
-                            oracle_policy=args.oracle_policy, fully_observable=args.fully_observable,
-                            model=args.model, env_config=env_config, fixed_worlds=args.fixed_worlds,
-                            rotated_observations=args.rotated_observations, env_is_minerl=env_is_minerl, cfg=cfg)
+        init_particle_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
-
-    # If doing QD (i.e. there is more than one bin), then we have 1 individual per bin.
-    max_items_per_bin = 1 if max_total_bins != 1 else num_rllib_envs  # The number of items in each bin of the grid
 
     if args.fixed_worlds:
         # train_worlds = {0: generator.landscape}
@@ -439,7 +383,7 @@ if __name__ == '__main__':
                     print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
                 sys.exit()
 
-        if isinstance(env.swarms[0], NeuralSwarm) and rllib_eval:
+        if isinstance(env.swarms[0], NeuralSwarm) and cfg.rllib_eval:
             # if args.loadIteration == -1:
             with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
                 model_checkpoint_path = f.read()
@@ -488,26 +432,24 @@ if __name__ == '__main__':
             sys.exit()
 
     # Train
-
     else:
-        # Initialize these if not reloading
-        gen_itr = 0
-        play_itr = 0
-        net_itr = 0
-        # Create container
-        grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
-                               fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
+        if not args.fixed_worlds:
+            # Initialize these if not reloading
+            gen_itr = 0
+            play_itr = 0
+            net_itr = 0
+            # Create container
+            grid = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=fitness_domain,
+                                fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
         logbook = None
 
     if not os.path.isdir(save_dir):
         os.mkdir(save_dir)
 
     if args.fixed_worlds:
-        train_players(0, 1000, trainer=particle_trainer, landscapes=training_worlds, n_policies=n_policies,
-                      n_rllib_envs=num_rllib_envs, save_dir=save_dir, n_pop=n_pop, n_sim_steps=n_sim_steps, 
-                      quality_diversity=args.quality_diversity, fixed_worlds=args.fixed_worlds,
+        train_players(0, 1000, trainer=particle_trainer, worlds=training_worlds,
                       # TODO: initialize logbook even if not evolving worlds
-                      logbook=None)
+                      logbook=None, cfg=cfg)
         sys.exit()
 
     def iteration_callback(iteration, net_itr, play_itr, toolbox, rllib_eval, staleness_counter, save_dir, batch, 
@@ -546,8 +488,8 @@ if __name__ == '__main__':
     # assert (dimension >= 2)
     assert (nb_features >= 1)
 
-    init_batch_size = num_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
-    batch_size = num_rllib_envs  # The number of evaluations in each subsequent batch
+    init_batch_size = n_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
+    batch_size = n_rllib_envs  # The number of evaluations in each subsequent batch
     nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome
@@ -602,15 +544,14 @@ if __name__ == '__main__':
     # toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
 
     # with ParallelismManager(args.parallelismType, toolbox=toolbox) as pMgr:
-    qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, rllib_eval=rllib_eval, net_itr=net_itr,
-                        quality_diversity=args.quality_diversity, oracle_policy=args.oracle_policy, gen_itr=gen_itr,
-                        logbook=logbook, play_itr=play_itr, render=args.render)
-    # The staleness counter will be incremented whenver a generation of evolution does not result in any update to
+    qd_algo = partial(qdRLlibEval, rllib_trainer=particle_trainer, cfg=cfg, net_itr=net_itr,
+                      gen_itr=gen_itr, logbook=logbook, play_itr=play_itr)
+    # The staleness counter will be incremented whenever a generation of evolution does not result in any update to
     # the archive. (Crucially, it is mutable.)
     staleness_counter = [0]
-    callback = partial(iteration_callback, toolbox=toolbox, rllib_eval=rllib_eval, 
+    callback = partial(iteration_callback, toolbox=toolbox, cfg=cfg,
                         staleness_counter=staleness_counter, save_dir=save_dir,
-                        quality_diversity=args.quality_diversity, cfg=cfg)
+                        quality_diversity=args.quality_diversity)
     # Create a QD algorithm
     algo = DEAPQDAlgorithm(toolbox, grid, init_batch_siz=init_batch_size,
                             batch_size=batch_size, niter=nb_iterations,

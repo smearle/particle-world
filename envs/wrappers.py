@@ -9,7 +9,7 @@ from ray.rllib import MultiAgentEnv
 
 from minerl.herobraine.env_spec import EnvSpec
 from envs.minecraft.touchstone import TouchStone
-from swarm import min_solvable_fitness
+from envs.maze.swarm import min_solvable_fitness
 from utils import discrete_to_onehot
 
 
@@ -119,7 +119,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
     world)."""
     def __init__(self, env, env_cfg):
         super().__init__(env)
-        self.agent_ids = [(i, j) for i in range(self.n_pop) for j in range(self.n_policies)]
+        self.agent_ids = [(i, j) for j in range(self.n_pop) for i in range(self.n_policies)]
         self.env = env
         self.need_world_reset = False
         self.stats = []
@@ -174,6 +174,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 #       raise NotImplementedError('Implement set_world in domain-specific wrapper or environment.')
 
     def step(self, actions):
+        """Step a single-agent environment."""
         obs, rews, done, info = super().step(actions)
         self.log_rewards(rews)
         self.n_step += 1
@@ -195,7 +196,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.stats.append([self.world_key, {k: 0 for k in self.agent_ids}])
 
     def reset(self):
-        print(f'Resetting world {self.world_key} at step {self.n_step}.')
+        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
         self.need_world_reset = False
         obs = super().reset()
@@ -228,14 +229,14 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
         # reset() call occurs on the first step (resulting in max_steps - 1).
         if not evaluate:
-            print(f'get world stats at step {self.n_step} with max step {self.max_episode_steps}')
-            # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
+            # print(f'get world stats at step {self.n_step} with max step {self.max_episode_steps}')
+            assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
 
         qd_stats = []
 
         if not evaluate:
-            # assert len(self.stats) == 1
-            print(f'stats: {self.stats}')
+            assert len(self.stats) == 1
+            # print(f'stats: {self.stats}')
 
         for i, (world_key, agent_rewards) in enumerate( self.stats):
             world_key_2, regret_loss = self.regret_losses[i] if len(self.regret_losses) > 0 else (None, None)
@@ -258,6 +259,10 @@ class WorldEvolutionWrapper(gym.Wrapper):
                 # Objective and placeholder measures
                 if self.obj_fn_str == 'regret':
                     obj = self.objective_function(regret_loss)
+                # If we have no objective function (i.e. evaluating on fixed worlds), objective is None.
+                elif not self.objective_function:
+                    obj = None
+                # Most objectives are functions of agent reward.
                 else:
                     obj = self.objective_function(swarm_rewards)
                 world_stats = (world_key, ((obj,), [0, 0]))
@@ -295,7 +300,9 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         self.stats.append((self.world_key, {agent_id: 0 for agent_id in self.agent_ids}))
 
     def step(self, actions):
-        obs, rews, dones, infos = self.env.step(actions)
+        # We skip the step() function in WorldEvolutionWrapper and call *it's* parent's step() function instead.
+        obs, rews, dones, infos = super(WorldEvolutionWrapper, self).step(actions)
+
         self.validate_stats()
         self.log_rewards(rews)
         dones['__all__'] = dones['__all__'] or self.need_world_reset
@@ -304,9 +311,10 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         return obs, rews, dones, infos
 
     def log_rewards(self, rews):
-        """Log rewards for each agent on each world."""
-        # Store rewards so that we can compute world fitness according to progress over duration of level. Might need
-        # separate rewards from multiple policies.
+        """Log rewards for each agent on each world.
+        
+        We store rewards so that we can compute world fitness according to progress over duration of level. Might need
+        separate rewards from multiple policies."""
         if len(self.stats) > 0:
             for k, v in rews.items():
                 self.stats[-1][1][k] += v

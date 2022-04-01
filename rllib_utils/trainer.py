@@ -29,9 +29,19 @@ from rllib_utils.eval_worlds import rllib_evaluate_worlds
 from utils import get_solution
 
 
-def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscapes, save_dir, n_rllib_envs, cfg, n_sim_steps, 
-                  idx_counter=None, logbook=None, quality_diversity=False, fixed_worlds=False, render=False,):
-    trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(n_policies)])
+def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=None, logbook=None,):
+    """Train player-agents using the rllib trainer.
+
+    :param net_itr: (int) Counter for net iterations of algorithm (including both player training and world evolution 
+                    steps.) 
+    :param play_phase_len: (int) Number of player training steps (calls to train.train()) to perform.
+    :param worlds: (dict) Dictionary of worlds to train on, ({world_key: world}).
+    :param trainer: (Trainer) RLLib trainer.
+    :param cfg: Object with configuration parameters as attributes.
+    :param idx_counter: (Actor) ray actor accessed by parallel rllib envs to assign them unique world_keys.
+    :param logbook: (Logbook) qdpy logbook to record (evolution and) training stats.
+    """
+    trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
     # toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
     staleness_window = 10
@@ -42,25 +52,24 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
         # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
         # weights start changing.
         if i % 10 == 0:
-            rllib_save_model(trainer, save_dir)
-        replace = True if fixed_worlds else True
-        if isinstance(landscapes, dict):
-            world_keys = list(landscapes.keys())
+            rllib_save_model(trainer, cfg.save_dir)
+        replace = True if cfg.fixed_worlds else True
+        if isinstance(worlds, dict):
+            world_keys = list(worlds.keys())
         else:
-            assert isinstance(landscapes, Iterable)
-            world_keys = list(range(len(landscapes)))
-        world_keys = np.random.choice(world_keys, cfg.archive_size, replace=replace)
+            assert isinstance(worlds, Iterable)
+            world_keys = list(range(len(worlds)))
+        world_keys = np.random.choice(world_keys, cfg.n_rllib_envs, replace=replace)
         # curr_lands = np.array(landscapes)[world_keys]
-        curr_lands = [landscapes[wid] for wid in world_keys]
-        worlds = {i: l for i, l in enumerate(curr_lands)}
+        curr_worlds = [worlds[wk] for wk in world_keys]
+        worlds = {i: l for i, l in enumerate(curr_worlds)}
 
         # Get world heuristics on first iteration only, since they won't change after this inside training loop
         calc_world_heuristics = (i == 0)
 
         rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
-            net_itr=net_itr, trainer=trainer, worlds=worlds, idx_counter=idx_counter, calc_agent_stats=True,
-            start_time=start_time, evaluate_only=False, quality_diversity=quality_diversity, 
-            calc_world_heuristics=calc_world_heuristics, fixed_worlds=fixed_worlds, render=render)
+            net_itr=net_itr, trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, calc_agent_stats=True,
+            start_time=start_time, calc_world_heuristics=calc_world_heuristics)
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rl_stats['episode_reward_mean']
 
@@ -79,7 +88,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
                 # done_training = running_std < 1.0 or i >= 100
             # else:
                 # done_training = False
-        if not fixed_worlds:
+        if not cfg.fixed_worlds:
             logbook.record(**logbook_stats)
             print(logbook.stream)
         i += 1
@@ -91,9 +100,7 @@ def train_players(net_itr, play_phase_len, n_policies, n_pop, trainer, landscape
     return net_itr
 
 
-def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate, enjoy, render, save_dir, num_gpus, 
-                          oracle_policy, fully_observable, idx_counter, model, env_config, fixed_worlds, 
-                          rotated_observations, env_is_minerl, cfg):
+def init_particle_trainer(env, idx_counter, env_config, cfg):
     """
     Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
@@ -113,20 +120,6 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     :param num_gpus: How many GPUs to use for training.
     :return: An rllib PPOTrainer object
     """
-    # logger_config = {} if not fixed_worlds else {
-    logger_config = {} if True else {
-        # Provide the class directly or via fully qualified class
-        # path.
-        "type": PrintLogger,
-        # `config` keys:
-        "prefix": "ABC",
-        # Optional: Custom logdir (do not define this here
-        # for using ~/ray_results/...).
-    }
-    logger_config.update({
-        "log_dir": save_dir,
-    })
-
     # Create multiagent config dict if env is multi-agent
     # Create models specialized for small-scale grid-worlds
     # TODO: separate these tasks?
@@ -138,13 +131,13 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # TODO: make this general
         n_policies = len(env.swarms)
 
-        if oracle_policy:
+        if cfg.oracle_policy:
             policies_dict = {f'policy_{i}': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[i],
                                                         action_space=env.action_spaces[i], config={})
                                 for i, _ in enumerate(env.swarms)}
             model_config = {}
         else:
-            policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fovs[i])
+            policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fields_of_view[i])
                             for i, swarm in enumerate(env.swarms)}
             # Add the oracle (flood-fill convolutional model) for fast path-length computations. obs/act spaces are dummy
             policies_dict.update({
@@ -160,11 +153,11 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         is_multiagent_env = False
         multiagent_config = {}
 
-    if env_is_minerl:
+    if cfg.env_is_minerl:
         ModelCatalog.register_custom_model('minerl', CustomConvRNNModel)
         model_config.update({'custom_model': 'minerl'})
-    elif fully_observable and model == 'strided_feedforward':
-        if rotated_observations:
+    elif cfg.fully_observable and cfg.model == 'strided_feedforward':
+        if cfg.rotated_observations:
             model_config.update({
             # Fully observable, translated and padded map
             "conv_filters": [
@@ -182,7 +175,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 [256, [3, 3], 2]
             ],})
     else:
-        if model is None:
+        if cfg.model is None:
             model_config.update({
                 "use_lstm": True,
                 "lstm_cell_size": 32,
@@ -192,12 +185,12 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                     [4, [3, 3], 1]],
                 # "post_fcnet_hiddens": [32, 32],
             })
-        elif model == 'paired':
+        elif cfg.model == 'paired':
             # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
             ModelCatalog.register_custom_model('paired', CustomRNNModel)
             model_config = {'custom_model': 'paired'}
         # TODO: this seems broken
-        elif model == 'flood':
+        elif cfg.model == 'flood':
             ModelCatalog.register_custom_model('flood', FloodMemoryModel)
             model_config = {'custom_model': 'flood', 'custom_model_config': {'player_chan': env.player_chan}}
 #           elif model == 'nca':
@@ -208,16 +201,19 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
             raise NotImplementedError
 
 
-    num_workers = 1 if num_rllib_remote_workers == 0 or enjoy else num_rllib_remote_workers
-    num_envs_per_worker = math.ceil(n_rllib_envs / num_workers) if not enjoy else 1
+    # Set the number of environments per worker to result in at least n_rllib_envs-many environments.
+    num_workers = 1 if cfg.n_rllib_workers == 0 or cfg.enjoy else cfg.n_rllib_workers
+    num_envs_per_worker = math.ceil(cfg.n_rllib_envs / num_workers) if not cfg.enjoy else 1
+
+    # Because we only ever use a single worker for all evaluation environments.
     num_eval_envs = num_envs_per_worker
 
-    if env_is_minerl:
+    if cfg.env_is_minerl:
         evaluation_interval = 0
     else:
-        evaluation_interval = 10 if not enjoy else 10
+        evaluation_interval = 10 if not cfg.enjoy else 10
 
-    if enjoy:
+    if cfg.enjoy:
         evaluation_num_episodes = num_eval_envs * 2
     # elif evaluate:
         # evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * 10
@@ -240,16 +236,16 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # "custom_model": RLlibNN,
         # },
         "env_config": env_config,
-        "num_gpus": num_gpus,
-        "num_workers": num_rllib_remote_workers if not (enjoy or evaluate) else 0,
+        "num_gpus": cfg.num_gpus,
+        "num_workers": cfg.n_rllib_workers if not (cfg.enjoy or cfg.evaluate) else 0,
         "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
-        "render_env": render if not enjoy else True,
+        "render_env": cfg.render if not cfg.enjoy else True,
 
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
         "evaluation_interval": evaluation_interval,
 
-        "evaluation_num_workers": 0 if not (evaluate) else num_rllib_remote_workers,
+        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.num_rllib_remote_workers,
 
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
@@ -264,14 +260,13 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
                 # "n_pop": 1,
 
                 # If enjoying, then we look at generated levels instead of eval levels. (Because we user trainer.evaluate() when enjoying.)
-                "evaluate": True if not enjoy else evaluate,
+                "evaluate": True if not cfg.enjoy else cfg.evaluate,
                 "num_eval_envs": num_eval_envs,
             },
             "evaluation_parallel_to_training": True,
-            "render_env": render,
-            "explore": False if oracle_policy else True,
+            "render_env": cfg.render,
+            "explore": False if cfg.oracle_policy else True,
         },
-        "logger_config": logger_config,
         # "lr": 0.1,
         # "log_level": "INFO",
         # "record_env": True,
@@ -279,8 +274,14 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
 
         # TODO: try increasing batch size to ~500k, expect a few minutes update time
-        "train_batch_size": env.max_episode_steps * n_rllib_envs,
-        "sgd_minibatch_size": env.max_episode_steps * n_rllib_envs if (enjoy or evaluate) and render else 128,
+        "train_batch_size": env.max_episode_steps * cfg.n_rllib_envs,
+        "sgd_minibatch_size": env.max_episode_steps * cfg.n_rllib_envs if (cfg.enjoy or cfg.evaluate) and cfg.render else 128,
+        "logger_config": {
+            "type": "ray.tune.logger.TBXLogger",
+            # Optional: Custom logdir (do not define this here
+            # for using ~/ray_results/...).
+            "logdir": cfg.save_dir,
+        },
     }
     pp = pprint.PrettyPrinter(indent=4)
     print(f'Loading trainer with config:')
@@ -288,7 +289,7 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
-    if not enjoy and not env_is_minerl:  # TODO: eval worlds in minerl
+    if not cfg.enjoy and not cfg.env_is_minerl:  # TODO: eval worlds in minerl
         # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_key of each env will be incremented
         # by len(eval_mazes) each reset.
         eval_workers = trainer.evaluation_workers
@@ -321,11 +322,11 @@ def init_particle_trainer(env, num_rllib_remote_workers, n_rllib_envs, evaluate,
     return trainer
 
 
-def gen_policy(i, observation_space, action_space, fov):
+def gen_policy(i, observation_space, action_space, field_of_view):
     config = {
         "model": {
             "custom_model_config": {
-                "fov": fov,
+                "field_of_view": field_of_view,
             }
         }
     }

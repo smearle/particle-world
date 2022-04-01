@@ -13,7 +13,7 @@ from ray.rllib import MultiAgentEnv
 # from envs import eval_mazes
 from generators.representations import render_landscape
 from generators.objectives import max_reward_fitness
-from swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
+from envs.maze.swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
 from utils import discrete_to_onehot
 
 player_colors = [
@@ -31,9 +31,9 @@ start_color = (255, 255, 0)
 class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
     propelling themselves toward desirable regions in the fitness world."""
-    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False, fov=4,
-                 rotated_observations=False):
-        self.rotated_observations=rotated_observations
+    def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False, 
+                 field_of_view=4, rotated_observations=True, translated_observations=True):
+        self.rotated_observations = rotated_observations
         self.n_chan = n_chan
         if not pg_width:
             pg_width = width
@@ -43,38 +43,38 @@ class ParticleSwarmEnv(object):
         self.width = width
         self.n_pop = n_pop
         self.n_policies = n_policies
-        # self.fovs = [si+1 for si in range(n_policies)]
+        # self.fields_of_view = [si+1 for si in range(n_policies)]
 
         if fully_observable:
-            # if not rotated_observations:
 
-            # just viewing the whole map, not centered at agent
-            self.fovs = [math.floor(width/2) for si in range(n_policies)]
+            # When not translating observation to center the agent, field_of_view is a kind of placeholder, computed 
+            # from the middle of the map.
+            if not translated_observations:
+                self.fields_of_view = [math.floor(width/2) for si in range(n_policies)]
 
-            # TODO: add a `translation` arg to toggle this (automatically True if not fully_observable)
-#           else:
-#               # viewing the whole map, centered at agent, guaranteed via padding
-#               self.fovs = [math.floor(width) for si in range(n_policies)]
+            # If translating, we ensure that the agent can always observe the full map, even when it is in the corner.
+            if translated_observations:
+                self.fields_of_view = [width - 1 for si in range(n_policies)]
 
         else:
         # Partially observable map
-            self.fovs = [fov for si in range(n_policies)]
+            self.fields_of_view = [field_of_view for si in range(n_policies)]
 
-        self.patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
+        self.patch_widths = [int(field_of_view * 2 + 1) for field_of_view in self.fields_of_view]
 
-        self._gen_swarms(swarm_cls, n_policies, n_pop, self.fovs)
+        self._gen_swarms(swarm_cls, n_policies, n_pop, self.fields_of_view)
         self.particle_draw_size = 0.3
         self.n_steps = None
         self.screen = None
 
-    def _gen_swarms(self, swarm_cls, n_policies, n_pop, fovs):
+    def _gen_swarms(self, swarm_cls, n_policies, n_pop, fields_of_view):
         self.swarms = [
             # GreedySwarm(
             # NeuralSwarm(
             swarm_cls(
                 world_width=self.width,
                 n_pop=n_pop,
-                fov=fovs[si],
+                field_of_view=fields_of_view[si],
                 # trg_scape_val=trg)
                 trg_scape_val=1.0)
             for si, trg in zip(range(n_policies), np.arange(n_policies) / max(1, (n_policies - 1)))]
@@ -132,10 +132,10 @@ class ParticleSwarmEnv(object):
 
 
 class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
-    def __init__(self, width, swarm_cls, n_policies, n_pop, pg_width=500, n_chan=1, fully_observable=False, fov=4,
+    def __init__(self, width, swarm_cls, n_policies, n_pop, pg_width=500, n_chan=1, fully_observable=False, field_of_view=4,
                  rotated_observations=False, translated_observations=False, **env_config):
         ParticleSwarmEnv.__init__(self, 
-            width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, fov=fov,
+            width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, field_of_view=field_of_view,
             rotated_observations=rotated_observations)
         MultiAgentEnv.__init__(self)
         
@@ -143,7 +143,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 
         # Each agent observes 2D patch around itself. Each cell has multiple channels. 3D observation.
         # Map policies to agent observations.
-        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(n_chan, self.patch_ws[i], self.patch_ws[i]))
+        self.observation_spaces = {i: gym.spaces.Box(-1.0, 1.0, shape=(n_chan, self.patch_widths[i], self.patch_widths[i]))
                                    for i in range(n_policies)}
         # self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(n_chan, patch_ws[i], patch_ws[i]))
         # self.action_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(2,))
@@ -244,7 +244,7 @@ class ParticleGymRLlib(ParticleGym):
         
         # if evaluate:
             # Agents should be able to reach any tile within the initial neighborhood by a shortest path.
-            # self.max_steps = max(self.fovs) * 2
+            # self.max_steps = max(self.fields_of_view) * 2
             # self.reset = partial(ParticleEvalEnv.reset, self)
             # self.get_reward = partial(ParticleEvalEnv.get_eval_reward, self, self.get_reward)
 #       self.world_key = None
@@ -322,7 +322,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
 
         # TODO: maze-specific evaluation scenarios (will currently break)
         self.n_policies = n_policies = len(self.swarms)
-        # self.patch_ws = patch_ws = [int(fov * 2 + 1) for fov in self.fovs]
+        # self.patch_ws = patch_ws = [int(field_of_view * 2 + 1) for field_of_view in self.fields_of_view]
 
         # Observe empty, wall, and goal tiles (not start tiles)
         if self.fully_observable and not self.translated_observations:
@@ -336,7 +336,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
             self.n_obs_chan = self.n_chan - 1
             self.player_chan = None
 
-        self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], self.n_obs_chan))
+        self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(self.patch_widths[i], self.patch_widths[i], self.n_obs_chan))
                                    for i in range(n_policies)}
         self.observation_space = None
 
@@ -554,7 +554,7 @@ class DirectedMazeEnv(ParticleMazeEnv):
 #                                  for i in range(self.n_policies)}
 
         self.observation_spaces = {i: 
-            gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], self.n_obs_chan + 4))
+            gym.spaces.Box(0.0, 1.0, shape=(self.patch_widths[i], self.patch_widths[i], self.n_obs_chan + 4))
                                    for i in range(self.n_policies)}
         self.action_spaces = {i : gym.spaces.Discrete(4) for i in range(self.n_policies)}
 
@@ -614,7 +614,7 @@ class DirectedMazeEnv(ParticleMazeEnv):
             return arr
 
     def get_particle_observations(self):
-        obs = super().get_particle_observations(padding_mode='constant', surplus_padding=self.fovs[0])
+        obs = super().get_particle_observations(padding_mode='constant', surplus_padding=self.fields_of_view[0])
         return obs
 
     def get_max_steps(self):
@@ -637,9 +637,9 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
         n_aux_chans = 16
         self.aux_maps = np.zeros((n_aux_chans, self.width, self.width))
         self.observation_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(self.n_chan + 1 + n_aux_chans, 
-                                   self.patch_ws[i], self.patch_ws[i])) for i in range(self.n_policies)}
+                                   self.patch_widths[i], self.patch_widths[i])) for i in range(self.n_policies)}
         self.action_spaces = {i: gym.spaces.Box(0.0, 1.0, shape=(self.n_chan + 1 + n_aux_chans,
-                                   self.patch_ws[i], self.patch_ws[i])) for i in range(self.n_policies)}
+                                   self.patch_widths[i], self.patch_widths[i])) for i in range(self.n_policies)}
 
     def get_max_steps(width=15):
         # max. path length times 2: first the agent computes, then traverses it
@@ -669,7 +669,7 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
 #    """
 #    def __init__(self, **cfg):
 #        """
-#        :param fovs: The fields of vision of the policies (how far they can see in each direction.
+#        :param fields_of_view: The fields of vision of the policies (how far they can see in each direction.
 #        """
 #        super().__init__(**cfg)
 #        raise Exception(f"{type(self)} is a dummy class.")
@@ -685,10 +685,10 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
 #        # Note that this is weird, allows borrowing by parent class. Will break the
 #        self.init_nbs = [swarm.get_observations(og_scape, flatten=False) for swarm in self.swarms]
 #        landscape = np.ones(og_scape.shape)
-#        for swarm, init_nb, fov in zip(self.swarms, self.init_nbs, self.fovs):
+#        for swarm, init_nb, field_of_view in zip(self.swarms, self.init_nbs, self.fields_of_view):
 #            for ps, nb in zip(swarm.ps.astype(int), init_nb):
 #                # TODO: vectorize this
-#                landscape[ps[0] - fov: ps[0] + fov + 1, ps[1] - fov: ps[1] + fov + 1] = nb
+#                landscape[ps[0] - field_of_view: ps[0] + field_of_view + 1, ps[1] - field_of_view: ps[1] + field_of_view + 1] = nb
 #        self.set_landscape(landscape)
 #        # obs = [np.reshape(nb, (nb.shape[0], nb.shape[1], -1)) for nb in self.init_nbs]
 #        return obs
@@ -697,8 +697,8 @@ class MazeEnvForNCAgents(ParticleMazeEnv):
 #        """Reward for policies when their agents move the best tile that was in their initial field of vision."""
 #        if not self.dones['__all__']:
 #            return {agent_id: 0 for agent_id in self.agent_ids}
-#        fovs = [int((nb[0].shape[0] - 1) / 2) for nb in self.init_nbs]
-#        # nbs = [nb[fov - 1: fov + 2] for nb, fov in zip(self.init_nbs, fovs)]
+#        fields_of_view = [int((nb[0].shape[0] - 1) / 2) for nb in self.init_nbs]
+#        # nbs = [nb[field_of_view - 1: field_of_view + 2] for nb, field_of_view in zip(self.init_nbs, fields_of_view)]
 #        nbs = self.init_nbs
 #        # Condition is satisfied when
 #        og_rewards = og_get_reward()

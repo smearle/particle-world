@@ -5,12 +5,12 @@ import ray
 from timeit import default_timer as timer
 import torch as th
 
+from ray.tune.logger import pretty_print
 from rllib_utils.utils import get_env_world_heuristics
 
 
-def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
-    quality_diversity=False, oracle_policy=False, calc_world_heuristics=False, calc_agent_stats=False, 
-    fixed_worlds=False, render=False):
+def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
+                          calc_world_heuristics=False, calc_agent_stats=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
@@ -34,7 +34,8 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         workers = trainer.evaluation_workers
     else:
         workers = trainer.workers
-    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} if render else None
+    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
+        if cfg.render else None
     if not isinstance(list(worlds.values())[0], np.ndarray):
         worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
     # fitnesses = {k: [] for k in worlds}
@@ -69,7 +70,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
                 lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
 
         # If using oracle, manually load the world
-        if oracle_policy:
+        if cfg.oracle_policy:
             flood_model = trainer.get_policy('policy_0').model
             workers.foreach_worker(
                 lambda worker: worker.foreach_env(lambda env: env.reset()))
@@ -93,13 +94,21 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
                 stats = trainer.evaluate()
             else:
                 stats = trainer.train()
+                log_result = {k: v for k, v in stats.items() if k in cfg.log_keys}
+                log_result['info: learner:'] = stats['info']['learner']
+
+                # FIXME: sometimes timesteps_this_iter is 0. Maybe a ray version problem? Weird.
+                log_result['fps'] = stats['timesteps_this_iter'] / stats['time_this_iter_s']
+
+                print('-----------------------------------------')
+                print(pretty_print(log_result))
             # print(pretty_print(stats))
             rl_stats.append(stats)
 
             # Collect stats for generator
             new_world_stats = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
-                    lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=quality_diversity)))
+                    lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=cfg.quality_diversity)))
         # assert(len(rl_stats) == 1)  # TODO: bring back this assertion except when we're re-evaluating world archive after training
         last_rl_stats = rl_stats[-1]
         logbook_stats = {'iteration': net_itr}
@@ -125,7 +134,7 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
             for stat_tpl in stat_lst:
                 world_key = stat_tpl[0]
                 if world_key in new_fits:
-                    assert fixed_worlds or evaluate_only, ("Should not have redundant world evaluations inside this "
+                    assert cfg.fixed_worlds or evaluate_only, ("Should not have redundant world evaluations inside this "
                     "function unless training on fixed worlds or doing evaluation/enjoyment.")
                     # We'll create a list of stats from separate runs, though we're not doing anything with this for now
                     new_fits[world_key] = [new_fits[world_key]] + [stat_tpl[1:]]
@@ -135,8 +144,8 @@ def rllib_evaluate_worlds(trainer, worlds, start_time=None, net_itr=None, idx_co
         # Ensure we have not evaluated any world twice
         for k in new_fits:
             if k in world_stats:
-                assert fixed_worlds or evaluate_only
-        if fixed_worlds:
+                assert cfg.fixed_worlds or evaluate_only
+        if cfg.fixed_worlds:
             for k in list(new_fits.keys()):
                 if k in world_stats:
                     world_stats[k] = [world_stats[k]] + [new_fits.pop(k)]
