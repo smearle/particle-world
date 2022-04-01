@@ -47,10 +47,7 @@ def init_parser():
     parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
                         help="How many iterations to train the player. If -1, run until convergence.")
     parser.add_argument('-m', '--model', type=str, default=None)
-    parser.add_argument('-field_of_view', '--field_of_view', type=int, default=2, help='How far agents can see in each direction.')
-    parser.add_argument('-lc', '--load_config', type=int, default=None, 
-                        help="Load a dictionary of (automatically-generated) arguments. "
-                        "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
+    parser.add_argument('-fov', '--field_of_view', type=int, default=2, help='How far agents can see in each direction.')
     parser.add_argument('-tr', '--target_reward', type=int, default=0, 
                         help="Target reward the world should elicit from player if using the min_solvable objective "
                         "function.")
@@ -60,5 +57,8 @@ def init_parser():
                         "discrete space.")
 #   parser.add_argument('-to', '--translated_observations', action='store_true', help='Whether to use translated '
 #                       ' observations. This will always be the True when fully_observable is False.')
+    parser.add_argument('-lc', '--load_config', type=int, default=None, 
+                        help="Load a dictionary of (automatically-generated) arguments. "
+                        "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
 
     return parser

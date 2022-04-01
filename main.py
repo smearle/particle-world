@@ -162,8 +162,7 @@ if __name__ == '__main__':
         n_rllib_envs = args.n_rllib_workers * n_envs_per_worker if args.n_rllib_workers > 1 \
             else (1 if env_is_minerl else 12)
 
-    # args.n_rllib_envs = n_rllib_envs
-    args.n_rllib_envs = 1
+    args.n_rllib_envs = n_rllib_envs
     register_env('world_evolution_env', make_env)
 
     # Dummy env, to get various parameters defined inside the env, or for debugging.
