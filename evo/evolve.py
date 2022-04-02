@@ -5,7 +5,7 @@ import ray
 import deap
 from timeit import default_timer as timer
 
-from rllib_utils.eval_worlds import rllib_evaluate_worlds
+from rl.eval_worlds import rllib_evaluate_worlds
 from utils import update_individuals
 
 
@@ -15,10 +15,11 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
                 halloffame=None, verbose=False, show_warnings=True, start_time=None, iteration_callback=None):
     """Simple QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer object.
 
-    :param rllib_trainer: RLlib trainer object.
-    :param rllib_eval: #TODO
-    :param quality_diversity: If this is False, we are reducing this to a vanilla evolutionary strategy.
-    :param init_batch: Sequence of individuals used as initial batch.
+    Args:
+        rllib_trainer: RLlib trainer object.
+        rllib_eval: #TODO
+        param quality_diversity: If this is False, we are reducing this to a vanilla evolutionary strategy.
+        init_batch: Sequence of individuals used as initial batch.
     :param toolbox: A :class:`~deap.base.Toolbox` that contains the evolution operators.
     :param batch_size: The number of individuals in a batch.
     :param niter: The number of iterations.
@@ -114,12 +115,16 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
 
         ## Vary the pool of individuals
         # offspring = deap.algorithms.varAnd(batch, toolbox, cxpb, mutpb)
-        offspring = [toolbox.clone(ind) for ind in batch]
+        # offspring = [toolbox.clone(ind) for ind in batch]
+        offspring = [None for ind in batch]
         for i in range(len(offspring)):
             if random.random() < 0.05:
+                # Create a new random individual.
                 offspring[i] = toolbox.individual()
                 del offspring[i].fitness.values
             else:
+                # Create a mutated copy of an existing individual.
+                offspring[i] = toolbox.clone(batch[i])
                 offspring[i], = toolbox.mutate(offspring[i])
                 del offspring[i].fitness.values
 

@@ -1,16 +1,17 @@
 import json
 import os
-from pdb import set_trace as TT
 import pickle
+from pdb import set_trace as TT
 from pprint import PrettyPrinter
+# from ribs.visualize import grid_archive_heatmap
+from timeit import default_timer as timer
 
 import numpy as np
 import pygame
 import ray
 from matplotlib import pyplot as plt
 from pygame.constants import KEYDOWN
-# from ribs.visualize import grid_archive_heatmap
-from timeit import default_timer as timer
+import torch as th
 
 
 def nnb(ps):

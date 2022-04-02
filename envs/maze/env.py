@@ -430,8 +430,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         obs, rew, done, info = super().step(actions)
         # print(f"step {self.n_step} world {self.world_key}, done: {done}, max steps {self.max_steps}")
 
-#       if not np.all([agent_key not in self.dead for agent_key in actions]):
-#           TT()
+#       assert np.all([agent_key not in self.dead for agent_key in actions]), "Received an action for a dead agent."
 
         [obs.pop(k) for k in self.dead if k in obs]
         [rew.pop(k) for k in self.dead if k in rew]

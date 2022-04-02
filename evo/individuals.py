@@ -1,16 +1,28 @@
+import copy
 from pdb import set_trace as TT
 
 import numpy as np
-from qdpy.phenotype import Features, Fitness, Individual
+from qdpy.phenotype import Features, Fitness
+from qdpy.phenotype import Individual as QdpyIndividual
 
 from generators.representations import NCAGenerator
 
 
-# TODO:
-# class CPPNIndividual(creator.Individual, CPPN):
-#     def __init__(self):
-#         CPPN.__init__(self, width)
-#         creator.Individual.__init__(self)
+def clone(ind):
+    """Clone an individual for the purpose of mutation (or crossover?)."""
+    # Create a deep copy of the individual, so that, e.g., the world state is not shared between the two individuals.
+    new_ind = copy.deepcopy(ind)
+
+    # Clear the individual's heuristic information, so that it is recomputed.
+    new_ind.heuristics = {}
+
+    return new_ind
+
+
+class Individual(QdpyIndividual):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.heuristics = {}
 
 
 class DiscreteIndividual(Individual):
@@ -122,6 +134,13 @@ class TileFlipIndividual3D(DiscreteIndividual):
     def replace_surplus_unique_tiles(self, unique_tile_idxs, nonunique_tile_chans):
         self.discrete[unique_tile_idxs[:, 0], unique_tile_idxs[:, 1], unique_tile_idxs[:, 2]] = \
             np.random.choice(nonunique_tile_chans, len(unique_tile_idxs))
+
+
+# TODO:
+# class CPPNIndividual(creator.Individual, CPPN):
+#     def __init__(self):
+#         CPPN.__init__(self, width)
+#         creator.Individual.__init__(self)
 
 
 class NCAIndividual(DiscreteIndividual):

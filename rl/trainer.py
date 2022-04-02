@@ -24,8 +24,8 @@ from envs import eval_mazes
 from envs.minecraft.touchstone import TouchStone
 from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
-from rllib_utils.callbacks import RegretCallbacks
-from rllib_utils.eval_worlds import rllib_evaluate_worlds
+from rl.callbacks import RegretCallbacks
+from rl.eval_worlds import rllib_evaluate_worlds
 from utils import get_solution
 
 
@@ -65,11 +65,11 @@ def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=Non
         worlds = {i: l for i, l in enumerate(curr_worlds)}
 
         # Get world heuristics on first iteration only, since they won't change after this inside training loop
-        calc_world_heuristics = (i == 0)
+        # calc_world_heuristics = (i == 0)
 
         rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
             net_itr=net_itr, trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, is_training_player=True,
-            start_time=start_time, calc_world_heuristics=calc_world_heuristics)
+            start_time=start_time)
         recent_rewards[:-1] = recent_rewards[1:]
         recent_rewards[-1] = rl_stats['episode_reward_mean']
 
@@ -307,8 +307,6 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         # FIXME: Sometimes hash-to-idx dict is not set by the above call?
         assert ray.get(idx_counter.scratch.remote())
         # Assign envs to worlds
-        eval_workers.foreach_worker(
-            lambda worker: worker.foreach_env(lambda env: print(type(env))))
         eval_workers.foreach_worker(
             lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
 

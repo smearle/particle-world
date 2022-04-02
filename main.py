@@ -18,7 +18,6 @@ import ray
 from deap import base
 from deap import creator
 from deap import tools
-from minerl.herobraine.env_specs.obtain_specs import ObtainDiamond
 from qdpy import containers
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 # from qdpy.base import ParallelismManager
@@ -31,14 +30,14 @@ from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, TouchSton
     ghost_action_test_maze
 from envs.wrappers import make_env
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
-from qdpy_utils.utils import qdpy_save_archive
-from qdpy_utils.evolve import qdRLlibEval
-from qdpy_utils.callbacks import iteration_callback
-from qdpy_utils.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D
+from evo.utils import qdpy_save_archive
+from evo.evolve import qdRLlibEval
+from evo.callbacks import iteration_callback
+from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
 from ray.tune.registry import register_env
-from rllib_utils.trainer import init_particle_trainer, train_players, toggle_exploration
-from rllib_utils.eval_worlds import rllib_evaluate_worlds
-from rllib_utils.utils import IdxCounter
+from rl.trainer import init_particle_trainer, train_players, toggle_exploration
+from rl.eval_worlds import rllib_evaluate_worlds
+from rl.utils import IdxCounter
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
 from visualize import visualize_train_stats
@@ -136,6 +135,7 @@ if __name__ == '__main__':
 
     elif args.environment_class == 'TouchStone':
         env_is_minerl = True
+        from minerl.herobraine.env_specs.obtain_specs import ObtainDiamond
         n_envs_per_worker = 1
 
         if args.generator_class == 'TileFlipIndividual':
@@ -259,7 +259,7 @@ if __name__ == '__main__':
 
     if args.load:
         if not args.fixed_worlds:
-            # fname = f'latest-0' if args.loadIteration is not None else 'latest-0'
+            # Load the world archive from the checkpoint if performing world evolution.
             fname = 'latest-0.p'
             loadfile_name = os.path.join(save_dir, fname)
 
@@ -269,10 +269,6 @@ if __name__ == '__main__':
             with open(os.path.join(loadfile_name), "rb") as f:
                 data = pickle.load(f)
 
-            # with open(f'runs/{args.experimentName}/learn.pickle', 'rb') as f:
-            #     supp_data = pickle.load(f)
-            #     policies = supp_data['policies']
-            # env.set_policies(policies)
             grid = data['container']
             gen_itr = data['gen_itr']
             play_itr = data['play_itr']
@@ -351,7 +347,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if args.fixed_worlds:
                 trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(trainer=trainer, worlds=training_worlds, calc_world_heuristics=False, 
+                rllib_evaluate_worlds(trainer=trainer, worlds=training_worlds, 
                                       fixed_worlds=args.fixed_worlds, render=args.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
@@ -365,7 +361,7 @@ if __name__ == '__main__':
                 worlds = eval_mazes
             for i, elite in enumerate(worlds):
                 ret = rllib_evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
-                                            evaluate_only=True, calc_world_heuristics=False, render=args.render)
+                                            evaluate_only=True, render=args.render)
             sys.exit()
 
         # Evaluate
@@ -456,6 +452,7 @@ if __name__ == '__main__':
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
     # toolbox.register("evaluate", qdpy_eval, env, generator)
+    toolbox.register("clone", clone)
     # toolbox.register("mutate", tools.mutPolynomialBounded, low=ind_domain[0], up=ind_domain[1], eta=eta,
                     #  indpb=mutation_pb)
     toolbox.register("mutate", lambda individual: individual.mutate())

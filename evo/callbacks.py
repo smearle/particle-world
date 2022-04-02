@@ -6,10 +6,9 @@ from timeit import default_timer as timer
 
 import ray
 
-from qdpy_utils.utils import qdpy_save_archive
-from rllib_utils.eval_worlds import rllib_evaluate_worlds
-from rllib_utils.trainer import train_players
-from rllib_utils.utils import get_archive_world_complexity
+from evo.utils import get_archive_world_heuristics, qdpy_save_archive
+from rl.eval_worlds import rllib_evaluate_worlds
+from rl.trainer import train_players
 from utils import update_individuals
 
 
@@ -44,7 +43,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
             #   i.e., do more rounds of evolution until some worlds are feasible.
             training_worlds *= math.ceil(cfg.n_rllib_envs / len(training_worlds))
 
-        mean_path_length = get_archive_world_complexity(archive, trainer)
+        mean_path_length = get_archive_world_heuristics(archive, trainer)
         logbook_stats = {}
         stat_keys = ['mean', 'min', 'max']  # , 'std]
         logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
@@ -70,8 +69,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
         if cfg.rllib_eval:
             rl_stats, world_stats, logbook_stats_from_eval = rllib_evaluate_worlds(
                 net_itr=net_itr, trainer=trainer, worlds={i: ind for i, ind in enumerate(invalid_inds)},
-                idx_counter=idx_counter, start_time=start_time,
-                calc_world_heuristics=False, cfg=cfg)
+                idx_counter=idx_counter, start_time=start_time, cfg=cfg)
             logbook_stats.update(logbook_stats_from_eval)
 
         else:

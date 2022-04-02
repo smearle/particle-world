@@ -6,11 +6,11 @@ from timeit import default_timer as timer
 import torch as th
 
 from ray.tune.logger import pretty_print
-from rllib_utils.utils import get_archive_world_complexity
+from evo.utils import get_archive_world_heuristics
 
 
 def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
-                          calc_world_heuristics=False, is_training_player=False):
+                          is_training_player=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions.
