@@ -132,30 +132,64 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
         # print(logbook.stream)
 
         # list with entries (world_key, (fit_vals, bc_vals), policy_rewards)
-        new_world_stats = [fit for worker_fits in new_world_stats for fit in worker_fits]
+        new_world_stats = [stats for worker_world_stats in new_world_stats for stats in worker_world_stats]
 
-        new_fits = {}
+        # Extract QD stats (objectives and features) from the world stats.
+        new_qd_stats = {}
         for stat_lst in new_world_stats:
-            for stat_tpl in stat_lst:
-                world_key = stat_tpl[0]
-                if world_key in new_fits:
-                    assert cfg.fixed_worlds or evaluate_only, ("Should not have redundant world evaluations inside this "
-                    "function unless training on fixed worlds or doing evaluation/enjoyment.")
-                    # We'll create a list of stats from separate runs, though we're not doing anything with this for now
-                    new_fits[world_key] = [new_fits[world_key]] + [stat_tpl[1:]]
+            for stats_dict in stat_lst:
+                world_key = stats_dict["world_key"]
+                if world_key in new_qd_stats:
+                    warn_msg = ("Should not have redundant world evaluations inside this function unless training on "\
+                                "fixed worlds or doing evaluation/enjoyment.")
+                    # assert cfg.fixed_worlds or evaluate_only, warn_msg
+                    if not cfg.fixed_worlds and not evaluate_only:
+                        print(warn_msg)
+
+                    # We'll create a list of stats from separate runs.
+                    new_qd_stats[world_key] = new_qd_stats[world_key] + [stats_dict["qd_stats"]]
+
                 else:
-                    new_fits[world_key] = stat_tpl[1:]
+                    # Note that this will be a tuple.
+                    new_qd_stats[world_key] = [stats_dict["qd_stats"]]
+        
+        # Take the average of each objective and feature value across all runs.
+        aggregate_new_qd_stats = {}
+        for world_key, world_qd_stats in new_qd_stats.items():
+            n_trials = len(world_qd_stats)
+            if n_trials > 1:
+                aggregate_new_qd_stats[world_key] = ([], [])
+
+                # Get the mean in each objective value across trials.
+                n_objs = len(world_qd_stats[0][0])  # Length of objective tuple from first trial.
+                for obj_i in range(n_objs):
+                    aggregate_new_qd_stats[world_key][0].append(np.mean([world_qd_stats[trial_i][0][obj_i] \
+                        for trial_i in range(n_trials)]))
+
+                # Get the mean in each feature value across trials.
+                n_feats = len(world_qd_stats[0][1])  # Length of feature list from first trial.
+                for feat_i in range(n_feats):
+                    aggregate_new_qd_stats[world_key][1].append(np.mean([world_qd_stats[trial_i][1][feat_i] \
+                        for trial_i in range(n_trials)]))
+
+            else:
+                aggregate_new_qd_stats[world_key] = new_qd_stats[world_key][0]
+
+        # print("Aggregate new qd stats:", aggregate_new_qd_stats)
 
         # Ensure we have not evaluated any world twice
-        for k in new_fits:
+        for k in aggregate_new_qd_stats:
             if k in world_stats:
                 assert cfg.fixed_worlds or evaluate_only
         if cfg.fixed_worlds:
-            for k in list(new_fits.keys()):
+            for k in list(new_qd_stats.keys()):
                 if k in world_stats:
-                    world_stats[k] = [world_stats[k]] + [new_fits.pop(k)]
+                    world_stats[k] = [world_stats[k]] + [new_qd_stats.pop(k)]
 
-        world_stats.update(new_fits)
+        else:
+            world_stats.update(aggregate_new_qd_stats)
+        
+        # print("World stats:", world_stats)
 
         # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).

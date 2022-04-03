@@ -19,6 +19,7 @@ from utils import discrete_to_onehot
 player_colors = [
     (0, 0, 255),
     (255, 0, 0),
+    (119, 15, 184),
     (0, 255, 255),
     (255, 0, 255),
     # (0, 255, 0),  # green
@@ -63,6 +64,11 @@ class ParticleSwarmEnv(object):
         self.patch_widths = [int(field_of_view * 2 + 1) for field_of_view in self.fields_of_view]
 
         self._gen_swarms(swarm_cls, n_policies, n_pop, self.fields_of_view)
+
+        # NOTE: We assume all swarms have the same reward function/bounds
+        self.max_reward = self.swarms[0].max_reward
+        self.min_reward = self.swarms[0].min_reward
+
         self.particle_draw_size = 0.3
         self.n_steps = None
         self.screen = None
@@ -224,10 +230,6 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
 
         # This is kind of arbitrary
         return self._width **2 // 2
-
-
-def regret_fitness(regret_loss):
-    return regret_loss
 
 
 class ParticleGymRLlib(ParticleGym):

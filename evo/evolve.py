@@ -66,7 +66,6 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     else:
         world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
 
-    world_stats = {k: ws[0] for k, ws in world_stats.items()}
     update_individuals(invalid_ind, world_stats)
 
     if len(invalid_ind) == 0:
@@ -87,7 +86,6 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         'iteration': net_itr, 'containerSize': container.size_str(), 'evals': len(invalid_ind), 'nbUpdated': nb_updated,
         'elapsed': timer() - start_time, **record,
     })
-    # logbook.record(iteration=net_itr, containerSize=container.size_str(), evals=len(invalid_ind), nbUpdated=nb_updated, elapsed=timer()-start_time, **record) #, meanAgentReward=rllib_stats["episode_reward_mean"], maxAgentReward=rllib_stats["episode_reward_max"], minAgentReward=rllib_stats["episode_reward_min"])
     logbook.record(**logbook_stats)
     if verbose:
         print(logbook.stream)
@@ -118,7 +116,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         # offspring = [toolbox.clone(ind) for ind in batch]
         offspring = [None for ind in batch]
         for i in range(len(offspring)):
-            if random.random() < 0.05:
+            if random.random() < 0.00:
                 # Create a new random individual.
                 offspring[i] = toolbox.individual()
                 del offspring[i].fitness.values
@@ -139,7 +137,6 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         else:
             world_stats = toolbox.map(toolbox.evaluate, invalid_ind)
 
-        world_stats = {k: ws[0] for k, ws in world_stats.items()}
         update_individuals(invalid_ind, world_stats)
 
         # Replace the current population by the offspring

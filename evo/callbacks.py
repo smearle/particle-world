@@ -39,8 +39,10 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
             # Eliminate impossible worlds
             training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
 
-            # TODO: need to add a failsafe in case all worlds are impossible, or this may result in a division by zero.
-            #   i.e., do more rounds of evolution until some worlds are feasible.
+            # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
+            if len(training_worlds) == 0:
+                return net_itr
+
             training_worlds *= math.ceil(cfg.n_rllib_envs / len(training_worlds))
 
         mean_path_length = get_archive_world_heuristics(archive, trainer)
@@ -56,7 +58,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
 
         # Pop individuals from the container for re-evaluation.
         # Randomly select individuals to pop, without replacement
-        invalid_inds = random.sample(archive, k=cfg.n_rllib_envs)
+        invalid_inds = random.sample(archive, k=min(cfg.n_rllib_envs, len(archive)))
         # invalid_ind = [ind for ind in container]
 
         # TODO: we have an n-time lookup in discard. We should be getting the indices of the individuals directly,
@@ -75,8 +77,8 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
         else:
             world_stats = toolbox.map(toolbox.evaluate, invalid_inds)
 
-        # Here we are assuming that we've only evaluated each world once (?)
-        world_stats = {k: ws[0] for k, ws in world_stats.items()}
+        # NOTE: Here we are assuming that we've only evaluated each world once. If we have duplicate stats for a given world, we will overwrite all but one instance of statistics 
+        #  resulting from playthrough in this world.
 
         # Set fitness & feature attributes of the individuals we have just evaluated.
         update_individuals(invalid_inds, world_stats)

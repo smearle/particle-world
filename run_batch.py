@@ -66,12 +66,13 @@ def main():
         batch_config = yaml.safe_load(f)
     batch_config = namedtuple('batch_config', batch_config.keys())(**batch_config)
 
-    exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.gen_play_phase_lens, 
-                            batch_config.npol_qd_objectives, batch_config.fo_models))
+    exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.ngen_nplay, 
+                            batch_config.npol_qd_objectives, batch_config.fullobs_fov_models))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
-        exp_name, env_cls, (gen_phase_len, play_phase_len), (n_policies, quality_diversity, objective), (fully_observable, model) = exp_set
+        exp_name, env_cls, (gen_phase_len, play_phase_len), (n_policies, quality_diversity, objective), \
+            (fully_observable, field_of_view, model) = exp_set
 
         # Just for reference in terms of what's currently explicitly supported/expected:
 #       if objective in ['min_solvable', 'regret', 'max_reward']:
@@ -103,7 +104,7 @@ def main():
             'evaluate': args.evaluate,
             'render': render,
             'num_proc': num_cpus,
-            'field_of_view': 2,
+            'field_of_view': field_of_view,
         }
         exp_configs.append(exp_config)
         with open(os.path.join('configs', 'auto', f'{exp_i}.json'), 'w') as f:

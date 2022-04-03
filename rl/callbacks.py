@@ -139,7 +139,7 @@ class RegretCallbacks(DefaultCallbacks):
             w_advantages = advantages[idxs]
             pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
 
-        # TODO: should be able to pass this info back more natureally somehow, as below
+        # TODO: should be able to pass this info back more naturally somehow, as below
         # pol_batch['pos_val_losses'] = pos_val_losses
 
         # For now, just giving it back to environments to be collected later

@@ -1,12 +1,22 @@
 {
+    # The names of the experiments. Add a range of integers to allow for multiple trials of experiments with the same 
+    # hyperparameters.
     "exp_names": [
         "0"
     ],
+
+    # The name of the class corresponding to the environment we wich to generate/play.
     "env_classes": [
-        "ParticleMazeEnv"
+        "ParticleMazeEnv",  # A maze navigation task with 1 spawn and 1 goal.
+        # "TouchStone",  # A WIP Minecraft navigation task.
     ],
-    "gen_play_phase_lens": [
+
+    # List of [n_gen_itr, n_play_itr] hyperparameters. These indicate the number of steps of generator-evolution and 
+    # player-training to take, respectively, before switching to a phase of the opposite type. If either is -1, then
+    # we iterate until generator/player convergence (or "staleness") is reached. 0 is an invalid value.
+    "ngen_nplay": [
         [1, 1],
+        # [-1, 1],
     ],
 
     # List of [n_policies: int, quality_diversity: bool, objective: str] hyperparameters. If quality_diversity is True, 
@@ -15,13 +25,16 @@
     "npol_qd_objectives": [
         [1, false, "min_solvable"],
         # [1, false, "regret"],
-        # [2, false, "contrastive"],
-        # [3, true, null],
+        [2, false, "contrastive"],
+        [3, true, null],
     ],
     
-    # List of pairs of [fully_observable: bool, model_name: str] hyperparameters
-    "fo_models": [
-        [false, "paired"],
-        # [true, "paired"],
+    # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 
+    # receives full observations, then field_of_view is ignored (i.e. it is set to the width of the level, if we are 
+    # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
+    # number of cells the agent can see in each direction (excluding its own position).
+    "fullobs_fov_models": [
+        [false, 2, "paired"],
+        # [true, -1, "paired"],
     ]
 }

@@ -211,7 +211,11 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
     if cfg.env_is_minerl:
         evaluation_interval = 0
     else:
-        evaluation_interval = 10 if not cfg.enjoy else 10
+        # Evaluate policies once after every player-training phase. If we're evolving/training until convergence, just
+        # evaluate every 10 iterations. If we're "enjoying", just need to set this to any number > 0 to ensure we 
+        # initialize the evaluation workers.
+        evaluation_interval = ((cfg.gen_phase_len + 1 + cfg.play_phase_len) \
+            if -1 not in [cfg.gen_phase_len, cfg.gen_phase_len] else 10) if not cfg.enjoy else 10
 
     if cfg.enjoy:
         evaluation_num_episodes = num_eval_envs * 2

@@ -24,18 +24,18 @@ def get_archive_world_heuristics(archive, trainer):
 
     # Compute path-length of each individual where it has not been computed previously, and store this information with 
     # the individual.
-    print(f"{len([ind for ind in archive if 'path_length' not in ind.heuristics])} new individuals.")
-    [ind.heuristics.update({"path_length": get_path_length(ind)}) 
-        for ind in archive if "path_length" not in ind.heuristics]
+    # print(f"{len([ind for ind in archive if 'path_length' not in ind.stats['heuristics']])} new individuals.")
+    [ind.stats["heuristics"].update({"path_length": get_path_length(ind)}) 
+        for ind in archive if "path_length" not in ind.stats['heuristics']]
 #   path_lengths_old = [ind.path_length if hasattr(ind, "path_length") else len(get_solution(ind.discrete)) \
 #       for ind in archive]
 
-    path_lengths = [ind.heuristics["path_length"] for ind in archive]
+    path_lengths = [ind.stats["heuristics"]["path_length"] for ind in archive]
     mean_path_length = np.mean(path_lengths)
     min_path_length = np.min(path_lengths)
     max_path_length = np.max(path_lengths)
     # std_path_length = np.std(path_lengths)
-    print("Computed path-lengths of {} individuals in {:.2e} seconds.".format(len(archive), timer() - start_time))
+    # print("Computed path-lengths of {} individuals in {:.2e} seconds.".format(len(archive), timer() - start_time))
 
     return {
         'mean_path_length': mean_path_length,

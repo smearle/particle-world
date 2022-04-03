@@ -9,7 +9,7 @@ from ray.rllib import MultiAgentEnv
 
 from minerl.herobraine.env_spec import EnvSpec
 from envs.minecraft.touchstone import TouchStone
-from envs.maze.swarm import min_solvable_fitness, contrastive_fitness  # , regret_fitness
+from envs.maze.swarm import min_solvable_fitness, contrastive_fitness, regret_fitness
 from utils import discrete_to_onehot
 
 
@@ -129,28 +129,31 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world = None
         self.world_gen_sequence = None
         self.next_world = None
-        args = env_cfg.get('args')
+        cfg = env_cfg.get('cfg')
 
         # Target reward world should elicit if using min_solvable objective
-        trg_rew = args.target_reward
+        trg_rew = cfg.target_reward
 
-        self.obj_fn_str = args.objective_function
+        self.obj_fn_str = cfg.objective_function
         obj_func = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
         if obj_func == min_solvable_fitness:
 
             # TODO: get this directly from the environment.
             # The maximum reward (specific to maze environment)
-            max_rew = 1
+            max_rew = env.max_reward
 
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
-
 
     def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
         """Assign a ``next_world`` to the environment, which will be loaded after the next step.
         
         We set flag ``need_world_reset`` to True, so that the next step will return done=True, and the environment will
         be reset, at which point, ``next_world`` will be loaded."""
+        # TODO: also accept mutable dictionaries corresponding to stats resulting from player simulation for each world,
+        #  then update these. This could make things more clear (use keys for different player rewards), and remove the
+        #  need for a call to get_world_stats(). We should also offload some of the objective/measure calculation to the
+        #  evolution/QD code.
 
         # Figure out which world to evaluate.
         # self.world_idx = 0
@@ -181,13 +184,11 @@ class WorldEvolutionWrapper(gym.Wrapper):
         """Step a single-agent environment."""
         obs, rews, done, info = super().step(actions)
         self.log_rewards(rews)
+        info.update({'world_key': self.world_key})
         self.n_step += 1
 
         # We'll take an additional step in the old world, then reset. Not the best but it works.
         done = done or self.need_world_reset
-
-        # Not using this?
-        # info.update({agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs})
 
         return obs, rews, done, info
 
@@ -239,7 +240,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # print(f'get world stats at step {self.n_step} with max step {self.max_episode_steps}')
             assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
 
-        qd_stats = []
+        world_stats = []
 
         if not evaluate:
             assert len(self.stats) == 1
@@ -261,7 +262,9 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # stats are of the form (world_key, qdpy_stats, policy_rewards)
             if quality_diversity:
                 # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
-                world_stats = {world_key: ((-np.mean(swarm_rewards[0]),), [np.mean(sr) for sr in swarm_rewards[1:]])}
+                obj = -np.mean(swarm_rewards[0])
+                measures = [np.mean(sr) for sr in swarm_rewards[1:]]
+
             else:
                 # Objective and placeholder measures
                 if self.obj_fn_str == 'regret':
@@ -272,17 +275,23 @@ class WorldEvolutionWrapper(gym.Wrapper):
                 # Most objectives are functions of agent reward.
                 else:
                     obj = self.objective_function(swarm_rewards)
-                world_stats = (world_key, ((obj,), [0, 0]))
 
-            # Add per-policy stats
-            world_stats = (*world_stats, [np.mean(sr) for sr in swarm_rewards])
+                # Placeholder measures
+                measures = [0, 0]
 
-            qd_stats.append(world_stats)
+            # Format things for qdpy consumption.
+            qd_stats_i = ((obj,), measures)
+
+            # Add some additional per-policy stats (just mean reward for now).
+            world_stats_i = {"world_key": world_key, "qd_stats": qd_stats_i}  #, [np.mean(sr) for sr in swarm_rewards])
+            [world_stats_i.update({f'policy_{i} reward': np.mean(sr)}) for i, sr in enumerate(swarm_rewards)]
+
+            world_stats.append(world_stats_i)
 
         self.stats = []
         self.regret_losses = []
 
-        return qd_stats
+        return world_stats
 
     def validate_stats(self):
         if len(self.stats) == 0:
@@ -313,6 +322,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         self.validate_stats()
         self.log_rewards(rews)
         dones['__all__'] = dones['__all__'] or self.need_world_reset
+        infos.update({agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs})
         self.n_step += 1
 
         return obs, rews, dones, infos

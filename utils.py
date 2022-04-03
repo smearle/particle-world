@@ -227,10 +227,8 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
 
 def update_individuals(individuals, qd_stats):
     qd_stats = [qd_stats[k] for k in range(len(qd_stats))]
-    # print(f"updating individuals with new qd stats: {qd_stats}")
+    # print(f"Updating individuals with new qd stats: {qd_stats}.")
 
-    # FIXME: this breaks QD, because we get each policy's reward as elements of a list. Instead we need 
-    # [(reward of policy 1,), [rew 2, rew3]), ...]
     for ind, s in zip(individuals, qd_stats):
         ind.fitness.values = s[0]
         ind.features = s[1]

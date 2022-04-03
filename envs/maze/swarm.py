@@ -205,6 +205,13 @@ class NeuralSwarm(Swarm):
 
 
 class MazeSwarm(NeuralSwarm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_reward = 1.0
+
+        # TODO:  use max_steps to make this exact.
+        self.min_reward = 0.0 
+
     def get_rewards(self, scape, goal_idx, n_step, max_steps):
         """Calculates rewards for each agent in the swarm."""
         assert goal_idx is not None
@@ -377,6 +384,10 @@ class MemorySwarm(Swarm):
         self.vs += toroidal_distance(self.g_best, self.ps, self.world_width) * dsr * self.r_xploit
         self.vs /= 2
         # nnbs = nnb(self.ps)
+
+
+def regret_fitness(regret_loss):
+    return regret_loss
 
 
 def eval_fit(ps, scape):

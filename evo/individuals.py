@@ -13,8 +13,8 @@ def clone(ind):
     # Create a deep copy of the individual, so that, e.g., the world state is not shared between the two individuals.
     new_ind = copy.deepcopy(ind)
 
-    # Clear the individual's heuristic information, so that it is recomputed.
-    new_ind.heuristics = {}
+    # Clear the individual's statistics, so that they are recomputed.
+    new_ind.reset_stats()
 
     return new_ind
 
@@ -22,7 +22,15 @@ def clone(ind):
 class Individual(QdpyIndividual):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.heuristics = {}
+        self.reset_stats()
+
+    def reset_stats(self):
+        self.stats = {
+            "heuristics": {},
+
+            # TODO: Store player stats here.
+            "player_stats": {},
+        }
 
 
 class DiscreteIndividual(Individual):
