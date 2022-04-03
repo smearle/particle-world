@@ -249,7 +249,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
         "evaluation_interval": evaluation_interval,
 
-        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.num_rllib_remote_workers,
+        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.n_rllib_workers,
 
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 

@@ -5,16 +5,16 @@ from pdb import set_trace as TT
 # from ribs.visualize import grid_archive_heatmap
 
 
-def visualize_pyribs(archive):
-    plt.figure(figsize=(8, 6))
-    grid_archive_heatmap(archive)
-    plt.gca().invert_yaxis()
-    # plt.xlabel("Symmetry")
-    # plt.ylabel("Emptiness")
-    plt.xlabel("pop1 mean x")
-    plt.ylabel("pop1 mean y")
-    plt.savefig("fitness.png")
-    plt.close()
+# def visualize_pyribs(archive):
+#     plt.figure(figsize=(8, 6))
+#     grid_archive_heatmap(archive)
+#     plt.gca().invert_yaxis()
+#     # plt.xlabel("Symmetry")
+#     # plt.ylabel("Emptiness")
+#     plt.xlabel("pop1 mean x")
+#     plt.ylabel("pop1 mean y")
+#     plt.savefig("fitness.png")
+#     plt.close()
 
 def visualize_train_stats(save_dir, logbook, quality_diversity=True):
     gen = logbook.select("iteration")
@@ -91,7 +91,7 @@ def visualize_train_stats(save_dir, logbook, quality_diversity=True):
     min_eval_rews = remove_nones(logbook.select("minEvalRew"))
     max_eval_rews = remove_nones(logbook.select("maxEvalRew"))
     # line1 = ax2.plot(gen, min_eval_rews, "r--")
-    line2 = ax1.plot(gen, mean_eval_rews, "r-", label="Mean Eval Reward")
+    line2 = ax1.plot(gen, smooth(mean_eval_rews, 100), "r-", label="Mean Eval Reward")
     # line3 = ax2.plot(gen, max_eval_rews, "r--")
     ax1.set_ylabel("Agent Evaluation Reward")
     # ax1.yaxis.set_ticks(np.arange(start, end, (end - start) / 10))
@@ -100,6 +100,13 @@ def visualize_train_stats(save_dir, logbook, quality_diversity=True):
     ax1.legend(lns, labs, loc="best")
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'agent_eval_reward.png'))
+
+
+def smooth(y, box_pts):
+    box = np.ones(box_pts)/box_pts
+    y_smooth = np.convolve(y, box, mode='same')
+    return y_smooth
+
 
 def remove_nones(l):
     iv = 0

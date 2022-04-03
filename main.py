@@ -364,7 +364,7 @@ if __name__ == '__main__':
                 worlds = eval_mazes
             for i, elite in enumerate(worlds):
                 ret = rllib_evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
-                                            evaluate_only=True, render=cfg.render)
+                                            evaluate_only=True, cfg=cfg)
             sys.exit()
 
         # Evaluate

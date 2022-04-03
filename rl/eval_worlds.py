@@ -94,14 +94,15 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
         else:
             # Train/evaluate
             if evaluate_only:
+
+                # FIXME: On enjoy, this causes environments to reset too early.
                 stats = trainer.evaluate()
+
             else:
                 stats = trainer.train()
 #               if is_training_player:
 #                   log_result = {k: v for k, v in stats.items() if k in cfg.log_keys}
 #                   log_result['info: learner:'] = stats['info']['learner']
-
-#                   # FIXME: sometimes timesteps_this_iter is 0. Maybe a ray version problem? Weird.
 #                   log_result['fps'] = stats['timesteps_this_iter'] / stats['time_this_iter_s']
 
 #                   print('-----------------------------------------')
