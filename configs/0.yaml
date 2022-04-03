@@ -25,8 +25,8 @@
     "npol_qd_objectives": [
         [1, false, "min_solvable"],
         # [1, false, "regret"],
-        [2, false, "contrastive"],
-        [3, true, null],
+        # [2, false, "contrastive"],
+        # [3, true, null],
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 

@@ -71,6 +71,7 @@ if __name__ == '__main__':
     cfg.qdpy_save_interval = 100
     cfg.archive_size = 1024
     cfg.translated_observations = True
+    cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     # Whether to use rllib trainer to perform evaluations of evolved worlds.
     cfg.rllib_eval = True
@@ -166,20 +167,20 @@ if __name__ == '__main__':
     cfg.n_rllib_envs = n_rllib_envs
     register_env('world_evolution_env', make_env)
 
+    experiment_name = get_experiment_name(cfg)
+    save_dir = os.path.join(cfg.outputDir, experiment_name)
+    cfg.save_dir = save_dir
+    cfg.env_is_minerl = env_is_minerl
+
     # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
 
     n_sim_steps = env.max_episode_steps
     unique_chans = env.unique_chans
-    experiment_name = get_experiment_name(cfg)
-    load = cfg.load
+
     total_play_itrs = 50000
     multi_proc = cfg.parallelismType != 'None'
     rllib_save_interval = 10
-    save_dir = os.path.join(cfg.outputDir, experiment_name)
-    cfg.save_dir = save_dir
-    cfg.env_is_minerl = env_is_minerl
-    cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
 

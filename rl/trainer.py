@@ -21,7 +21,6 @@ from ray.tune.logger import Logger
 from timeit import default_timer as timer
 
 from envs import eval_mazes
-from envs.minecraft.touchstone import TouchStone
 from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import RegretCallbacks
@@ -154,6 +153,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         multiagent_config = {}
 
     if cfg.env_is_minerl:
+        from envs.minecraft.touchstone import TouchStone
         ModelCatalog.register_custom_model('minerl', CustomConvRNNModel)
         model_config.update({'custom_model': 'minerl'})
     elif cfg.fully_observable and cfg.model == 'strided_feedforward':

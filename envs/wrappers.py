@@ -7,20 +7,23 @@ import numpy as np
 import ray
 from ray.rllib import MultiAgentEnv
 
-from minerl.herobraine.env_spec import EnvSpec
-from envs.minecraft.touchstone import TouchStone
+# from minerl.herobraine.env_spec import EnvSpec
+# from envs.minecraft.touchstone import TouchStone
 from envs.maze.swarm import min_solvable_fitness, contrastive_fitness, regret_fitness
 from utils import discrete_to_onehot
 
 
 def make_env(env_config):
+    # FIXME: shouldn't be popping any arguments anymore, so can probably remove this line.
     # Copying config here because we pop certain settings in env subclasses before passing to parent classes
     env_config = copy.copy(env_config)
 
+    cfg = env_config.get('cfg')
     environment_class = env_config.pop('environment_class')
 
-    if issubclass(environment_class, EnvSpec):
-        env = gym.make("TouchStone-v0")
+    if cfg.env_is_minerl:
+    # if issubclass(environment_class, EnvSpec):
+        env = gym.make(environment_class)
         env =  MineRLWrapper(env)
 
         # DEBUG with built-in minerl environment
