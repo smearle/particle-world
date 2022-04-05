@@ -288,7 +288,6 @@ class ParticleGymRLlib(ParticleGym):
         self.world = self.next_world
         # self.n_pop = self.next_n_pop
         # self.world = self.next_world
-        self.next_world = None
         # self.need_world_reset = False
         # print('reset w/ worlds', self.worlds.keys())
         # world_idx = list(self.worlds.keys())[self.world_idx]

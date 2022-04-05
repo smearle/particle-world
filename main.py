@@ -360,8 +360,6 @@ if __name__ == '__main__':
             # We'll look at each world independently in our single env
             elites = sorted(grid, key=lambda ind: ind.fitness, reverse=True)
             worlds = [i for i in elites]
-            if cfg.evaluate:
-                worlds = eval_mazes
             for i, elite in enumerate(worlds):
                 ret = rllib_evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
                                             evaluate_only=True, cfg=cfg)

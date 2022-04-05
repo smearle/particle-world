@@ -46,76 +46,6 @@ def gen_init_world(width, depth, height, block_types):
     return np.ones((width, depth, height), dtype=np.int32)
 
 
-class MineRLWrapper(gym.Wrapper):
-    """An environment wrapper specific to minerl."""
-    def __init__(self, env):
-        super(MineRLWrapper, self).__init__(env)
-        self.env = env
-        self.width, self.height, self.depth = self.task.width, self.task.height, self.task.depth
-        self.n_chan = len(self.task.block_types)
-        self.unique_chans = self.task.unique_chans
-        self.max_episode_steps = self.task.max_episode_steps
-        self.next_world = None
-        self.n_pop = 1
-        self.n_policies = 1
-        self.n_step = 0
-
-        # TODO: minecraft-specific eval maps
-        self.evaluate = False
-
-        # FIXME: kind of a hack. Should support Dict observation space.
-        self.observation_space = self.observation_space.spaces['pov']
-        # self.unwrapped.observation_space = self.observation_space
-
-    def process_observation(self, obs):
-        # FIXME: kind of a hack. Should support Dict observation space.
-        return obs['pov']
-
-    def reset(self):
-        self.world = self.next_world
-        self.next_world = None
-        if self.world is not None:
-            self.task.world_arr = self.world
-        obs = super(MineRLWrapper, self).reset()
-        obs = self.process_observation(obs)
-
-        return obs
-
-    def step(self, action):
-        obs, rew, done, info = super().step(action)
-        obs = self.process_observation(obs)
-        self.n_step += 1
-
-        return obs, rew, done, info
-
-#   def set_world(self, world):
-#       """
-#       Set the world (from some external process, e.g. world-generator optimization), and set the env to be reset at
-#       the next step.
-#       """
-#       # This will be set as the current world at the next reset
-#       self.next_world = world.reshape(self.width, self.width, self.width)
-#       # self.worlds = {idx: worlds[idx]}
-#       # print('set worlds ', worlds.keys())
-
-    def set_world(self, world):
-        """
-        Convert an encoding produced by the generator into a world map. The encoding has channels (empty, wall, start/goal)
-        :param world: Encoding, optimized directly or produced by a world-generator.
-        """
-        w = np.zeros((self.width, self.height, self.depth), dtype=np.int)
-
-        # TODO: fill this with walls/bedrock or some such, and ensure the agent spawns in the corner
-        w.fill(self.task.empty_chan)
-        w[1:-1, 1:-1, 1:-1] = world
-#       self.goal_idx = np.argwhere(w == self.task.goal_chan)
-#       assert len(self.goal_idx) == 1
-#       self.goal_idx = self.goal_idx[0]
-#       # self.world_flat = w
-#       # self.next_world = discrete_to_onehot(w)
-        self.next_world = w
-
-
 class WorldEvolutionWrapper(gym.Wrapper):
     """A wrapper facilitating world-evolution in a gym environment, allowing an external process to set the world (i.e.,
     the level layout), and collect statistics of interest (e.g., a player-agent's performance or "regret" on that 
@@ -133,6 +63,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world_gen_sequence = None
         self.next_world = None
         cfg = env_cfg.get('cfg')
+        self.enjoy = cfg.enjoy
 
         # Target reward world should elicit if using min_solvable objective
         trg_rew = cfg.target_reward
@@ -176,7 +107,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         if world_gen_sequences is not None and len(world_gen_sequences) > 0:
             self.world_gen_sequence = world_gen_sequences[self.world_key]
 
-        self.need_world_reset = self.unwrapped.need_world_reset = True
+        self.need_world_reset = True
 
 # TODO: we should be able to do this in a wrapper.
 #   def set_world(self, world):
@@ -205,7 +136,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
-        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
+        print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
 
         # We are now resetting and loading the next world. So we switch this flag off.
@@ -218,6 +149,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # FIXME: maybe inefficient to call index
             self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]
             self.set_world(self.worlds[self.world_key])
+
+        self.next_world = None if not self.enjoy else self.next_world
 
         obs = super().reset()
         self.reset_stats()
@@ -320,6 +253,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
     def step(self, actions):
         # We skip the step() function in WorldEvolutionWrapper and call *it's* parent's step() function instead.
+        print(f'Stepping world {self.world_key}, step {self.n_step}.')
         obs, rews, dones, infos = super(WorldEvolutionWrapper, self).step(actions)
 
         self.validate_stats()

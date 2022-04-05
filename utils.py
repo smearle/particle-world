@@ -259,6 +259,7 @@ def load_config(args, config_file):
     print(f'Loaded config:')
     pp.pprint(new_args)
     for k, v in new_args.items():
+        assert hasattr(args, k), f"Attempting to write a config parameter, {k}, from run_batch.py which is not present in args.py"
         setattr(args, k, v)
     return args
 

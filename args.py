@@ -47,7 +47,7 @@ def init_parser():
                         help="How many generations to evolve worlds (generator). If -1, run until convergence.")
     parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
                         help="How many iterations to train the player. If -1, run until convergence.")
-    parser.add_argument('-m', '--model', type=str, default=None)
+    parser.add_argument('-m', '--model', type=str, default='paired')
     parser.add_argument('-fov', '--field_of_view', type=int, default=2, help='How far agents can see in each direction.')
     parser.add_argument('-tr', '--target_reward', type=int, default=0, 
                         help="Target reward the world should elicit from player if using the min_solvable objective "

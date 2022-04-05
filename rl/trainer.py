@@ -218,6 +218,10 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
             if -1 not in [cfg.gen_phase_len, cfg.gen_phase_len] else 10) if not cfg.enjoy else 10
 
     if cfg.enjoy:
+        # Technically, we have 2 episodes during each call to eval. Imagine we have just called ``trainer.set_worlds()``.
+        # Then when we call ``trainer.evaluate()``, the environment is done on the first step, so that it can load the
+        # next world on the subsequent reset. It then iterates through the usual number of steps and is done. The first
+        # episode is an exception. 
         evaluation_num_episodes = num_eval_envs * 2
     # elif evaluate:
         # evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * 10

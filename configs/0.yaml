@@ -16,6 +16,7 @@
     # we iterate until generator/player convergence (or "staleness") is reached. 0 is an invalid value.
     "ngen_nplay": [
         [1, 1],
+        # [10, 1],
         # [20, 1],
         # [50, 1],
         # [100, 1],
