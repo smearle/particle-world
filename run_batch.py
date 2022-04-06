@@ -105,6 +105,7 @@ def main():
             'render': render,
             'rotated_observations': True,
             'visualize': args.visualize,
+            'generator_class': "TileFlipIndividual",
         }
         exp_configs.append(exp_config)
         with open(os.path.join('configs', 'auto', f'{exp_i}.json'), 'w') as f:

@@ -16,21 +16,21 @@
     # we iterate until generator/player convergence (or "staleness") is reached. 0 is an invalid value.
     "ngen_nplay": [
         [1, 1],
-        # [10, 1],
-        # [20, 1],
-        # [50, 1],
-        # [100, 1],
-        # [-1, 1],
+#       [10, 1],
+#       [20, 1],
+#       [50, 1],
+#       [100, 1],
+#       [-1, 1],
     ],
 
     # List of [n_policies: int, quality_diversity: bool, objective: str] hyperparameters. If quality_diversity is True, 
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
     "npol_qd_objectives": [
-        [1, false, "min_solvable"],
-        # [1, false, "regret"],
-        # [2, false, "contrastive"],
-        # [3, true, null],
+#       [1, false, "min_solvable"],
+#       [1, false, "regret"],
+#       [2, false, "contrastive"],
+        [3, true, null],
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 
@@ -38,7 +38,7 @@
     # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
     # number of cells the agent can see in each direction (excluding its own position).
     "fullobs_fov_models": [
-        # [false, 2, "paired"],
+#       [false, 2, "paired"],
         [true, -1, "paired"],
     ]
 }
