@@ -487,12 +487,12 @@ class ParticleMazeEnv(ParticleGymRLlib):
         # (though it may in fact need much more)
         return max_path * 2
 
-    def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True):
+    def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True, screen=None, enforce_constraints=True):
         if not pg_width:
             pg_width = self.pg_width
         pg_scale = pg_width / self.width
         if not self.screen:
-            self.screen = pygame.display.set_mode([pg_width, pg_width])
+            self.screen = screen if screen else pygame.display.set_mode([pg_width, pg_width])
 #       if self.n_step == 1 and self.world_gen_sequence is not None:
 #           pass
 #           for i in range(len(self.world_gen_sequence)):
@@ -510,22 +510,43 @@ class ParticleMazeEnv(ParticleGymRLlib):
 #               onehot_world = discrete_to_onehot(w)
 #               self._render_level(onehot_world, start_idx, goal_idx, pg_scale, pg_delay, mode)
 #       else:
-        self._render_level(self.world, self.start_idx, self.goal_idx, pg_scale, pg_delay, mode)
+        self.render_level(self.world, [self.start_idx], [self.goal_idx], pg_scale, pg_delay, mode, 
+                           render_player=render_player, enforce_constraints=enforce_constraints)
 
-    def _render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode):
+    def render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode, render_player, enforce_constraints):
+        """_summary_
+
+        Args:
+            world (np.ndarray): A onehot-encoded representation of the world. Shape: (n_tile_types, width, width).
+            start_idx (np.ndarray): _description_
+            goal_idx (np.ndarray): A list of (x, y) coordinates corresponding to goal tile positions. Shape (n_goals, 2).
+            pg_scale (_type_): _description_
+            pg_delay (_type_): _description_
+            mode (_type_): _description_
+            render_player (_type_): _description_
+            enforce_constraints (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         render_landscape(self.screen, -1 * world[1] + 1)
         # Did the user click the window close button? Exit if so.
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-        pygame.draw.rect(self.screen, goal_color, (goal_idx[0] * pg_scale, goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
-        pygame.draw.rect(self.screen, start_color, (start_idx[0] * pg_scale, start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
-        for pi, policy_i in enumerate(self.swarms):
-            for agent_pos in policy_i.ps:
-                agent_pos = agent_pos.astype(int) + 0.5
-                pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
-                                   self.particle_draw_size * pg_scale)
+        if enforce_constraints:
+            assert len(goal_idx) == len(start_idx) == 1
+        for gidx in goal_idx:
+            pygame.draw.rect(self.screen, goal_color, (gidx[0] * pg_scale, gidx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        for sidx in start_idx:
+            pygame.draw.rect(self.screen, start_color, (sidx[0] * pg_scale, sidx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        if render_player:
+            for pi, policy_i in enumerate(self.swarms):
+                for agent_pos in policy_i.ps:
+                    agent_pos = agent_pos.astype(int) + 0.5
+                    pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
+                                    self.particle_draw_size * pg_scale)
         if mode == 'human':
             pygame.display.update()
             pygame.time.delay(pg_delay)
@@ -589,37 +610,18 @@ class DirectedMazeEnv(ParticleMazeEnv):
                                    for i in range(self.n_policies)}
         self.action_spaces = {i : gym.spaces.Discrete(4) for i in range(self.n_policies)}
 
-    def _render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode):
-        render_landscape(self.screen, -1 * world[1] + 1)
-        # Did the user click the window close button? Exit if so.
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-        pygame.draw.rect(self.screen, goal_color, (goal_idx[0] * pg_scale, goal_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
-        pygame.draw.rect(self.screen, start_color, (start_idx[0] * pg_scale, start_idx[1] * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
-        for pi, policy_i in enumerate(self.swarms):
-            for agent_pos, agent_direction in policy_i.ps, policy_i.directions:
-                agent_pos = agent_pos.astype(int) + 0.5
-#               pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
-#                                  self.particle_draw_size * pg_scale)
-                pygame.draw.polygon(self.screen, player_colors[pi], directed_triangles[agent_direction])
-        if mode == 'human':
-            pygame.display.update()
-            pygame.time.delay(pg_delay)
-            return True
-
-        arr = pygame.surfarray.array3d(self.screen)
-        if mode == 'rgb':
-            return arr
-
-    def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True):
+    def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True, enforce_constraints=True):
+        """
+        Args:
+            enforce_constraints: Whether to check for (1 goal, 1 spawn) constraints. Can set to false if rendering 
+                world-gen to fully show the generation process.
+        """
         if not pg_width:
             pg_width = self.pg_width
         pg_scale = pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([pg_width, pg_width])
-        render_landscape(self.screen, -1 * self.world[1] + 1)
+        render_landscape(self.screen, -1 * self.world[1] + 1, enforce_constraints=enforce_constraints)
         # Did the user click the window close button? Exit if so.
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -635,6 +637,34 @@ class DirectedMazeEnv(ParticleMazeEnv):
                     points = [np.array(point) * triangle_scale * pg_scale + agent_pos * pg_scale for point in directed_triangles[agent_direction]]
                     pygame.draw.polygon(self.screen, player_colors[pi], points)
                     ag_i = (ag_i + 1) % 4
+        if mode == 'human':
+            pygame.display.update()
+            pygame.time.delay(pg_delay)
+            return True
+
+        arr = pygame.surfarray.array3d(self.screen)
+        if mode == 'rgb':
+            return arr
+
+    def _render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode, enforce_constraints):
+        render_landscape(self.screen, -1 * world[1] + 1)
+        # Did the user click the window close button? Exit if so.
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        if enforce_constraints:
+            assert len(goal_idx) == len(start_idx) == 1
+        for gidx in goal_idx:
+            pygame.draw.rect(self.screen, goal_color, (gidx * pg_scale, gidx * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        for sidx in start_idx:
+            pygame.draw.rect(self.screen, start_color, (sidx * pg_scale, sidx * pg_scale, 1.0 * pg_scale, 1.0 * pg_scale))
+        for pi, policy_i in enumerate(self.swarms):
+            for agent_pos, agent_direction in policy_i.ps, policy_i.directions:
+                agent_pos = agent_pos.astype(int) + 0.5
+#               pygame.draw.circle(self.screen, player_colors[pi], agent_pos * pg_scale,
+#                                  self.particle_draw_size * pg_scale)
+                pygame.draw.polygon(self.screen, player_colors[pi], directed_triangles[agent_direction])
         if mode == 'human':
             pygame.display.update()
             pygame.time.delay(pg_delay)

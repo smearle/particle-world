@@ -4,6 +4,7 @@ from pdb import set_trace as TT
 
 import gym
 import numpy as np
+import pygame
 import ray
 from ray.rllib import MultiAgentEnv
 
@@ -11,6 +12,8 @@ from ray.rllib import MultiAgentEnv
 # from envs.minecraft.touchstone import TouchStone
 from envs.maze.swarm import min_solvable_fitness, contrastive_fitness, regret_fitness
 from envs.minecraft.wrappers import MineRLWrapper
+from generators.representations import render_landscape
+from utils import discrete_to_onehot
 
 
 def make_env(env_config):
@@ -19,6 +22,7 @@ def make_env(env_config):
 
     if cfg.env_is_minerl:
     # if issubclass(environment_class, EnvSpec):
+        from envs.minecraft.wrappers import MineRLWrapper
         env = gym.make(environment_class)
         env =  MineRLWrapper(env)
 
@@ -138,9 +142,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
-        if self.evaluate:
-            # print(f'Resetting world {self.world_key} at step {self.n_step}.')
-            pass
+        self.has_rendered_world_gen = False
+        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
 
         # We are now resetting and loading the next world. So we switch this flag off.
@@ -269,6 +272,25 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # We have cleared stats, which means we need to assign new world and reset (adding a new entry to stats)
             if not self.evaluate:
                 assert self.need_world_reset
+
+    def render(self, mode='human'):
+        if not self.screen:
+            # A redundant render at first just to initialize the pygame screen so we can render world-generation on it.
+            super().render(enforce_constraints=False)
+
+        if not self.has_rendered_world_gen:
+            # Render the sequence of worlds that were generated in the generation process.
+            for world in self.world_gen_sequence:
+                # render_landscape(self.screen, -1 * world[1] + 1)
+                sidxs, gidxs = np.argwhere(world == self.start_chan).T, np.argwhere(world == self.goal_chan).T
+                sidxs, gidxs = sidxs.cpu().numpy(), gidxs.cpu().numpy()
+                world = discrete_to_onehot(world, n_chan=self.n_chan)
+                self.render_level(world, sidxs, gidxs, pg_scale=self.pg_width/self.width, pg_delay=10, 
+                                mode=mode, render_player=False, enforce_constraints=False)
+            self.has_rendered_world_gen = True
+    
+        # Render the final world and players.
+        super().render(enforce_constraints=True)
 
 
 class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):

@@ -176,9 +176,9 @@ def symmetry(x):
 #     obj, bcs = simulate(generator, weights, env)
 #     return (obj,), bcs
 
-def discrete_to_onehot(a):
-    n_val = a.max() + 1
-    return np.eye(n_val)[a].transpose(2, 0, 1)
+def discrete_to_onehot(a, n_chan=None):
+    n_chan = a.max() + 1 if not n_chan else n_chan
+    return np.eye(n_chan)[a].transpose(2, 0, 1)
 
 
 adj_coords_2d = np.array([
@@ -245,11 +245,7 @@ def get_experiment_name(cfg):
     if cfg.fixed_worlds:
         exp_name = f'fixedWorlds_{cfg.n_policies}-pol'
     else:
-        if 'TileFlip' not in cfg.generator_class:
-            exp_name = f'{cfg.generator_class}_'
-        else:
-            exp_name = f''
-
+        exp_name = f'{cfg.generator_class}'
         if cfg.quality_diversity:
             exp_name += 'qd'
         else:
