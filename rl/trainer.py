@@ -288,9 +288,10 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
             "type": "ray.tune.logger.TBXLogger",
             # Optional: Custom logdir (do not define this here
             # for using ~/ray_results/...).
-            "logdir": cfg.save_dir,
+            "logdir": os.path.abspath(cfg.save_dir),
         },
     }
+
     pp = pprint.PrettyPrinter(indent=4)
 
     # Log the trainer config, excluding overly verbose entries (i.e. Box observation space printouts).

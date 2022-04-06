@@ -136,7 +136,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
-        print(f'Resetting world {self.world_key} at step {self.n_step}.')
+        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
 
         # We are now resetting and loading the next world. So we switch this flag off.
@@ -207,7 +207,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
                     obj = self.objective_function(regret_loss)
                 # If we have no objective function (i.e. evaluating on fixed worlds), objective is None.
                 elif not self.objective_function:
-                    obj = None
+                    obj = 0
                 # Most objectives are functions of agent reward.
                 else:
                     obj = self.objective_function(swarm_rewards)
@@ -253,7 +253,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
     def step(self, actions):
         # We skip the step() function in WorldEvolutionWrapper and call *it's* parent's step() function instead.
-        print(f'Stepping world {self.world_key}, step {self.n_step}.')
+        # print(f'Stepping world {self.world_key}, step {self.n_step}.')
         obs, rews, dones, infos = super(WorldEvolutionWrapper, self).step(actions)
 
         self.validate_stats()

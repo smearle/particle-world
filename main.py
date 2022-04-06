@@ -104,6 +104,10 @@ if __name__ == '__main__':
         # set the generator
         if cfg.generator_class == 'TileFlipIndividual':
             generator_class = TileFlipIndividual2D
+        
+        elif cfg.generator_class == 'NCA':
+            generator_class = NCAIndividual
+            
         else: raise NotImplementedError
 
 #       # set the environment, if specific to player-model
@@ -257,8 +261,8 @@ if __name__ == '__main__':
 
     if cfg.fixed_worlds:
         # train_worlds = {0: generator.landscape}
-        # training_worlds = full_obs_test_mazes
-        training_worlds = ghost_action_test_maze
+        training_worlds = full_obs_test_mazes
+        # training_worlds = ghost_action_test_maze
 
     if cfg.load:
         if not cfg.fixed_worlds:

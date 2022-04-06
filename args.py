@@ -35,7 +35,7 @@ def init_parser():
     parser.add_argument('-qd', '--quality_diversity', action='store_true',
                         help='Search for a grid of levels with dimensions (measures) given by the fitness of distinct '
                                 'policies, and objective score given by the inverse fitness of an additional policy.')
-    parser.add_argument('-obj', '--objective_function', type=str, default=None,
+    parser.add_argument('-obj', '--objective_function', type=str, default='min_solvable',
                         help='If not using quality diversity, the name of the fitness function that will compute world'
                                 'fitness based on population-wise rewards.')
     parser.add_argument('-n_pol', '--n_policies', type=int, default=1, help="How many distinct policies to train.")
