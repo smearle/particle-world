@@ -378,6 +378,7 @@ if __name__ == '__main__':
                 qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
                 # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
                                             # evaluate_only=True)
+                print(qd_stats)
             
             # TODO: save (per-world) stats
             raise NotImplementedError
