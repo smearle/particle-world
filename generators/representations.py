@@ -9,6 +9,8 @@ import pytorch_neat
 from pytorch_neat.cppn import create_cppn, Leaf
 from torch import nn
 
+from utils import discrete_to_onehot
+
 
 class Generator(object):
     def __init__(self, width, n_chan):
@@ -97,6 +99,7 @@ class NNGenerator(Generator):
 
     def _reset(self, latent):
         super()._reset()
+        self.nn_model.reset()
 
         # Could include global information in the form of xy coordinates here, but we won't for now.
         # self.world = th.Tensor(np.concatenate((self.xy, latent), axis=0)).unsqueeze(0)
@@ -104,10 +107,12 @@ class NNGenerator(Generator):
         self.world = th.Tensor(latent).unsqueeze(0)
         self.landscape = self.world[0, 0].numpy()
 
-    def _update(self):
-        self.world = self.nn_model(self.world)
+    def _update(self, x):
+        self.world = self.nn_model(x)
         #           cv2.imshow("NCA world generation", self.world)
         self.landscape = self.world[0, 0].numpy()
+
+        return self.world
 
     def get_weights(self):
         return get_init_weights(self.nn_model)
@@ -117,19 +122,28 @@ class NNGenerator(Generator):
 
 
 class GradlessNCA(nn.Module):
-    def __init__(self, n_hid):
+    def __init__(self, n_chan):
         super(GradlessNCA, self).__init__()
-        self.ls1 = nn.Conv2d(n_hid, 32, 3, 1, 1)  # , padding_mode='circular')
+        self.n_aux = 16
+        self.n_chan = n_chan
+        self.ls1 = nn.Conv2d(n_chan + self.n_aux, 32, 3, 1, 1)  # , padding_mode='circular')
         self.ls2 = nn.Conv2d(32, 64, 1, 1, 0)
-        self.ls3 = nn.Conv2d(64, n_hid, 1, 1, 0)
+        self.ls3 = nn.Conv2d(64, n_chan + self.n_aux, 1, 1, 0)
         self.layers = [self.ls3, self.ls2, self.ls1]
         self.apply(init_weights)
 
     def forward(self, x):
         with th.no_grad():
+            if self.last_aux is None:
+                self.last_aux = th.zeros(x.shape[0], self.n_aux, *x.shape[2:])
+            x = th.cat([x, self.last_aux], dim=1)
             x = th.sigmoid(self.ls3(th.relu(self.ls2(th.relu(self.ls1(x))))))
             # x = th.sin(self.ls3(th.sin(self.ls2(th.sin(self.ls1(x))))))
-            return x
+            self.last_aux = x[:, self.n_chan:, ...]
+            return x[:, :self.n_chan, ...]
+
+    def reset(self):
+        self.last_aux = None
 
 
 class SinCPPN(nn.Module):
@@ -189,7 +203,8 @@ class NCAGenerator(NNGenerator):
         self.n_nca_steps = n_nca_steps
 
         # Fix the latent, making this simply an indirect encoding for now
-        self.latent = np.random.normal(0, 1, size=(self.n_chan, self.width, self.width))
+        # self.latent = np.random.normal(0, 1, size=(self.n_chan, self.width, self.width))
+        self.latent = discrete_to_onehot(np.random.randint(0, self.n_chan, size=(self.width, self.width)), self.n_chan)
 
         self._reset()
 
@@ -197,26 +212,29 @@ class NCAGenerator(NNGenerator):
         super()._reset(self.latent)
         self.discrete_world = self.world.argmax(1)
 
-    def _update(self):
-        super()._update()
+    def _update(self, x):
+        self.discrete_world = super()._update(x).argmax(1)
         # self.landscape = (self.world[0, 0] + 1) / 2  # for sine wave activation only!
 
         # Note: we could have auxiliary (non-board-state) tiles here, in which case we won't want to argmax over them 
         # like this.
-        self.discrete_world = self.world.argmax(1)
+        # self.discrete_world = self.world.argmax(1)
 
         return self.world
 
     def generate(self, render=False, screen=None, pg_delay=1):
         self._reset()
         gen_sequence = [self.discrete_world]
+        x = discrete_to_onehot(self.discrete_world[0], self.n_chan)
         for _ in range(self.n_nca_steps):
-            self._update()
+            x = self._update(th.Tensor(x).unsqueeze(0))
+            self.discrete_world = x.argmax(1)
             if self.save_gen_sequence:
                 gen_sequence.append(self.discrete_world)
             if render:
                 self._render(screen=screen)
                 pygame.time.delay(pg_delay)
+            x = discrete_to_onehot(self.discrete_world[0], self.n_chan)
         return gen_sequence
 
 

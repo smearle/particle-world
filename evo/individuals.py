@@ -65,6 +65,7 @@ class DiscreteIndividual(Individual):
 
     def validate(self):
         # ensure exactly only one of each of these integers
+        self.playability_penalty = 0
         for i, u in enumerate(self.unique_chans):
             idxs = np.argwhere(self.discrete == u)
             if len(idxs) == 0:
@@ -180,7 +181,6 @@ class NCAIndividual(DiscreteIndividual):
         self.n_chan = n_chan
         self.nca_generator = NCAGenerator(width, n_chan, 30, save_gen_sequence=save_gen_sequence)
         self.generate()
-        self.validate() 
 
     def generate(self):
         self.gen_sequence = [bd[0] for bd in self.nca_generator.generate()]
@@ -196,3 +196,12 @@ class NCAIndividual(DiscreteIndividual):
         self.nca_generator.set_weights(weights)
         self.generate()
         return self, 
+
+    def validate(self):
+        # ensure exactly only one of each of these integers
+        playability_penalty = 0
+        for i, u in enumerate(self.unique_chans):
+            idxs = np.argwhere(self.discrete == u)
+            playability_penalty += abs(len(idxs) - 1)
+        super().validate()
+        self.playability_penalty = playability_penalty

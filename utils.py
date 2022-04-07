@@ -245,12 +245,12 @@ def get_experiment_name(cfg):
     if cfg.fixed_worlds:
         exp_name = f'fixedWorlds_{cfg.n_policies}-pol'
     else:
-        exp_name = f'{cfg.generator_class}'
+        exp_name = f'{cfg.generator_class}_'
         if cfg.quality_diversity:
             exp_name += 'qd'
         else:
             exp_name += f'{cfg.objective_function}'
-        exp_name += f'_{cfg.n_policies}-pol_{cfg.gen_phase_len}-gen_{cfg.play_phase_len}-play'
+        exp_name += f'{cfg.n_policies}-pol_{cfg.gen_phase_len}-gen_{cfg.play_phase_len}-play'
     if cfg.fully_observable:
         exp_name += '_fullObs'
     if cfg.model is not None:
