@@ -2,10 +2,15 @@
     # The names of the experiments. Add a range of integers to allow for multiple trials of experiments with the same 
     # hyperparameters.
     "exp_names": [
+<<<<<<< HEAD:configs/batch.yaml
         # "0",
         "tweak_nn",
 #         "tweak_nn_1worker",
 #         "2",
+=======
+        "0",
+        # "test_ray1-11"
+>>>>>>> b307809 (Evolve worlds adversarially to test trained players.):configs/0.yaml
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.
@@ -38,8 +43,13 @@
     # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
     # number of cells the agent can see in each direction (excluding its own position).
     "fullobs_fov_models": [
+<<<<<<< HEAD:configs/batch.yaml
         [true, -1, "feedforward", false],
 #       [false, 2, "paired", true],
 #       [true, -1, "paired", true],
+=======
+#       [false, 2, "paired"],
+        [true, -1, "paired"],
+>>>>>>> b307809 (Evolve worlds adversarially to test trained players.):configs/0.yaml
     ]
 }
