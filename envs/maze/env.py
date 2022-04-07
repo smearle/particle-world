@@ -165,6 +165,10 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
                               for i in range(n_policies)}
 
         self.max_episode_steps = self.get_max_steps()
+
+        if self.evaluate:
+            self.max_episode_steps *= 1
+
         self.n_step = 0
         self.dead_action = [0, 0]
 
@@ -211,6 +215,7 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
         dones = {(i, j): False for i, swarm in enumerate(self.swarms)
                 for j in range(swarm.n_pop)}
         dones.update({'__all__': self.n_step > 0 and self.n_step == self.max_episode_steps})
+
         return dones
 
     def get_particle_observations(self):

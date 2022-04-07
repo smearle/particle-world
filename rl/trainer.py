@@ -226,9 +226,20 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
     # elif evaluate:
         # evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs) * 10
     else:
-        evaluation_num_episodes = math.ceil(len(eval_mazes) / num_eval_envs)
+        # This ensures we get stats for eval eval world with each call to ``trainer.evaluate()``. We may want to 
+        # decrease this if we have a large number of eval worlds.
+        evaluation_num_episodes = len(eval_mazes)
+
+        # This means we evaluate 1 episode per eval env.
+        # evaluation_num_episodes = num_eval_envs
 
     regret_callbacks = partial(RegretCallbacks, regret_objective=cfg.objective_function=='regret')
+    logger_config = {
+            "type": "ray.tune.logger.TBXLogger",
+            # Optional: Custom logdir (do not define this here
+            # for using ~/ray_results/...).
+            "logdir": os.path.abspath(cfg.save_dir),
+    }
 
     trainer_config = {
         "callbacks": regret_callbacks,
@@ -284,12 +295,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         # TODO: try increasing batch size to ~500k, expect a few minutes update time
         "train_batch_size": env.max_episode_steps * cfg.n_rllib_envs,
         "sgd_minibatch_size": env.max_episode_steps * cfg.n_rllib_envs if (cfg.enjoy or cfg.evaluate) and cfg.render else 128,
-        "logger_config": {
-            "type": "ray.tune.logger.TBXLogger",
-            # Optional: Custom logdir (do not define this here
-            # for using ~/ray_results/...).
-            "logdir": os.path.abspath(cfg.save_dir),
-        },
+        "logger_config": logger_config if not (cfg.enjoy or cfg.evaluate) else {},
     }
 
     pp = pprint.PrettyPrinter(indent=4)

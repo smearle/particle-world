@@ -60,6 +60,7 @@ def main():
     num_cpus = 0 if args.visualize else args.num_cpus
     num_gpus = 0 if args.visualize else args.num_gpus
     render = True if args.enjoy else args.render
+    load = True if args.visualize or args.enjoy or args.evaluate else args.load
     
     with open(os.path.join('configs', args.batch_config + '.yaml')) as f:
         # batch_config = json.load(f)
@@ -93,8 +94,9 @@ def main():
             'fixed_worlds': False,
             'fully_observable': fully_observable,
             'gen_phase_len': gen_phase_len,
+            'generator_class': "TileFlipIndividual",
+            'load': load,
             'model': model,
-            'load': args.load,
             'n_policies': n_policies,
             'n_rllib_workers': num_cpus,
             'num_gpus': num_gpus,
@@ -105,7 +107,6 @@ def main():
             'render': render,
             'rotated_observations': True,
             'visualize': args.visualize,
-            'generator_class': "TileFlipIndividual",
         }
         exp_configs.append(exp_config)
         with open(os.path.join('configs', 'auto', f'{exp_i}.json'), 'w') as f:

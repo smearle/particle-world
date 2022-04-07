@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:1
 #SBATCH --time=48:00:00
-#SBATCH --mem=64GB
+#SBATCH --mem=30GB
 #SBATCH --job-name=prtcl_11
 #SBATCH --mail-type=BEGIN,END
 #SBATCH --mail-user=sam.earle@nyu.edu

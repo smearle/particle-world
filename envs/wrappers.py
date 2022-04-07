@@ -116,23 +116,27 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def step(self, actions):
         """Step a single-agent environment."""
-        obs, rews, done, info = super().step(actions)
-        self.log_rewards(rews)
+        print(f'Stepping world {self.world_key}, step {self.n_step}.')
+        obs, rew, done, info = super().step(actions)
+        self.log_stats(rew=rew)
         info.update({'world_key': self.world_key})
         self.n_step += 1
 
         # We'll take an additional step in the old world, then reset. Not the best but it works.
         done = done or self.need_world_reset
 
-        return obs, rews, done, info
+        return obs, rew, done, info
 
-    def log_rewards(self, rew):
-        """Log rewards for each agent on each world."""
-        if len(self.stats) > 0:
-            self.stats[-1][1][(0, 0)] += rew
+    def log_stats(self, rew):
+        """Log rewards for each agent on each world in the ``self.stats`` attribute."""
+        # (0, 0) is treated as the first agent's id in single-agent environments.
+        self.stats[-1][f'agent_{(0, 0)}_reward'] += rew
+        self.stats[-1]['n_steps'] = self.n_step
 
     def reset_stats(self):
-        self.stats.append([self.world_key, {k: 0 for k in self.agent_ids}])
+        new_ep_stats = {'world_key': self.world_key, 'n_steps': 0}
+        new_ep_stats.update({f'agent_{k}_reward': 0 for k in self.agent_ids})
+        self.stats.append(new_ep_stats)
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
@@ -177,22 +181,32 @@ class WorldEvolutionWrapper(gym.Wrapper):
             assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
 
         world_stats = []
+        next_stats = []
 
         if not evaluate:
             assert len(self.stats) == 1
             # print(f'stats: {self.stats}')
 
-        for i, (world_key, agent_rewards) in enumerate( self.stats):
+        for i, stats_dict in enumerate(self.stats):
+
+            # We will simulate on this world on future steps, so keep this empty stats dict around.
+            if stats_dict["n_steps"] == 0:
+                next_stats.append(stats_dict)
+                continue
+
+            world_key = stats_dict['world_key']
             world_key_2, regret_loss = self.regret_losses[i] if len(self.regret_losses) > 0 else (None, None)
             
             # FIXME: Mismatched world keys between agent_rewards and regret_losses during evaluation. Ignoring so we can
             #  render all eval mazes
             if not self.evaluate \
                 and world_key_2:  # i.e. we have a regret loss
-                    assert world_key == world_key_2
+                assert world_key == world_key_2
 
-            # Convert agent to policy rewards
-            swarm_rewards = [[agent_rewards[(i, j)] for j in range(self.n_pop)] for i in range(self.n_policies)]
+            # Convert agent to policy rewards. Get a list of lists, where outer list is per-policy, and inner list is 
+            # per-agent reward.
+            swarm_rewards = [[stats_dict[f'agent_{(i, j)}_reward'] for j in range(self.n_pop)] \
+                for i in range(self.n_policies)]
 
             # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
             # stats are of the form (world_key, qdpy_stats, policy_rewards)
@@ -219,12 +233,14 @@ class WorldEvolutionWrapper(gym.Wrapper):
             qd_stats_i = ((obj,), measures)
 
             # Add some additional per-policy stats (just mean reward for now).
-            world_stats_i = {"world_key": world_key, "qd_stats": qd_stats_i}  #, [np.mean(sr) for sr in swarm_rewards])
-            [world_stats_i.update({f'policy_{i} reward': np.mean(sr)}) for i, sr in enumerate(swarm_rewards)]
-
+            world_stats_i = {"world_key": world_key, "qd_stats": qd_stats_i, "n_steps": stats_dict["n_steps"]}  #, [np.mean(sr) for sr in swarm_rewards])
+            world_stats_i.update({f'policy_{i}': {} for i in range(len(swarm_rewards))})
+            [world_stats_i[f'policy_{i}'].update({'mean_reward': np.mean(sr)}) for i, sr in enumerate(swarm_rewards)]
+            [world_stats_i[f'policy_{i}'].update({'pct_win': np.sum(np.array(sr) > 0) / len(sr)}) for i, sr in enumerate(swarm_rewards)]
+            # TODO: log time-to-win?
             world_stats.append(world_stats_i)
 
-        self.stats = []
+        self.stats = next_stats
         self.regret_losses = []
 
         return world_stats
@@ -248,27 +264,25 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         self.env = env
         # MultiAgentEnv.__init__(self)
 
-    def clear_stats(self):
-        self.stats.append((self.world_key, {agent_id: 0 for agent_id in self.agent_ids}))
-
     def step(self, actions):
         # We skip the step() function in WorldEvolutionWrapper and call *it's* parent's step() function instead.
-        # print(f'Stepping world {self.world_key}, step {self.n_step}.')
         obs, rews, dones, infos = super(WorldEvolutionWrapper, self).step(actions)
 
         self.validate_stats()
-        self.log_rewards(rews)
+        self.log_stats(rews=rews)
         dones['__all__'] = dones['__all__'] or self.need_world_reset
+#       if dones['__all__']:
+#           print(f'world {self.world_key} is done.')
         infos.update({agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs})
         self.n_step += 1
 
         return obs, rews, dones, infos
 
-    def log_rewards(self, rews):
+    def log_stats(self, rews):
         """Log rewards for each agent on each world.
         
         We store rewards so that we can compute world fitness according to progress over duration of level. Might need
         separate rewards from multiple policies."""
-        if len(self.stats) > 0:
-            for k, v in rews.items():
-                self.stats[-1][1][k] += v
+        for k, v in rews.items():
+            self.stats[-1][f'agent_{k}_reward'] += v
+        self.stats[-1]['n_steps'] = self.n_step
