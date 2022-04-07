@@ -44,8 +44,9 @@ def get_archive_world_heuristics(archive, trainer):
     }
 
 
-def qdpy_save_archive(container, play_itr, gen_itr, net_itr, logbook, save_dir):
-    with open(os.path.join(save_dir, 'latest-0.p'), 'wb') as f:
+def qdpy_save_archive(container, play_itr, gen_itr, net_itr, logbook, save_dir, adversarial_archive=False):
+    arch_name = 'latest-0.p' if not adversarial_archive else 'adversarial_worlds.p'
+    with open(os.path.join(save_dir, arch_name), 'wb') as f:
         pickle.dump(
             {
                 'container': container,

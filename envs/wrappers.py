@@ -68,7 +68,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # Target reward world should elicit if using min_solvable objective
         trg_rew = cfg.target_reward
 
-        self.obj_fn_str = cfg.objective_function
+        self.obj_fn_str = cfg.objective_function if not cfg.gen_adversarial_worlds else 'min_solvable'
         obj_func = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
         if obj_func == min_solvable_fitness:
 
@@ -283,6 +283,13 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         
         We store rewards so that we can compute world fitness according to progress over duration of level. Might need
         separate rewards from multiple policies."""
-        for k, v in rews.items():
-            self.stats[-1][f'agent_{k}_reward'] += v
-        self.stats[-1]['n_steps'] = self.n_step
+        # On training, we don't write stats for the last, "hangover" step from the previous world before loading the 
+        # next world up for evaluation. The previous world is from the previous batch of evolved world candidates, so 
+        # we don't want to return qd stats on it.
+        if len(self.stats) > 0:
+            for k, v in rews.items():
+                self.stats[-1][f'agent_{k}_reward'] += v
+            self.stats[-1]['n_steps'] = self.n_step
+        else:
+            assert not self.evaluate
+            assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1

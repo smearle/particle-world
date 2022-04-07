@@ -2,7 +2,8 @@
     # The names of the experiments. Add a range of integers to allow for multiple trials of experiments with the same 
     # hyperparameters.
     "exp_names": [
-        "0"
+        "0",
+        # "test_ray1-11"
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.
@@ -27,9 +28,9 @@
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
     "npol_qd_objectives": [
-        [3, true, null],
-        [2, false, "contrastive"],
-        [1, false, "regret"],
+#       [3, true, null],
+#       [2, false, "contrastive"],
+#       [1, false, "regret"],
         [1, false, "min_solvable"],
     ],
     
@@ -38,7 +39,7 @@
     # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
     # number of cells the agent can see in each direction (excluding its own position).
     "fullobs_fov_models": [
-        [false, 2, "paired"],
-#       [true, -1, "paired"],
+#       [false, 2, "paired"],
+        [true, -1, "paired"],
     ]
 }
