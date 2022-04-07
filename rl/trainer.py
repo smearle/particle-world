@@ -208,7 +208,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
     # Because we only ever use a single worker for all evaluation environments.
     num_eval_envs = num_envs_per_worker
 
-    if cfg.env_is_minerl:
+    if cfg.env_is_minerl or cfg.gen_adversarial_worlds:
         evaluation_interval = 0
     else:
         # Evaluate policies once after every player-training phase. If we're evolving/training until convergence, just
@@ -270,8 +270,9 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
         # trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number 
         # of steps.)
-        "evaluation_num_episodes": evaluation_num_episodes,
-            # if not (evaluate or enjoy) else len(eval_mazes) + 1,
+        # if not (evaluate or enjoy) else len(eval_mazes) + 1,
+        "evaluation_duration": evaluation_num_episodes,
+        "evaluation_duration_unit": "episodes",
 
         # TODO: run the right number of episodes s.t. we simulate on each map the same number of times
         "evaluation_config": {
@@ -309,7 +310,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
     trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
-    if not cfg.enjoy and not cfg.env_is_minerl:  # TODO: eval worlds in minerl
+    if not cfg.enjoy and not cfg.gen_adversarial_worlds and not cfg.env_is_minerl:  # TODO: eval worlds in minerl
         # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_key of each env will be incremented
         # by len(eval_mazes) each reset.
         eval_workers = trainer.evaluation_workers

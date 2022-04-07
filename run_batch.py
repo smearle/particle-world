@@ -55,6 +55,7 @@ def main():
     parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-lo', '--load', action='store_true')
     parser.add_argument('-bc', '--batch_config', type=str, default='0')
+    parser.add_argument('-gaw', '--gen_adversarial_worlds', action='store_true')
     args = parser.parse_args()
     job_time = 48
     num_cpus = 0 if args.visualize else args.num_cpus
@@ -93,9 +94,10 @@ def main():
             'field_of_view': field_of_view,
             'fixed_worlds': False,
             'fully_observable': fully_observable,
+            'gen_adversarial_worlds': args.gen_adversarial_worlds,
             'gen_phase_len': gen_phase_len,
             'generator_class': "TileFlipIndividual",
-            'load': load,
+            'load': load or args.gen_adversarial_worlds,
             'model': model,
             'n_policies': n_policies,
             'n_rllib_workers': num_cpus,

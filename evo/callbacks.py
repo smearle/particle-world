@@ -1,6 +1,7 @@
 import math
 from pdb import set_trace as TT
 import random
+import sys
 import numpy as np
 from timeit import default_timer as timer
 
@@ -10,6 +11,7 @@ from evo.utils import get_archive_world_heuristics, qdpy_save_archive
 from rl.eval_worlds import rllib_evaluate_worlds
 from rl.trainer import train_players
 from utils import update_individuals
+from visualize import visualize_archive
 
 
 def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox, logbook, idx_counter,
@@ -31,9 +33,23 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
     if cfg.oracle_policy:
         return net_itr
 
+    # Launch player training if appropriate
     if gen_itr > 0 and (cfg.gen_phase_len != -1 and gen_itr % cfg.gen_phase_len == 0 or stale_generators or optimal_generators):
         qdpy_save_archive(container=archive, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook,
                           save_dir=cfg.save_dir)
+
+        mean_path_length = get_archive_world_heuristics(archive, trainer)
+        logbook_stats = {}
+        stat_keys = ['mean', 'min', 'max']  # , 'std]
+        logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
+
+        if cfg.gen_adversarial_worlds:
+            # Then generator evolution has stagnated, so we are done.
+            env = trainer.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.env))
+            visualize_archive(cfg, env, archive)
+            print('Done generating adversarial worlds.')
+            sys.exit()
+
         training_worlds = sorted(archive, key=lambda i: i.fitness.values[0], reverse=True)
         if cfg.quality_diversity:
             # Eliminate impossible worlds
@@ -45,10 +61,6 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
 
             training_worlds *= math.ceil(cfg.n_rllib_envs / len(training_worlds))
 
-        mean_path_length = get_archive_world_heuristics(archive, trainer)
-        logbook_stats = {}
-        stat_keys = ['mean', 'min', 'max']  # , 'std]
-        logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
         net_itr = train_players(net_itr=net_itr, play_phase_len=cfg.play_phase_len, trainer=trainer,
                                 worlds=training_worlds, idx_counter=idx_counter, cfg=cfg, logbook=logbook)
         # else:
