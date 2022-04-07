@@ -1,5 +1,6 @@
 import argparse
 import copy
+import json
 import math
 import os
 import pickle
@@ -34,6 +35,7 @@ from evo.utils import qdpy_save_archive
 from evo.evolve import qdRLlibEval
 from evo.callbacks import iteration_callback
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
+from ray.tune.logger import pretty_print
 from ray.tune.registry import register_env
 from rl.trainer import init_particle_trainer, train_players, toggle_exploration
 from rl.eval_worlds import rllib_evaluate_worlds
@@ -162,7 +164,7 @@ if __name__ == '__main__':
 
     env_config.update({'environment_class': environment_class, 'cfg': cfg})
 
-    if (cfg.enjoy or cfg.evaluate) and cfg.render:
+    if (cfg.evaluate or cfg.enjoy) and cfg.render:
         n_rllib_envs = 1
     else:
         n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
@@ -371,17 +373,43 @@ if __name__ == '__main__':
         # Evaluate
         if cfg.evaluate:
             worlds = eval_mazes
-            for i in range(10):
+            net_world_stats = {eval_maze: {f'policy_{i}': {'pct_wins': [], 'mean_rewards': []} \
+                for i in range(n_policies)} for eval_maze in worlds}
+
+            # How many trials on each world? Kind of, minus garbage resets, and assuming evaluation_num_episodes == len(eval_worlds).
+            for _ in range(10):
                 rllib_stats = trainer.evaluate()
                 qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=True, quality_diversity=cfg.quality_diversity)))
+
+                # Flattening the list of lists of stats (outer lists are per-worker, inner lists are per-environment).
                 qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
+
                 # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
                                             # evaluate_only=True)
-                print(qd_stats)
-            
-            # TODO: save (per-world) stats
-            raise NotImplementedError
+
+                for env_stats in qd_stats:
+                    for world_stats in env_stats:
+#                       if world_stats['n_steps'] != env.max_episode_steps:
+#                           # There will be one additional stats dict (the last one in the list), that was created on the last reset.
+#                           # We will ignore it
+#                           assert world_stats['n_steps'] == 0
+#                           continue
+
+                        world_key = world_stats['world_key']
+
+                        for j in range(n_policies):
+                            policy_key = f'policy_{j}' 
+                            net_world_stats[world_key][policy_key]['mean_rewards'].append(
+                                world_stats[policy_key]['mean_reward'])
+                            net_world_stats[world_key][policy_key]['pct_wins'].append(
+                                world_stats[policy_key]['pct_win'])
+
+            eval_stats_fname = os.path.join(save_dir, 'eval_stats.json')
+            with open(os.path.join(save_dir, 'eval_stats.json'), 'w') as f:
+                json.dump(net_world_stats, f, indent=4)
+            print(f"\nEvaluation stats saved to '{eval_stats_fname}'.")
+            # We're done evaluating. Exit now so we don't start training.
             sys.exit()
 
     # Train
