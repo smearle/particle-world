@@ -70,7 +70,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
 
         # Pop individuals from the container for re-evaluation.
         # Randomly select individuals to pop, without replacement
-        invalid_inds = random.sample(archive, k=min(cfg.n_rllib_envs, len(archive)))
+        invalid_inds = random.sample(archive, k=min(cfg.evo_batch_size, len(archive)))
         # invalid_ind = [ind for ind in container]
 
         # TODO: we have an n-time lookup in discard. We should be getting the indices of the individuals directly,

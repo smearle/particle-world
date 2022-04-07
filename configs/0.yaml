@@ -2,8 +2,8 @@
     # The names of the experiments. Add a range of integers to allow for multiple trials of experiments with the same 
     # hyperparameters.
     "exp_names": [
-        "0",
-        # "test_ray1-11"
+        # "0",
+        "test_resources",
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.

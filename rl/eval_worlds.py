@@ -13,7 +13,10 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
                           is_training_player=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
-    train/evaluate functions.
+    train/evaluate functions. 
+    
+    We may be doing either evo eval, or player training. In evo eval, we do not update player weights, and instead use 
+    simulation results to get objectives/measures for world evolution. In player training, we update player weights.
 
     If we are running a QD experiment (cfg.quality_diversity), we'll return measures corresponding
     to fitnesses of distinct populations, and an objective corresponding to fitness of an additional "protagonist"
@@ -60,6 +63,7 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
             hashes = [h for wh in hashes for h in wh]
             n_envs = len(hashes)
 
+            # Select a subset of the worlds to simulate on in this call to ``train()``.
             sub_idxs = idxs[world_id:min(world_id + n_envs, len(idxs))]
             idx_counter.set_idxs.remote(sub_idxs)
             idx_counter.set_hashes.remote(hashes)
@@ -192,11 +196,11 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
         
         # print("World stats:", world_stats)
 
-        # If we've mapped envs to specific worlds, then we count the number of unique worlds evaluated (assuming worlds are
+        # If we've mapped envs to specific worlds (i.e. we're using idx_counter), then we count the number of unique worlds evaluated (assuming worlds are
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
         # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
-            assert len(world_stats) == len(idxs)
+            assert len(new_world_stats) == len(sub_idxs)
             world_id = len(world_stats)
         else:
             world_id += len(new_world_stats)

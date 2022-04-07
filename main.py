@@ -170,6 +170,11 @@ if __name__ == '__main__':
             else (1 if env_is_minerl else 12)
 
     cfg.n_rllib_envs = n_rllib_envs
+    cfg.evo_batch_size = 120
+
+    # We don't want any wasted episodes when we call train() to evaluate worlds.
+    assert cfg.evo_batch_size % n_rllib_envs == 0
+
     register_env('world_evolution_env', make_env)
 
     experiment_name = get_experiment_name(cfg)
@@ -379,6 +384,8 @@ if __name__ == '__main__':
         # If we're not loading, and not overwriting, and the relevant ``save_dir`` exists, then raise Exception.
         if not cfg.overwrite:
             if os.path.exists(save_dir):
+                # FIXME: even when we are running new experiment, the directoy already exists at this point. Why?
+                # Ahhh it's TBXLogger? Can just skip this check?
                 raise Exception(f"The save directory '{save_dir}' already exists. Use --overwrite to overwrite it.")
 
         # Remove the save directory if it exists and we are overwriting.
@@ -420,8 +427,8 @@ if __name__ == '__main__':
     # assert (dimension >= 2)
     assert (nb_features >= 1)
 
-    init_batch_size = cfg.n_rllib_envs  # The number of evaluations of the initial batch ('batch' = population)
-    batch_size = cfg.n_rllib_envs  # The number of evaluations in each subsequent batch
+    init_batch_size = cfg.evo_batch_size  # The number of evaluations of the initial batch ('batch' = population)
+    batch_size = cfg.evo_batch_size  # The number of evaluations in each subsequent batch
     nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome
