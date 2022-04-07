@@ -244,24 +244,25 @@ class WorldEvolutionWrapper(gym.Wrapper):
             if not self.evaluate:
                 assert self.need_world_reset
 
-    def render(self, mode='human'):
-        if not self.screen:
+    def render(self, mode='human', pg_width=None, render_player=True):
+        pg_width = self.pg_width if pg_width is None else pg_width
+        if mode == 'human' and not self.screen:
             # A redundant render at first just to initialize the pygame screen so we can render world-generation on it.
-            super().render(enforce_constraints=False)
+            super().render(enforce_constraints=False, pg_width=pg_width, render_player=render_player)
 
-        if not self.has_rendered_world_gen:
+        if self.world_gen_sequence is not None and not self.has_rendered_world_gen:
             # Render the sequence of worlds that were generated in the generation process.
             for world in self.world_gen_sequence:
                 # render_landscape(self.screen, -1 * world[1] + 1)
                 sidxs, gidxs = np.argwhere(world == self.start_chan).T, np.argwhere(world == self.goal_chan).T
                 sidxs, gidxs = sidxs.cpu().numpy(), gidxs.cpu().numpy()
                 world = discrete_to_onehot(world, n_chan=self.n_chan)
-                self.render_level(world, sidxs, gidxs, pg_scale=self.pg_width/self.width, pg_delay=10, 
+                self.render_level(world, sidxs, gidxs, pg_scale=pg_width/self.width, pg_delay=10, 
                                 mode=mode, render_player=False, enforce_constraints=False)
             self.has_rendered_world_gen = True
     
         # Render the final world and players.
-        super().render(enforce_constraints=True)
+        return super().render(mode=mode, enforce_constraints=True, pg_width=pg_width, render_player=render_player)
 
 
 class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):

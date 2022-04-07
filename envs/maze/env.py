@@ -482,7 +482,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
 
     def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True, screen=None, enforce_constraints=True):
         if not pg_width:
-            pg_width = self.pg_width
+            pg_width = self.pg_width if mode == 'human' else self.width
         pg_scale = pg_width / self.width
         if not self.screen:
             self.screen = screen if screen else pygame.display.set_mode([pg_width, pg_width])
@@ -503,7 +503,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
 #               onehot_world = discrete_to_onehot(w)
 #               self._render_level(onehot_world, start_idx, goal_idx, pg_scale, pg_delay, mode)
 #       else:
-        self.render_level(self.world, [self.start_idx], [self.goal_idx], pg_scale, pg_delay, mode, 
+        return self.render_level(self.world, [self.start_idx], [self.goal_idx], pg_scale, pg_delay, mode, 
                            render_player=render_player, enforce_constraints=enforce_constraints)
 
     def render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode, render_player, enforce_constraints):

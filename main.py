@@ -69,7 +69,7 @@ if __name__ == '__main__':
 
     # TODO: do this better?
     cfg.qdpy_save_interval = 100
-    cfg.archive_size = 1024
+    cfg.archive_size = 12
     cfg.translated_observations = True
     cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
@@ -107,7 +107,7 @@ if __name__ == '__main__':
         
         elif cfg.generator_class == 'NCA':
             generator_class = NCAIndividual
-            
+
         else: raise NotImplementedError
 
 #       # set the environment, if specific to player-model
@@ -292,7 +292,6 @@ if __name__ == '__main__':
                 # if doing QD, render a grid of 1 world per cell in archive
                 if cfg.quality_diversity:
                     nb_bins = grid.shape
-                    world_im_width = width * 10
                     im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
                     for g in gg:
                         i, j = grid.index_grid(g.features)
@@ -315,7 +314,7 @@ if __name__ == '__main__':
                         i, j = gi // n_world_width, gi % n_world_width
                         env.set_world(g.discrete)
                         env.reset()
-                        im = env.render(mode='rgb', pg_width=world_im_width, render_player=True)
+                        im = env.render(mode='rgb', pg_width=world_im_width, render_player=False)
                         im_grid[j * world_im_width: (j + 1) * world_im_width, i * world_im_width: (i + 1) * world_im_width] = im
 
                         # To visualize ranking of fitnesses
