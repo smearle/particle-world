@@ -135,7 +135,6 @@ def visualize_archive(cfg, env, grid):
                 # if doing QD, render a grid of 1 world per cell in archive
     if cfg.quality_diversity:
         nb_bins = grid.shape
-        world_im_width = cfg.width * 10
         im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
         for g in gg:
             i, j = grid.index_grid(g.features)
