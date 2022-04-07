@@ -69,7 +69,7 @@ if __name__ == '__main__':
     pg_scale = pg_width / cfg.width
     # swarm_type = MemorySwarm
     cfg.qdpy_save_interval = 100
-    cfg.archive_size = 12
+    cfg.archive_size = 100
     cfg.translated_observations = True
     cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 

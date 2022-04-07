@@ -59,7 +59,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
 
     if cfg.rllib_eval:
         rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
-            trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, cfg=cfg, idx_counter=idx_counter,
+            trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, cfg=cfg, idx_counter=idx_counter,
             net_itr=net_itr, start_time=start_time)
         # assert len(rllib_stats) == 1
 
