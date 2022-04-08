@@ -130,6 +130,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
         if cfg.rllib_eval:
+            print(f"{len(invalid_ind)} new offspring up for evaluation.")
             rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr,
                 trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, idx_counter=idx_counter,
                 start_time=start_time, cfg=cfg)

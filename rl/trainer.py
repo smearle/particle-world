@@ -58,7 +58,7 @@ def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=Non
         else:
             assert isinstance(worlds, Iterable)
             world_keys = list(range(len(worlds)))
-        world_keys = np.random.choice(world_keys, cfg.n_rllib_envs, replace=replace)
+        world_keys = np.random.choice(world_keys, cfg.n_eps_on_train, replace=replace)
         # curr_lands = np.array(landscapes)[world_keys]
         curr_worlds = [worlds[wk] for wk in world_keys]
         worlds = {i: l for i, l in enumerate(curr_worlds)}

@@ -101,7 +101,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # self.unwrapped.world_key = self.world_key
 
         # Assign this world to myself.
-        self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue}
+        self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue} if not self.evaluate else worlds
         # self.set_world(worlds[self.world_key])
         # self.worlds = self.unwrapped.worlds = worlds
 
@@ -148,21 +148,26 @@ class WorldEvolutionWrapper(gym.Wrapper):
         """Reset the environment. This will also load the next world."""
         print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
-        self.world_key = self.world_key_queue[0] if self.world_key_queue else None
-        self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
-        if self.world_key:
-            self.set_world(self.world_queue.pop(self.world_key))
 
         # We are now resetting and loading the next world. So we switch this flag off.
         self.need_world_reset = False
 
         # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
         if self.evaluate:
-            world_keys = list(self.worlds.keys())
-            # print('eval\n')
+            # 0th world key is that assigned by the global idx_counter. This ensures no two eval envs will be 
+            # evaluating the same world if it can be avoided. 
+            self.last_world_key = self.world_key_queue[0] if self.last_world_key is None else self.last_world_key
+
+            # From here on, the next world we evaluate is num_eval_envs away from the one we just evaluated.
+            world_keys = list(self.world_queue.keys())
             # FIXME: maybe inefficient to call index
-            self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]
-            self.set_world(self.worlds[self.world_key])
+            self.world_key = world_keys[(world_keys.index(self.last_world_key) + self.num_eval_envs) % len(self.world_queue)]
+            self.set_world(self.world_queue[self.world_key])
+        else:
+            self.world_key = self.world_key_queue[0] if self.world_key_queue else None
+            self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
+            if self.world_key:
+                self.set_world(self.world_queue.pop(self.world_key))
 
         # self.next_world = None if not self.enjoy and not self.world_queue else self.world_queue[self.world_key_queue[0]]
         # self.world_queue = self.world_queue[1:] if self.world_queue else []
@@ -188,9 +193,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
         # reset() call occurs on the first step (resulting in max_steps - 1).
         if not evaluate:
-            # print(f'get world stats at step {self.n_step} with max step {self.max_episode_steps}')
-            TT()
-            assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
+            print(f'Get world {self.world_key} stats at step {self.n_step} with max step {self.max_episode_steps}')
+            # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
 
         world_stats = []
         next_stats = []
@@ -305,4 +309,4 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
             self.stats[-1]['n_steps'] = self.n_step
         else:
             assert not self.evaluate
-            assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
+            # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1

@@ -45,6 +45,9 @@ class IdxCounter:
     def get(self, hsh):
         world_key_queue = self.hashes_to_idxs[hsh]
 
+        if not world_key_queue:
+            raise Exception("No world keys provided.")
+
         return world_key_queue
 
         # if self.idxs is None:

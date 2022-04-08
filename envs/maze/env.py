@@ -246,13 +246,13 @@ class ParticleGymRLlib(ParticleGym):
         # TODO: clean up this data structure.
         # self.stats = []
 
-        evaluate = cfg.pop("evaluate")
+        evaluate = cfg.get("evaluate")
         # self.need_world_reset = False
         self.fully_observable = cfg.get('fully_observable')
         # self.regret_losses = []
 
         # Global knowledge of number of eval envs for incrementing eval world idx
-        self.num_eval_envs = cfg.pop('num_eval_envs', None)
+        self.num_eval_envs = cfg.get('num_eval_envs', None)
         if self.evaluate:
             assert self.num_eval_envs is not None
 

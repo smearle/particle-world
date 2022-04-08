@@ -167,11 +167,11 @@ if __name__ == '__main__':
         n_rllib_envs = 1
     else:
         n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
-            else (1 if env_is_minerl else 6)
+            else (1 if env_is_minerl else n_envs_per_worker)
 
     cfg.n_rllib_envs = n_rllib_envs
-    cfg.evo_batch_size = 12
-    cfg.n_eps_on_train = 12
+    cfg.evo_batch_size = 24
+    cfg.n_eps_on_train = 6
 
     # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
     assert cfg.evo_batch_size % cfg.n_eps_on_train == 0

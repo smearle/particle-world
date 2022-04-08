@@ -64,7 +64,7 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
             n_envs = len(hashes)
 
             # Select a subset of the worlds to simulate on in this call to ``train()``.
-            sub_idxs = idxs[world_id:min(world_id + n_envs, len(idxs))]
+            sub_idxs = idxs[world_id:min(world_id + cfg.n_eps_on_train, len(idxs))]
             idx_counter.set_idxs.remote(sub_idxs)
             idx_counter.set_hashes.remote(hashes)
 
@@ -201,7 +201,7 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
         # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
-            assert len(new_world_stats) == len(sub_idxs)
+            assert len(aggregate_new_qd_stats) == len(sub_idxs)
             world_id = len(world_stats)
         else:
             world_id += len(new_world_stats)

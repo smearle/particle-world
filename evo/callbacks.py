@@ -81,6 +81,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
         # After player training, the reckoning: re-evaluate all worlds against updated player policies.
         net_itr -= 1
         if cfg.rllib_eval:
+            print(f"{len(invalid_inds)} up for re-evaluation.")
             rl_stats, world_stats, logbook_stats_from_eval = rllib_evaluate_worlds(
                 net_itr=net_itr, trainer=trainer, worlds={i: ind for i, ind in enumerate(invalid_inds)},
                 idx_counter=idx_counter, start_time=start_time, cfg=cfg)
