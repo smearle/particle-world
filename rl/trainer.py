@@ -24,7 +24,7 @@ from envs import eval_mazes
 from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import RegretCallbacks
-from rl.eval_worlds import rllib_evaluate_worlds
+from rl.eval_worlds import evaluate_worlds
 from utils import get_solution
 
 
@@ -51,14 +51,14 @@ def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=Non
         # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
         # weights start changing.
         if i % 10 == 0:
-            rllib_save_model(trainer, cfg.save_dir)
+            save_model(trainer, cfg.save_dir)
         replace = True if cfg.fixed_worlds else True
         if isinstance(worlds, dict):
             world_keys = list(worlds.keys())
         else:
             assert isinstance(worlds, Iterable)
             world_keys = list(range(len(worlds)))
-        world_keys = np.random.choice(world_keys, cfg.n_eps_on_train, replace=replace)
+        world_keys = np.random.choice(world_keys, cfg.world_batch_size, replace=replace)
         # curr_lands = np.array(landscapes)[world_keys]
         curr_worlds = [worlds[wk] for wk in world_keys]
         worlds = {i: l for i, l in enumerate(curr_worlds)}
@@ -66,7 +66,7 @@ def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=Non
         # Get world heuristics on first iteration only, since they won't change after this inside training loop
         # calc_world_heuristics = (i == 0)
 
-        rl_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(
+        rl_stats, qd_stats, logbook_stats = evaluate_worlds(
             net_itr=net_itr, trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, is_training_player=True,
             start_time=start_time)
         recent_rewards[:-1] = recent_rewards[1:]
@@ -211,10 +211,11 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
     if cfg.env_is_minerl or cfg.gen_adversarial_worlds:
         evaluation_interval = 0
     else:
+        # After how many calls to train do we evaluate?
         # Evaluate policies once after every player-training phase. If we're evolving/training until convergence, just
         # evaluate every 10 iterations. If we're "enjoying", just need to set this to any number > 0 to ensure we 
         # initialize the evaluation workers.
-        evaluation_interval = ((cfg.gen_phase_len + 1 + cfg.play_phase_len) \
+        evaluation_interval = ((cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size / cfg.n_eps_on_train \
             if -1 not in [cfg.gen_phase_len, cfg.gen_phase_len] else 10) if not cfg.enjoy else 10
 
     if cfg.enjoy:
@@ -264,7 +265,8 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
         "evaluation_interval": evaluation_interval,
 
-        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.n_rllib_workers,
+        # We'll only parallelize eval workers when doing evaluation on pre-trained agents.
+        "evaluation_num_workers": 3 if not (cfg.evaluate) else cfg.n_rllib_workers,
 
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
@@ -319,9 +321,18 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         hashes = eval_workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
         n_eval_envs = sum([e for we in hashes for e in we])
         idxs = list(eval_mazes.keys())
+
+        eval_envs_per_worker = eval_workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: env))
+        eval_envs = [env for we in eval_envs_per_worker for env in we]
+        n_eval_envs = len(eval_envs)
+
+        # Pad the list of indices with duplicates in case we have more than enough eval environments
+        idxs *= math.ceil(n_eval_envs / len(idxs))
+        idxs = idxs[:n_eval_envs]
+
         idx_counter.set_idxs.remote(idxs)
         hashes = [h for wh in hashes for h in wh]
-        idx_counter.set_hashes.remote(hashes, allow_one_to_many=False)
+        idx_counter.set_hashes.remote(hashes)
         # FIXME: Sometimes hash-to-idx dict is not set by the above call?
         assert ray.get(idx_counter.scratch.remote())
         # Assign envs to worlds
@@ -354,7 +365,7 @@ def gen_policy(i, observation_space, action_space, field_of_view):
     return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
 
 
-def rllib_save_model(trainer, save_dir):
+def save_model(trainer, save_dir):
     checkpoint = trainer.save(save_dir)
     # Delete previous checkpoint
     ckp_path_file = os.path.join(save_dir, 'model_checkpoint_path.txt')

@@ -9,7 +9,7 @@ from ray.tune.logger import pretty_print
 from evo.utils import get_archive_world_heuristics
 
 
-def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
+def evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
                           is_training_player=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
@@ -103,7 +103,7 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
                 stats = trainer.evaluate()
 
             else:
-                print(f'train worlds {sub_idxs}')
+                print(f'Calling trainer.train with worlds {sub_idxs}.')
                 stats = trainer.train()
 #               if is_training_player:
 #                   log_result = {k: v for k, v in stats.items() if k in cfg.log_keys}

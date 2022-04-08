@@ -38,7 +38,7 @@ from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndivid
 from ray.tune.logger import pretty_print
 from ray.tune.registry import register_env
 from rl.trainer import init_particle_trainer, train_players, toggle_exploration
-from rl.eval_worlds import rllib_evaluate_worlds
+from rl.eval_worlds import evaluate_worlds
 from rl.utils import IdxCounter
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
@@ -170,11 +170,11 @@ if __name__ == '__main__':
             else (1 if env_is_minerl else n_envs_per_worker)
 
     cfg.n_rllib_envs = n_rllib_envs
-    cfg.evo_batch_size = 24
+    cfg.world_batch_size = 12
     cfg.n_eps_on_train = 6
 
     # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
-    assert cfg.evo_batch_size % cfg.n_eps_on_train == 0
+    assert cfg.world_batch_size % cfg.n_eps_on_train == 0
 
     # We don't want any wasted episodes when we call train() to evaluate worlds.
     assert cfg.n_eps_on_train % cfg.n_rllib_envs == 0
@@ -324,7 +324,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if cfg.fixed_worlds:
                 trainer.workers.local_worker().set_policies_to_train([])
-                rllib_evaluate_worlds(trainer=trainer, worlds=training_worlds,
+                evaluate_worlds(trainer=trainer, worlds=training_worlds,
                                       fixed_worlds=cfg.fixed_worlds, render=cfg.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
@@ -336,7 +336,7 @@ if __name__ == '__main__':
             elites = sorted(archive, key=lambda ind: ind.fitness, reverse=True)
             worlds = [i for i in elites]
             for i, elite in enumerate(worlds):
-                ret = rllib_evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
+                ret = evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
                                             evaluate_only=True, cfg=cfg)
             print('Done enjoying, goodbye!')
             sys.exit()
@@ -431,8 +431,8 @@ if __name__ == '__main__':
     # assert (dimension >= 2)
     assert (nb_features >= 1)
 
-    init_batch_size = cfg.evo_batch_size  # The number of evaluations of the initial batch ('batch' = population)
-    batch_size = cfg.evo_batch_size  # The number of evaluations in each subsequent batch
+    init_batch_size = cfg.world_batch_size  # The number of evaluations of the initial batch ('batch' = population)
+    batch_size = cfg.world_batch_size  # The number of evaluations in each subsequent batch
     nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome

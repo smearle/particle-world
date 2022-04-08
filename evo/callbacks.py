@@ -8,7 +8,7 @@ from timeit import default_timer as timer
 import ray
 
 from evo.utils import get_archive_world_heuristics, qdpy_save_archive
-from rl.eval_worlds import rllib_evaluate_worlds
+from rl.eval_worlds import evaluate_worlds
 from rl.trainer import train_players
 from utils import update_individuals
 from visualize import visualize_archive
@@ -59,7 +59,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
             if len(training_worlds) == 0:
                 return net_itr
 
-            training_worlds *= math.ceil(cfg.n_rllib_envs / len(training_worlds))
+            training_worlds *= math.ceil(cfg.world_batch_size / len(training_worlds))
 
         net_itr = train_players(net_itr=net_itr, play_phase_len=cfg.play_phase_len, trainer=trainer,
                                 worlds=training_worlds, idx_counter=idx_counter, cfg=cfg, logbook=logbook)
@@ -70,7 +70,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
 
         # Pop individuals from the container for re-evaluation.
         # Randomly select individuals to pop, without replacement
-        invalid_inds = random.sample(archive, k=min(cfg.evo_batch_size, len(archive)))
+        invalid_inds = random.sample(archive, k=min(cfg.world_batch_size, len(archive)))
         # invalid_ind = [ind for ind in container]
 
         # TODO: we have an n-time lookup in discard. We should be getting the indices of the individuals directly,
@@ -82,7 +82,7 @@ def phase_switch_callback(net_itr, gen_itr, play_itr, trainer, archive, toolbox,
         net_itr -= 1
         if cfg.rllib_eval:
             print(f"{len(invalid_inds)} up for re-evaluation.")
-            rl_stats, world_stats, logbook_stats_from_eval = rllib_evaluate_worlds(
+            rl_stats, world_stats, logbook_stats_from_eval = evaluate_worlds(
                 net_itr=net_itr, trainer=trainer, worlds={i: ind for i, ind in enumerate(invalid_inds)},
                 idx_counter=idx_counter, start_time=start_time, cfg=cfg)
             logbook_stats.update(logbook_stats_from_eval)

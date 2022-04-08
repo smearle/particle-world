@@ -472,11 +472,12 @@ class NCA(TorchModelV2, nn.Module):
 
 class FloodModel(TorchModelV2, nn.Module):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
-                model_config: ModelConfigDict, name: str):
+                model_config: ModelConfigDict, name: str, player_chan=None, **kwargs):
         TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
                                              model_config=model_config, name=name)
         nn.Module.__init__(self)
-        self.player_chan = model_config['custom_model_config'].pop("player_chan")
+        # self.player_chan = model_config['custom_model_config'].pop("player_chan")
+        self.player_chan = player_chan
         assert self.player_chan is not None
         self.obs_space = obs_space
         self.n_hid_chans = n_hid_chans = 64

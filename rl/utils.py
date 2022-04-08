@@ -50,16 +50,6 @@ class IdxCounter:
 
         return world_key_queue
 
-        # if self.idxs is None:
-        #     Then we are doing inference and have set the idx directly
-        #
-        # return self.count
-        #
-        # idx = self.idxs[self.count % len(self.idxs)]
-        # self.count += 1
-        #
-        # return idx
-
     def set(self, i):
         # For inference
         self.count = i
@@ -68,36 +58,20 @@ class IdxCounter:
         self.count = 0
         self.world_keys = idxs
 
-    def set_hashes(self, hashes, allow_one_to_many: bool=True):
+    def set_hashes(self, hashes):
         """
+        Note that we may assign the same environment/hash to multiple worlds.
+
         Args:
             hashes: A list of hashes, one per environment object.
-            allow_one_to_many (bool): Whether we allow one environment/hash to be mapped to multiple worlds (self.idxs).
         """
         hashes_to_idxs = {h: [] for h in hashes}
+
         for i, wk in enumerate(self.world_keys):
             h = hashes[i % len(hashes)]
             hashes_to_idxs[h].append(wk)
         
-#        if not allow_one_to_many:
-#            assert len(hashes) >= len(self.world_keys)
-#            # If we have more hashes than indices, map many-to-one
-##           if len(hashes) > len(idxs):
-##               n_repeats = math.ceil(len(hashes) / len(idxs))
-##               idxs = np.tile(idxs, n_repeats)
-#
-#            # Map hashes of each environment to world keys/names/IDs
-#            self.hashes_to_idxs = {hsh: id for hsh, id in zip(hashes, self.world_keys[:len(hashes)])}
-#       else:
-        # Just for efficiency.
-#       assert len(self.world_keys) % len(hashes) == 0
-#       n_worlds_per_env = len(self.world_keys) // len(hashes)
-#       hashes_to_idxs = {}
-#       for i, hsh in enumerate(hashes):
-#           hashes_to_idxs[hsh] = self.world_keys[i * n_worlds_per_env:(i + 1) * n_worlds_per_env]
-
         self.hashes_to_idxs = hashes_to_idxs
-
 
     def scratch(self):
         return self.hashes_to_idxs

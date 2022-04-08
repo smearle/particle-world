@@ -5,7 +5,7 @@ import ray
 import deap
 from timeit import default_timer as timer
 
-from rl.eval_worlds import rllib_evaluate_worlds
+from rl.eval_worlds import evaluate_worlds
 from utils import update_individuals
 
 
@@ -58,7 +58,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
     invalid_ind = init_batch
 
     if cfg.rllib_eval:
-        rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(
+        rllib_stats, world_stats, logbook_stats = evaluate_worlds(
             trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(init_batch)}, cfg=cfg, idx_counter=idx_counter,
             net_itr=net_itr, start_time=start_time)
         # assert len(rllib_stats) == 1
@@ -131,7 +131,7 @@ def qdRLlibEval(init_batch, toolbox, container, batch_size, niter,
 
         if cfg.rllib_eval:
             print(f"{len(invalid_ind)} new offspring up for evaluation.")
-            rllib_stats, world_stats, logbook_stats = rllib_evaluate_worlds(net_itr=net_itr,
+            rllib_stats, world_stats, logbook_stats = evaluate_worlds(net_itr=net_itr,
                 trainer=rllib_trainer, worlds={i: ind for i, ind in enumerate(invalid_ind)}, idx_counter=idx_counter,
                 start_time=start_time, cfg=cfg)
 
