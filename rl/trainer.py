@@ -218,7 +218,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
             if -1 not in [cfg.gen_phase_len, cfg.gen_phase_len] else 10) if not cfg.enjoy else 10
 
     if cfg.enjoy:
-        # Technically, we have 2 episodes during each call to eval. Imagine we have just called ``trainer.set_worlds()``.
+        # Technically, we have 2 episodes during each call to eval. Imagine we have just called ``trainer.queue_worlds()``.
         # Then when we call ``trainer.evaluate()``, the environment is done on the first step, so that it can load the
         # next world on the subsequent reset. It then iterates through the usual number of steps and is done. The first
         # episode is an exception. 
@@ -274,7 +274,8 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         "evaluation_duration": evaluation_num_episodes,
         "evaluation_duration_unit": "episodes",
 
-        # TODO: run the right number of episodes s.t. we simulate on each map the same number of times
+        # We *almost* run the right number of episodes s.t. we simulate on each map the same number of times. But there
+        # are some garbage resets in there (???).
         "evaluation_config": {
             "env_config": {
                 # "n_pop": 1,
@@ -294,8 +295,8 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
 
         # TODO: try increasing batch size to ~500k, expect a few minutes update time
-        "train_batch_size": env.max_episode_steps * cfg.n_rllib_envs,
-        "sgd_minibatch_size": env.max_episode_steps * cfg.n_rllib_envs if (cfg.enjoy or cfg.evaluate) and cfg.render else 128,
+        "train_batch_size": env.max_episode_steps * cfg.n_eps_on_train,
+        # "sgd_minibatch_size": env.max_episode_steps * cfg.n_rllib_envs if (cfg.enjoy or cfg.evaluate) and cfg.render else 128,
         "logger_config": logger_config if not (cfg.enjoy or cfg.evaluate) else {},
     }
 
@@ -309,7 +310,8 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
 
     trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
-    # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs
+    # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs. We do not evaluate when 
+    # evolving adversarial worlds.
     if not cfg.enjoy and not cfg.gen_adversarial_worlds and not cfg.env_is_minerl:  # TODO: eval worlds in minerl
         # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_key of each env will be incremented
         # by len(eval_mazes) each reset.
@@ -319,12 +321,12 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         idxs = list(eval_mazes.keys())
         idx_counter.set_idxs.remote(idxs)
         hashes = [h for wh in hashes for h in wh]
-        idx_counter.set_hashes.remote(hashes, allow_one_to_many=True)
+        idx_counter.set_hashes.remote(hashes, allow_one_to_many=False)
         # FIXME: Sometimes hash-to-idx dict is not set by the above call?
         assert ray.get(idx_counter.scratch.remote())
         # Assign envs to worlds
         eval_workers.foreach_worker(
-            lambda worker: worker.foreach_env(lambda env: env.set_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
+            lambda worker: worker.foreach_env(lambda env: env.queue_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
 
     if is_multiagent_env:
         policy_names = [f'policy_{i}' for i in range(n_policies)]

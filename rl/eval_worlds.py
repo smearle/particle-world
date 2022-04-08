@@ -74,7 +74,7 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
         # Assign envs to worlds
         workers.foreach_worker(
             lambda worker: worker.foreach_env(
-                lambda env: env.set_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
+                lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
 
         # If using oracle, manually load the world
         if cfg.oracle_policy:
@@ -103,6 +103,7 @@ def rllib_evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, i
                 stats = trainer.evaluate()
 
             else:
+                print(f'train worlds {sub_idxs}')
                 stats = trainer.train()
 #               if is_training_player:
 #                   log_result = {k: v for k, v in stats.items() if k in cfg.log_keys}

@@ -167,13 +167,17 @@ if __name__ == '__main__':
         n_rllib_envs = 1
     else:
         n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
-            else (1 if env_is_minerl else 12)
+            else (1 if env_is_minerl else 6)
 
     cfg.n_rllib_envs = n_rllib_envs
-    cfg.evo_batch_size = 120
+    cfg.evo_batch_size = 12
+    cfg.n_eps_on_train = 12
+
+    # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
+    assert cfg.evo_batch_size % cfg.n_eps_on_train == 0
 
     # We don't want any wasted episodes when we call train() to evaluate worlds.
-    assert cfg.evo_batch_size % n_rllib_envs == 0
+    assert cfg.n_eps_on_train % cfg.n_rllib_envs == 0
 
     register_env('world_evolution_env', make_env)
 
@@ -196,7 +200,7 @@ if __name__ == '__main__':
 
     #   ### DEBUGGING THE ENVIRONMENT ###
     #   if environment_class == ParticleMazeEnv:
-    #       env.set_worlds(eval_mazes)
+    #       env.queue_worlds(eval_mazes)
     #       obs = env.reset()
     #       for i in range(1000):
     #           env.render()
@@ -205,7 +209,7 @@ if __name__ == '__main__':
     #   # elif environment_class == ObtainDiamond:
     #   elif environment_class == TouchStone:
     #       init_world = TileFlipIndividual3D(env.task.width-2, env.n_chan, unique_chans=env.unique_chans).discrete
-    #       # env.set_worlds({'world_0': init_world})
+    #       # env.queue_worlds({'world_0': init_world})
     #       obs = env.reset()
     #       done = False
     #       for i in range(6000):

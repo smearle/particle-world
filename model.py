@@ -672,11 +672,11 @@ if __name__ == '__main__':
          'fully_observable': True})
     cv2.namedWindow("FloodFill")
 
-    # env.set_worlds(worlds = eval_mazes)
+    # env.queue_worlds(worlds = eval_mazes)
     world_keys = list(eval_mazes.keys()) * 2
 
     for wk in world_keys:
-        env.set_worlds(worlds = {wk: eval_mazes[wk]})
+        env.queue_worlds(worlds = {wk: eval_mazes[wk]})
         obs = env.reset()
         env.render()
         done = {(0, 0): False}

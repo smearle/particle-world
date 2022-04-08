@@ -61,7 +61,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.last_world_key = self.world_key
         self.world = None
         self.world_gen_sequence = None
-        self.next_world = None
+        self.world_queue = None
         cfg = env_cfg.get('cfg')
         self.enjoy = cfg.enjoy
 
@@ -79,7 +79,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
 
-    def set_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
+    def queue_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
         """Assign a ``next_world`` to the environment, which will be loaded after the next step.
         
         We set flag ``need_world_reset`` to True, so that the next step will return done=True, and the environment will
@@ -92,18 +92,24 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # Figure out which world to evaluate.
         # self.world_idx = 0
         if idx_counter:
-            self.world_key = ray.get(idx_counter.get.remote(hash(self)))
+            self.world_key_queue = ray.get(idx_counter.get.remote(hash(self)))
         else:
+            # Do we ever use this?
             self.world_key = np.random.choice(list(worlds.keys()))
 
         # FIXME: hack
         # self.unwrapped.world_key = self.world_key
 
         # Assign this world to myself.
-        self.set_world(worlds[self.world_key])
-        self.worlds = self.unwrapped.worlds = worlds
-        if next_n_pop is not None:
-            self.next_n_pop = next_n_pop
+        self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue}
+        # self.set_world(worlds[self.world_key])
+        # self.worlds = self.unwrapped.worlds = worlds
+
+#       # Support changing number of players per policy between episodes (in case we want to evaluate policies 
+#      #  deterministically, for example).   
+#       if next_n_pop is not None:
+#           self.next_n_pop = next_n_pop
+
         if world_gen_sequences is not None and len(world_gen_sequences) > 0:
             self.world_gen_sequence = world_gen_sequences[self.world_key]
 
@@ -140,8 +146,12 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
-        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
+        print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
+        self.world_key = self.world_key_queue[0] if self.world_key_queue else None
+        self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
+        if self.world_key:
+            self.set_world(self.world_queue.pop(self.world_key))
 
         # We are now resetting and loading the next world. So we switch this flag off.
         self.need_world_reset = False
@@ -154,7 +164,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
             self.world_key = world_keys[(world_keys.index(self.world_key) + self.num_eval_envs) % len(self.worlds)]
             self.set_world(self.worlds[self.world_key])
 
-        self.next_world = None if not self.enjoy else self.next_world
+        # self.next_world = None if not self.enjoy and not self.world_queue else self.world_queue[self.world_key_queue[0]]
+        # self.world_queue = self.world_queue[1:] if self.world_queue else []
 
         obs = super().reset()
         self.reset_stats()
@@ -178,14 +189,16 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # reset() call occurs on the first step (resulting in max_steps - 1).
         if not evaluate:
             # print(f'get world stats at step {self.n_step} with max step {self.max_episode_steps}')
+            TT()
             assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
 
         world_stats = []
         next_stats = []
 
         if not evaluate:
-            assert len(self.stats) == 1
+            # assert len(self.stats) == cfg.n_eps_on_train // cfg.n_eps_per_world 
             # print(f'stats: {self.stats}')
+            pass
 
         for i, stats_dict in enumerate(self.stats):
 

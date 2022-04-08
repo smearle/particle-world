@@ -329,7 +329,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
             self.eval_maze_i = 0
         super().__init__(cfg)
 
-        # Set this broken dummy world only to placate RLlib during dummy reset. Immediately after, we should set_worlds,
+        # Set this broken dummy world only to placate RLlib during dummy reset. Immediately after, we should queue_worlds,
         # which will instigate another reset at the next step.
         dummy_world = np.zeros((width-2, width-2))
         dummy_world[1, 1] = self.start_chan
