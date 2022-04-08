@@ -145,10 +145,6 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.has_rendered_world_gen = False
         # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
-        self.world_key = self.world_key_queue[0] if self.world_key_queue else None
-        self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
-        if self.world_key:
-            self.set_world(self.world_queue.pop(self.world_key))
 
         # We are now resetting and loading the next world. So we switch this flag off.
         self.need_world_reset = False
