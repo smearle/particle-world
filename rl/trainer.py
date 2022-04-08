@@ -18,6 +18,8 @@ from ray.rllib.agents.ppo import ppo
 from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
 from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import Logger
+from ray.rllib.agents import Trainer
+from ray.rllib.evaluation.worker_set import WorkerSet
 from timeit import default_timer as timer
 
 from envs import eval_mazes
@@ -261,6 +263,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
         "render_env": cfg.render if not cfg.enjoy else True,
+        # "custom_eval_function": evo_evaluate,
 
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
         "evaluation_interval": evaluation_interval,
@@ -365,7 +368,7 @@ def gen_policy(i, observation_space, action_space, field_of_view):
     return PolicySpec(config=config, observation_space=observation_space, action_space=action_space)
 
 
-def save_model(trainer, save_dir):
+def save_model(trainer: Trainer, save_dir: str):
     checkpoint = trainer.save(save_dir)
     # Delete previous checkpoint
     ckp_path_file = os.path.join(save_dir, 'model_checkpoint_path.txt')
@@ -381,8 +384,13 @@ def save_model(trainer, save_dir):
     # print("checkpoint saved at", checkpoint)
 
 
-def toggle_exploration(trainer, explore: bool, n_policies: int):
+def toggle_exploration(trainer: Trainer, explore: bool, n_policies: int):
     for i in range(n_policies):
         trainer.get_policy(f'policy_{i}').config["explore"] = explore
         # Need to update each remote training worker as well (if they exist)
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
+
+
+def evo_evaluate(trainer: Trainer, eval_workers: WorkerSet) -> dict:
+    # TT()
+    trainer.evaluate()

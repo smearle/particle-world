@@ -32,7 +32,7 @@ from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_maze
 from envs.wrappers import make_env
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from evo.utils import qdpy_save_archive
-from evo.evolve import qdRLlibEval
+from evo.evolve import WorldEvolver
 from evo.callbacks import iteration_callback
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
 from ray.tune.logger import pretty_print
@@ -483,26 +483,37 @@ if __name__ == '__main__':
     # toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
 
     # with ParallelismManager(cfg.parallelismType, toolbox=toolbox) as pMgr:
-    qd_algo = partial(qdRLlibEval, rllib_trainer=trainer, cfg=cfg, net_itr=net_itr,
-                      gen_itr=gen_itr, logbook=logbook, play_itr=play_itr)
+    # qd_algo = partial(qdRLlibEval, rllib_trainer=trainer, cfg=cfg, net_itr=net_itr,
+                    #   gen_itr=gen_itr, logbook=logbook, play_itr=play_itr)
     # The staleness counter will be incremented whenever a generation of evolution does not result in any update to
     # the archive. (Crucially, it is mutable.)
     staleness_counter = [0]
     callback = partial(iteration_callback, toolbox=toolbox, cfg=cfg,
                        staleness_counter=staleness_counter, trainer=trainer)
     # Create a QD algorithm
-    algo = DEAPQDAlgorithm(toolbox, archive, init_batch_siz=init_batch_size,
+    world_evolver = WorldEvolver(toolbox=toolbox, archive=archive, init_batch_siz=init_batch_size,
                            batch_size=batch_size, niter=nb_iterations,
                            verbose=verbose, show_warnings=show_warnings,
                            results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                            iteration_filename=f'{experiment_name}' + '/latest-{}.p',
                            iteration_callback_fn=callback,
-                           ea_fn=qd_algo,
+                           trainer=trainer, idx_counter=idx_counter, cfg=cfg, 
+                           # TODO: don't need these anymore.
+                           net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr,
                            )
     # Run the illumination process !
-    algo.run(init_batch_size=init_batch_size)
+    world_evolver.run_setup(init_batch_size=init_batch_size)
+    # TODO: main outer loop ...
+    done = False
+    while not done:
+        done = world_evolver.evolve(net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr)
+
+    if world_evolver.final_filename != None and world_evolver.final_filename != "":
+        world_evolver.save(os.path.join(world_evolver.log_base_path, world_evolver.final_filename))
+    total_elapsed = timer() - world_evolver.start_time
+
     # Print results info
-    print(f"Total elapsed: {algo.total_elapsed}\n")
+    print(f"Total elapsed: {world_evolver.total_elapsed}\n")
     print(archive.summary())
     # print("Best ever fitness: ", container.best_fitness)
     # print("Best ever ind: ", container.best)
@@ -516,4 +527,6 @@ if __name__ == '__main__':
     plotGridSubplots(archive.quality_array[..., 0], plot_path, plt.get_cmap("nipy_spectral_r"), features_domain,
                      cfg.fitness_domain[0], nbTicks=None)
     print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
-    print("All results are available in the '%s' pickle file." % algo.final_filename)
+    print("All results are available in the '%s' pickle file." % world_evolver.final_filename)
+
+

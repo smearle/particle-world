@@ -39,7 +39,7 @@
     # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
     # number of cells the agent can see in each direction (excluding its own position).
     "fullobs_fov_models": [
-#       [false, 2, "paired"],
-        [true, -1, "paired"],
+        [false, 2, "paired"],
+#       [true, -1, "paired"],
     ]
 }
