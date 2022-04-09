@@ -149,7 +149,7 @@ class WorldEvolver(DEAPQDAlgorithm):
         #     raise ValueError("No individual could be added to the container !")
 
         # Compile stats and update logs
-        logbook_stats = self.stats.compile(self.container) if self.stats else {}
+        logbook_stats.update(self.stats.compile(self.container) if self.stats else {})
         logbook_stats.update({
             'containerSize': self.container.size_str(), 'evals': len(batch), 
             'nbUpdated': n_updated, 'elapsed': timer() - start_time})

@@ -47,7 +47,7 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
     # fitnesses = {k: [] for k in worlds}
     rl_stats = []
 
-    # Train/evaluate on all worlds n_trials many times each
+    # TODO: Train/evaluate on all worlds n_trials-many times each?
     # for i in range(n_trials):
     world_stats = {}
     world_id = 0
@@ -119,22 +119,7 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
             new_world_stats = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=cfg.quality_diversity)))
-        # assert(len(rl_stats) == 1)  # TODO: bring back this assertion except when we're re-evaluating world archive after training
-        last_rl_stats = rl_stats[-1]
-#       logbook_stats = {'iteration': net_itr}
-        logbook_stats = {}
-        stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
-        # if i == 0:
-#       if calc_world_heuristics:
-#           # TODO: only getting these heuristics on the subset of maps on which we train, at the moment
-#           env_world_heuristics = get_env_world_complexity(trainer)
-#           logbook_stats.update({f'{k}Path': env_world_heuristics[f'{k}_path_length'] for k in stat_keys})
-        if is_training_player and not evaluate_only:
-            logbook_stats.update({
-                f'{k}Rew': last_rl_stats[f'episode_reward_{k}'] for k in stat_keys})
-        if 'evaluation' in last_rl_stats:
-            logbook_stats.update({
-                f'{k}EvalRew': last_rl_stats['evaluation'][f'episode_reward_{k}'] for k in stat_keys})
+
         # logbook.record(**logbook_stats)
         # print(logbook.stream)
 
@@ -207,12 +192,33 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
         else:
             world_id += len(new_world_stats)
 
+    # Since we may have performed multiple train/eval calls, we merge the stats from each call.
+    stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
+    aggregate_rl_stats = {f"episode_reward_{k}": [] for k in stat_keys}
+    aggregate_rl_stats.update({f"evaluation_episode_reward_{k}": [] for k in stat_keys})
+    for k in stat_keys:
+        # Note that we're using either np.mean, np.min, or np.max depending on the stat itself we are aggregating.
+        aggregate_rl_stats[f"episode_reward_{k}"] = getattr(np, k)([stats[f"episode_reward_{k}"] \
+            for stats in rl_stats])
+        aggregate_rl_stats[f"evaluation_episode_reward_{k}"] = [stats["evaluation"][f"episode_reward_{k}"] \
+            for stats in rl_stats if "evaluation" in stats]
+
+    # We may have no stats from evaluation, so we need to check for that, then take min/mean/max over trials.
+    [aggregate_rl_stats.update({f"evaluation_episode_reward_{k}": \
+        getattr(np, k)(stats["evaluation"][f"episode_reward_{k}"])}) for k in stat_keys \
+            if aggregate_rl_stats[f"evaluation_episode_reward_{k}"]]
+
+    logbook_stats = {}
+    if is_training_player and not evaluate_only:
+        logbook_stats.update({
+            f'{k}Rew': aggregate_rl_stats[f'episode_reward_{k}'] for k in stat_keys})
+
+    if aggregate_rl_stats["evaluation_episode_reward_mean"]:
+        logbook_stats.update({
+            f'{k}EvalRew': aggregate_rl_stats[f'evaluation_episode_reward_{k}'] for k in stat_keys})
+
     logbook_stats.update({
         'elapsed': timer() - start_time,
     })
 
-        # [fitnesses[k].append(v) for k, v in trial_fitnesses.items()]
-    # fitnesses = {k: ([np.mean([vi[0][fi] for vi in v]) for fi in range(len(v[0][0]))],
-    #         [np.mean([vi[1][mi] for vi in v]) for mi in range(len(v[0][1]))]) for k, v in fitnesses.items()}
-
-    return last_rl_stats, world_stats, logbook_stats
+    return aggregate_rl_stats, world_stats, logbook_stats
