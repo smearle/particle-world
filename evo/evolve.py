@@ -132,6 +132,7 @@ class WorldEvolver(DEAPQDAlgorithm):
             assert len(self.init_batch) >= batch_size
             offspring = self.init_batch[:batch_size]
 
+        # Otherwise, generate a new batch by applying genetic operators to a subset of the individuals in the archive.
         else:
             batch = self.toolbox.select(self.container, batch_size)
 

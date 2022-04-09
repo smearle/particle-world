@@ -124,7 +124,6 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
             new_world_stats = workers.foreach_worker(
                 lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=cfg.quality_diversity)))
-
         # logbook.record(**logbook_stats)
         # print(logbook.stream)
 

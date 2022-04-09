@@ -54,7 +54,7 @@ def train_players(worlds, trainer, cfg, idx_counter=None):
     :param idx_counter: (Actor) ray actor accessed by parallel rllib envs to assign them unique world_keys.
     :param logbook: (Logbook) qdpy logbook to record (evolution and) training stats.
     """
-    trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
+#   trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
     # toggle_exploration(trainer, explore=True, n_policies=n_policies)
     i = 0
 #   staleness_window = 10
