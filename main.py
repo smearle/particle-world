@@ -31,17 +31,16 @@ from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_maze
     ghost_action_test_maze
 from envs.wrappers import make_env
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
-from evo.utils import qdpy_save_archive
+from evo.utils import compute_archive_world_heuristics, save
 from evo.evolve import WorldEvolver
-from evo.callbacks import iteration_callback
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
 from ray.tune.logger import pretty_print
 from ray.tune.registry import register_env
-from rl.trainer import init_particle_trainer, train_players, toggle_exploration
+from rl.trainer import init_particle_trainer, toggle_train_player, train_players, toggle_exploration
 from rl.eval_worlds import evaluate_worlds
 from rl.utils import IdxCounter
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
-from utils import compile_train_stats, get_experiment_name, qdpy_eval, update_individuals, load_config
+from utils import compile_train_stats, get_experiment_name, load_config
 from visualize import visualize_train_stats, visualize_archive
 
 seed = None
@@ -53,6 +52,32 @@ generator_phase = True  # Do we start by evolving generators, or training player
 fitness_weight = -1.0
 creator.create("FitnessMin", base.Fitness, weights=(-fitness_weight,))
 creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
+
+
+def log(logbook: tools.Logbook, stats: dict, net_itr: int):
+    stats.update({'iteration': net_itr, **stats})
+    logbook.record(**stats)
+    print(logbook.stream)
+
+
+def get_done_gen_phase(world_evolver, gen_itr, cfg):
+
+    if gen_itr == 0:
+        return False
+
+    if cfg.gen_phase_len != -1 and gen_itr % cfg.gen_phase_len == 0:
+        return True
+
+    if world_evolver.stale_generators:
+        world_evolver.reset_staleness()
+        return True
+
+#   if world_evolver.optimal_generators:
+#       return True
+
+
+def get_done_play_phase(play_itr, cfg):
+    return play_itr % cfg.play_phase_len == 0
 
 
 if __name__ == '__main__':
@@ -68,7 +93,7 @@ if __name__ == '__main__':
     pg_width = 500
     pg_scale = pg_width / cfg.width
     # swarm_type = MemorySwarm
-    cfg.qdpy_save_interval = 100
+    cfg.save_interval = 100
     cfg.archive_size = 1024
     cfg.translated_observations = True
     cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
@@ -138,7 +163,7 @@ if __name__ == '__main__':
 
     elif cfg.environment_class == 'TouchStone':
         env_is_minerl = True
-        from minerl.herobraine.env_specs.obtain_specs import ObtainDiamond
+        # from minerl.herobraine.env_specs.obtain_specs import ObtainDiamond
         from envs.minecraft.touchstone import TouchStone
 
         n_envs_per_worker = 1
@@ -270,10 +295,21 @@ if __name__ == '__main__':
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
 
+    # If training on fixed worlds, select the desired training set.
     if cfg.fixed_worlds:
         # train_worlds = {0: generator.landscape}
         training_worlds = full_obs_test_mazes
         # training_worlds = ghost_action_test_maze
+
+    # If doing co-learning, do any setup that is necessary regardless of whether we're reloading or starting anew.
+    else:
+        # Default stats to be performed on worlds in the archive.
+        stats = tools.Statistics(lambda ind: ind.fitness.values)
+        stats.register("avg", np.mean, axis=0)
+        stats.register("std", np.std, axis=0)
+        stats.register("min", np.min, axis=0)
+        stats.register("max", np.max, axis=0)
+        # TODO: use similar logic to compute path-length stats on worlds? (But only once per world-generation phase.)
 
     if cfg.load:
         if not cfg.fixed_worlds:
@@ -287,7 +323,7 @@ if __name__ == '__main__':
             with open(os.path.join(loadfile_name), "rb") as f:
                 data = pickle.load(f)
 
-            archive = data['container']
+            archive = data['arhive']
             gen_itr = data['gen_itr']
             play_itr = data['play_itr']
             net_itr = data['net_itr']
@@ -411,12 +447,17 @@ if __name__ == '__main__':
                                    fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
 
         # TODO: use this when ``fixed_worlds``...?
-        logbook = None
+        logbook = tools.Logbook()
+        # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
+        # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
+        logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + stats.fields + ["meanRew", \
+            "meanEvalRew", "meanPath", "maxPath", "elapsed"]
 
     if cfg.fixed_worlds:
-        train_players(0, 1000, trainer=trainer, worlds=training_worlds,
-                      # TODO: initialize logbook even if not evolving worlds
-                      logbook=None, cfg=cfg)
+        for i in range(1000):
+            logbook_stats = train_players(trainer=trainer, worlds=training_worlds,
+                        # TODO: initialize logbook even if not evolving worlds
+                        cfg=cfg)
         print('Done training, goodbye!')
         sys.exit()
 
@@ -431,8 +472,6 @@ if __name__ == '__main__':
     # assert (dimension >= 2)
     assert (nb_features >= 1)
 
-    init_batch_size = cfg.world_batch_size  # The number of evaluations of the initial batch ('batch' = population)
-    batch_size = cfg.world_batch_size  # The number of evaluations in each subsequent batch
     nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Set the probability of mutating each value of a genome
@@ -474,8 +513,8 @@ if __name__ == '__main__':
 
     # Create a dict storing all relevant infos
     results_infos = {'ind_domain': ind_domain, 'features_domain': features_domain, 'fitness_domain': cfg.fitness_domain,
-                     'nb_bins': nb_bins, 'init_batch_size': init_batch_size, 'nb_iterations': nb_iterations,
-                     'batch_size': batch_size, 'eta': eta}
+                     'nb_bins': nb_bins, 'init_batch_size': cfg.world_batch_size, 'nb_iterations': nb_iterations,
+                     'batch_size': cfg.world_batch_size, 'eta': eta}
     # results_infos['dimension'] = dimension
     # results_infos['mutation_pb'] = mutation_pb
 
@@ -485,29 +524,78 @@ if __name__ == '__main__':
     # with ParallelismManager(cfg.parallelismType, toolbox=toolbox) as pMgr:
     # qd_algo = partial(qdRLlibEval, rllib_trainer=trainer, cfg=cfg, net_itr=net_itr,
                     #   gen_itr=gen_itr, logbook=logbook, play_itr=play_itr)
-    # The staleness counter will be incremented whenever a generation of evolution does not result in any update to
-    # the archive. (Crucially, it is mutable.)
-    staleness_counter = [0]
-    callback = partial(iteration_callback, toolbox=toolbox, cfg=cfg,
-                       staleness_counter=staleness_counter, trainer=trainer)
     # Create a QD algorithm
-    world_evolver = WorldEvolver(toolbox=toolbox, archive=archive, init_batch_siz=init_batch_size,
-                           batch_size=batch_size, niter=nb_iterations,
+    world_evolver = WorldEvolver(toolbox=toolbox, container=archive, init_batch_siz=cfg.world_batch_size,
+                           batch_size=cfg.world_batch_size, niter=nb_iterations, stats=stats,
                            verbose=verbose, show_warnings=show_warnings,
                            results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                            iteration_filename=f'{experiment_name}' + '/latest-{}.p',
-                           iteration_callback_fn=callback,
                            trainer=trainer, idx_counter=idx_counter, cfg=cfg, 
-                           # TODO: don't need these anymore.
-                           net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr,
                            )
     # Run the illumination process !
-    world_evolver.run_setup(init_batch_size=init_batch_size)
-    # TODO: main outer loop ...
+    world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
+
+    # The outer co-learning loop
+    toggle_train_player(trainer, train_player=False, cfg=cfg)
     done = False
     while not done:
-        done = world_evolver.evolve(net_itr=net_itr, gen_itr=gen_itr, play_itr=play_itr)
 
+        # Run world evolution
+        done_gen_phase = False
+        while not done_gen_phase:
+            logbook_stats = world_evolver.evolve()
+            gen_itr += 1
+            done_gen_phase = get_done_gen_phase(world_evolver, gen_itr, cfg)
+
+            if done_gen_phase:
+                save(archive=archive, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook,
+                                save_dir=cfg.save_dir)
+                mean_path_length = compute_archive_world_heuristics(archive=archive, trainer=trainer)
+                stat_keys = ['mean', 'min', 'max']  # , 'std]
+                logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
+
+            elif gen_itr % cfg.save_interval == 0:
+                save(archive=archive, play_itr=play_itr, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=cfg.save_dir)
+
+            log(logbook, logbook_stats, net_itr)
+            net_itr += 1
+
+        if cfg.gen_adversarial_worlds:
+            # Then generator evolution has stagnated, so we are done.
+            visualize_archive(cfg, env, archive)
+            print('Done generating adversarial worlds.')
+            sys.exit()
+
+        done_play_phase = False
+        training_worlds = sorted(archive, key=lambda i: i.fitness.values[0], reverse=True)
+
+        if cfg.quality_diversity:
+            # Eliminate impossible worlds
+            training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
+
+            # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
+            if len(training_worlds) == 0:
+                # TODO: set done_play_phase = True in a way that won't be overwritten
+                done_play_phase = True
+
+        training_worlds *= math.ceil(cfg.world_batch_size / len(training_worlds))
+
+        # Run player training
+        # TODO: account for player staleness/optimality?
+        while not done_play_phase:
+            toggle_train_player(trainer, train_player=True, cfg=cfg)
+            logbook_stats = train_players(training_worlds, trainer, cfg, idx_counter)
+            log(logbook, logbook_stats, net_itr)
+            play_itr += 1
+            done_play_phase = get_done_play_phase(play_itr, cfg)
+            done = play_itr >= total_play_itrs
+            net_itr += 1
+
+        toggle_train_player(trainer, train_player=False, cfg=cfg)
+        logbook_stats = world_evolver.reevaluate_elites()
+        log(logbook, logbook_stats, net_itr)
+
+    # Tie off some loose ends once co-learning completes.
     if world_evolver.final_filename != None and world_evolver.final_filename != "":
         world_evolver.save(os.path.join(world_evolver.log_base_path, world_evolver.final_filename))
     total_elapsed = timer() - world_evolver.start_time
@@ -528,5 +616,3 @@ if __name__ == '__main__':
                      cfg.fitness_domain[0], nbTicks=None)
     print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
     print("All results are available in the '%s' pickle file." % world_evolver.final_filename)
-
-

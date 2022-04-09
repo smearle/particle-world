@@ -147,7 +147,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
     def reset(self):
         """Reset the environment. This will also load the next world."""
         if self.evaluate:
-            print(f'Resetting world {self.world_key} at step {self.n_step}.')
+            # print(f'Resetting world {self.world_key} at step {self.n_step}.')
+            pass
         self.last_world_key = self.world_key
 
         # We are now resetting and loading the next world. So we switch this flag off.
@@ -194,8 +195,9 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
         # reset() call occurs on the first step (resulting in max_steps - 1).
         if not evaluate:
-            print(f'Get world {self.world_key} stats at step {self.n_step} with max step {self.max_episode_steps}')
+            # print(f'Get world {self.world_key} stats at step {self.n_step} with max step {self.max_episode_steps}')
             # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
+            pass
 
         world_stats = []
         next_stats = []

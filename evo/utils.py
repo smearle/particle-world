@@ -1,5 +1,6 @@
 from timeit import default_timer as timer
 import os
+from pdb import set_trace as TT
 import pickle
 
 import numpy as np
@@ -8,7 +9,7 @@ import torch as th
 from utils import discrete_to_onehot
 
 
-def get_archive_world_heuristics(archive, trainer):
+def compute_archive_world_heuristics(archive, trainer):
     """Compute metrics (e.g. a proxy for the complexity) of all of the worlds currently stored in the archive.
 
     These are heuristics that reflect the quality/features of the worlds in the archive, without requiring simulation
@@ -44,12 +45,12 @@ def get_archive_world_heuristics(archive, trainer):
     }
 
 
-def qdpy_save_archive(container, play_itr, gen_itr, net_itr, logbook, save_dir, adversarial_archive=False):
+def save(archive, play_itr, gen_itr, net_itr, logbook, save_dir, adversarial_archive=False):
     arch_name = 'latest-0.p' if not adversarial_archive else 'adversarial_worlds.p'
     with open(os.path.join(save_dir, arch_name), 'wb') as f:
         pickle.dump(
             {
-                'container': container,
+                'archive': archive,
                 'net_itr': net_itr,
                 'gen_itr': gen_itr,
                 'play_itr': play_itr,

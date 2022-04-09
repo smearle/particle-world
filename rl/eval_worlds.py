@@ -6,10 +6,10 @@ from timeit import default_timer as timer
 import torch as th
 
 from ray.tune.logger import pretty_print
-from evo.utils import get_archive_world_heuristics
+from evo.utils import compute_archive_world_heuristics
 
 
-def evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_counter=None, evaluate_only=False, 
+def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, evaluate_only=False, 
                           is_training_player=False):
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
@@ -103,7 +103,7 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_cou
                 stats = trainer.evaluate()
 
             else:
-                print(f'Calling trainer.train with worlds {sub_idxs}.')
+                # print(f'Calling trainer.train with worlds {sub_idxs}.')
                 stats = trainer.train()
 #               if is_training_player:
 #                   log_result = {k: v for k, v in stats.items() if k in cfg.log_keys}
@@ -121,7 +121,8 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, net_itr=None, idx_cou
                     lambda env: env.get_world_stats(evaluate=evaluate_only, quality_diversity=cfg.quality_diversity)))
         # assert(len(rl_stats) == 1)  # TODO: bring back this assertion except when we're re-evaluating world archive after training
         last_rl_stats = rl_stats[-1]
-        logbook_stats = {'iteration': net_itr}
+#       logbook_stats = {'iteration': net_itr}
+        logbook_stats = {}
         stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
         # if i == 0:
 #       if calc_world_heuristics:

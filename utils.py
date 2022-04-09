@@ -41,138 +41,138 @@ def symmetry(x):
 #     generator.generate(render=True, pg_delay=pg_delay)
 
 
-def simulate(generator, g_weights, env, n_steps=100, n_eps=1, render=False, screen=None, pg_delay=1, pg_scale=1):
-    generator.set_weights(g_weights)
-    all_fit_difs = np.empty((n_eps))
-    all_bcs = np.empty((n_eps, 2))
-    for i in range(n_eps):
-        generator.generate(render=render, screen=screen, pg_delay=pg_delay)
-        env.set_landscape(generator.world)
-        env.reset()
-        fit_difs, bcs = env.simulate(n_steps=n_steps, generator=generator, render=render, screen=screen,
-                                     pg_delay=pg_delay, pg_scale=pg_scale)
-        all_fit_difs[i] = fit_difs
-        all_bcs[i] = bcs
-    #   obj = -np.std(all_fit_difs)
-    #   bcs = np.mean(all_fit_difs)
-    obj = np.mean(all_fit_difs)
-    # obj = symmetry(generator.world)
-    # bcs = [symmetry(generator.world), emptiness(generator.world)]
-    bcs = all_bcs.mean(0) / env.width
-    return obj, bcs
+# def simulate(generator, g_weights, env, n_steps=100, n_eps=1, render=False, screen=None, pg_delay=1, pg_scale=1):
+#     generator.set_weights(g_weights)
+#     all_fit_difs = np.empty((n_eps))
+#     all_bcs = np.empty((n_eps, 2))
+#     for i in range(n_eps):
+#         generator.generate(render=render, screen=screen, pg_delay=pg_delay)
+#         env.set_landscape(generator.world)
+#         env.reset()
+#         fit_difs, bcs = env.simulate(n_steps=n_steps, generator=generator, render=render, screen=screen,
+#                                      pg_delay=pg_delay, pg_scale=pg_scale)
+#         all_fit_difs[i] = fit_difs
+#         all_bcs[i] = bcs
+#     #   obj = -np.std(all_fit_difs)
+#     #   bcs = np.mean(all_fit_difs)
+#     obj = np.mean(all_fit_difs)
+#     # obj = symmetry(generator.world)
+#     # bcs = [symmetry(generator.world), emptiness(generator.world)]
+#     bcs = all_bcs.mean(0) / env.width
+#     return obj, bcs
 
 
-def infer(env, generator, archive, pg_width, pg_delay, trainer, rllib_eval):
-    df = archive.as_pandas()
-    high_perf_sols = df.sort_values("objective", ascending=False)
-    # elites = high_perf_sols.iloc[[0, len(high_perf_sols) // 2, -1]].iterelites()
-    elites = high_perf_sols.iterelites()
-    elites = [e.sol for e in elites]
-    return infer_elites(env, generator, trainer, elites, pg_width, pg_delay, rllib_eval)
+# def infer(env, generator, archive, pg_width, pg_delay, trainer, rllib_eval):
+#     df = archive.as_pandas()
+#     high_perf_sols = df.sort_values("objective", ascending=False)
+#     # elites = high_perf_sols.iloc[[0, len(high_perf_sols) // 2, -1]].iterelites()
+#     elites = high_perf_sols.iterelites()
+#     elites = [e.sol for e in elites]
+#     return infer_elites(env, generator, trainer, elites, pg_width, pg_delay, rllib_eval)
+# 
+# 
+# def infer_elites(env, generator, player_trainer, world_archive, pg_width, pg_delay, rllib_eval):
+#     """
+#     Observe the performance of trained player-agents on an archive of generator-worlds.
+#     :param env:
+#     :param generator:
+#     :param player_trainer:
+#     :param world_archive:
+#     :param pg_width:
+#     :param pg_delay:
+#     :param rllib_eval:
+#     :return:
+#     """
+#     # TODO: adapt this function for evaluating agents after training (and logging corresponding stats), without
+#     #  necessarily rendering.
+#     # More episodes over which to collect stats will only be necessary once evaluation involves some randomness. (For
+#     # now, we are setting exploration to False in our policies, and the environment itself is deterministic).
+#     n_eps = 1
+#     pygame.init()
+#     # screen = pygame.display.set_mode([pg_width, pg_width])
+#     # pg_scale = pg_width / env.width
+#     running = True
+#     idx_counter = ray.get_actor('idx_counter')
+#     while running:
+#         fitnesses = {}
+#         for world_key, g_weights in enumerate(world_archive):
+#             # generator.set_weights(g_weights)
+#             all_fit_difs = np.empty((n_eps))
+#             all_bcs = np.empty((n_eps, 2))
+#             for i in range(n_eps):
+#                 # rllib_evaluate_worlds(trainer=player_trainer, worlds=world_archive, idx_counter=idx_counter)
+#                 raise Exception
+#             #     generator.generate(render=True, screen=screen, pg_delay=pg_delay)
+#             #     env.set_world_eval(generator.world, world_idx)
+#             #     if rllib_eval:
+#             #         obs = env.reset()
+#             #         env.render(pg_delay=pg_delay)
+#             #         done = False
+#             #         while not done:
+#             #             agent_obs = {}
+#             #             agent_ids = obs.keys()
+#             #             for k in agent_ids:
+#             #                 n_pol = k[0]
+#             #                 if n_pol not in agent_obs:
+#             #                     agent_obs[n_pol] = {k: obs[k]}
+#             #                 else:
+#             #                     agent_obs[n_pol].update({k: obs[k]})
+#             #             actions = {}
+#             #             for k in agent_obs:
+#             #                 actions.update(player_trainer.compute_actions(agent_obs[k], policy_id=f'policy_{k}', explore=False))
+#             #             obs, rew, dones, info = env.step(actions)
+#             #             env.render(pg_delay=pg_delay)
+#             #             done = dones['__all__']
+#             #         fitnesses = env.get_fitness()
+#             #         assert len(fitnesses) == 1
+#             #         obj, bcs = env.get_fitness()[world_idx]
+#             #         assert len(obj) == 1
+#             #         all_fit_difs[i] = obj[0]
+#             #         all_bcs[i] = bcs
+#             #     else:
+#             #         fit_difs, bcs = env.simulate(n_steps=env.max_steps, generator=generator, render=True, screen=screen,
+#             #                                      pg_delay=pg_delay, pg_scale=pg_scale)
+#             #         all_fit_difs[i] = fit_difs
+#             #         all_bcs[i] = bcs
+#             #   obj = -np.std(all_fit_difs)
+#             #   bcs = np.mean(all_fit_difs)
+#             obj = np.mean(all_fit_difs)
+#             # obj = symmetry(generator.world)
+#             # bcs = [symmetry(generator.world), emptiness(generator.world)]
+#             bcs = all_bcs.mean(0) / env.width
+#             print(f'obj: {obj}, bcs: {bcs}')
+#             # Pause on the final frame for analysis/debugging
+#             pause = True
+#             while pause:
+#                 for event in pygame.event.get():
+#                     if event.type == KEYDOWN:
+#                         pause = False
+#     pygame.quit()
 
 
-def infer_elites(env, generator, player_trainer, world_archive, pg_width, pg_delay, rllib_eval):
-    """
-    Observe the performance of trained player-agents on an archive of generator-worlds.
-    :param env:
-    :param generator:
-    :param player_trainer:
-    :param world_archive:
-    :param pg_width:
-    :param pg_delay:
-    :param rllib_eval:
-    :return:
-    """
-    # TODO: adapt this function for evaluating agents after training (and logging corresponding stats), without
-    #  necessarily rendering.
-    # More episodes over which to collect stats will only be necessary once evaluation involves some randomness. (For
-    # now, we are setting exploration to False in our policies, and the environment itself is deterministic).
-    n_eps = 1
-    pygame.init()
-    # screen = pygame.display.set_mode([pg_width, pg_width])
-    # pg_scale = pg_width / env.width
-    running = True
-    idx_counter = ray.get_actor('idx_counter')
-    while running:
-        fitnesses = {}
-        for world_key, g_weights in enumerate(world_archive):
-            # generator.set_weights(g_weights)
-            all_fit_difs = np.empty((n_eps))
-            all_bcs = np.empty((n_eps, 2))
-            for i in range(n_eps):
-                # rllib_evaluate_worlds(trainer=player_trainer, worlds=world_archive, idx_counter=idx_counter)
-                raise Exception
-            #     generator.generate(render=True, screen=screen, pg_delay=pg_delay)
-            #     env.set_world_eval(generator.world, world_idx)
-            #     if rllib_eval:
-            #         obs = env.reset()
-            #         env.render(pg_delay=pg_delay)
-            #         done = False
-            #         while not done:
-            #             agent_obs = {}
-            #             agent_ids = obs.keys()
-            #             for k in agent_ids:
-            #                 n_pol = k[0]
-            #                 if n_pol not in agent_obs:
-            #                     agent_obs[n_pol] = {k: obs[k]}
-            #                 else:
-            #                     agent_obs[n_pol].update({k: obs[k]})
-            #             actions = {}
-            #             for k in agent_obs:
-            #                 actions.update(player_trainer.compute_actions(agent_obs[k], policy_id=f'policy_{k}', explore=False))
-            #             obs, rew, dones, info = env.step(actions)
-            #             env.render(pg_delay=pg_delay)
-            #             done = dones['__all__']
-            #         fitnesses = env.get_fitness()
-            #         assert len(fitnesses) == 1
-            #         obj, bcs = env.get_fitness()[world_idx]
-            #         assert len(obj) == 1
-            #         all_fit_difs[i] = obj[0]
-            #         all_bcs[i] = bcs
-            #     else:
-            #         fit_difs, bcs = env.simulate(n_steps=env.max_steps, generator=generator, render=True, screen=screen,
-            #                                      pg_delay=pg_delay, pg_scale=pg_scale)
-            #         all_fit_difs[i] = fit_difs
-            #         all_bcs[i] = bcs
-            #   obj = -np.std(all_fit_difs)
-            #   bcs = np.mean(all_fit_difs)
-            obj = np.mean(all_fit_difs)
-            # obj = symmetry(generator.world)
-            # bcs = [symmetry(generator.world), emptiness(generator.world)]
-            bcs = all_bcs.mean(0) / env.width
-            print(f'obj: {obj}, bcs: {bcs}')
-            # Pause on the final frame for analysis/debugging
-            pause = True
-            while pause:
-                for event in pygame.event.get():
-                    if event.type == KEYDOWN:
-                        pause = False
-    pygame.quit()
+# def _pg_anim(generator, trainer, model, env, pg_width, pg_delay):
+#     screen = pygame.display.set_mode([pg_width, pg_width])
+#     pg_scale = pg_width / env.width
+#     obj, bcs = simulate(generator, trainer, model, env, render=True, screen=screen, pg_delay=pg_delay, pg_scale=pg_scale)
+#     print(f'obj: {obj} \n bcs: {bcs}')
 
 
-def _pg_anim(generator, trainer, model, env, pg_width, pg_delay):
-    screen = pygame.display.set_mode([pg_width, pg_width])
-    pg_scale = pg_width / env.width
-    obj, bcs = simulate(generator, trainer, model, env, render=True, screen=screen, pg_delay=pg_delay, pg_scale=pg_scale)
-    print(f'obj: {obj} \n bcs: {bcs}')
+# def save_pyribs(archive, optimizer, emitters, stats, save_dir, policies=None):
+#     with open(os.path.join(save_dir, 'learn.pickle', 'wb')) as handle:
+#         dict = {
+#             'archive': archive,
+#             'optimizer': optimizer,
+#             'emitters': emitters,
+#             'stats': stats,
+#             'policies': policies,
+#         }
+#         pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def save(archive, optimizer, emitters, stats, save_dir, policies=None):
-    with open(os.path.join(save_dir, 'learn.pickle', 'wb')) as handle:
-        dict = {
-            'archive': archive,
-            'optimizer': optimizer,
-            'emitters': emitters,
-            'stats': stats,
-            'policies': policies,
-        }
-        pickle.dump(dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-
-def qdpy_eval(env, generator, weights):
-    weights = np.array(weights)
-    obj, bcs = simulate(generator, weights, env)
-    return (obj,), bcs
+# def qdpy_eval(env, generator, weights):
+#     weights = np.array(weights)
+#     obj, bcs = simulate(generator, weights, env)
+#     return (obj,), bcs
 
 def discrete_to_onehot(a):
     n_val = a.max() + 1

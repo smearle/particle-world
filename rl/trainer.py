@@ -1,4 +1,5 @@
 # Each policy can have a different configuration (including custom model).
+from argparse import Namespace
 import copy
 from functools import partial
 import math
@@ -30,7 +31,7 @@ from rl.eval_worlds import evaluate_worlds
 from utils import get_solution
 
 
-def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=None, logbook=None,):
+def train_players(worlds, trainer, cfg, idx_counter=None):
     """Train player-agents using the rllib trainer.
 
     :param net_itr: (int) Counter for net iterations of algorithm (including both player training and world evolution 
@@ -42,63 +43,65 @@ def train_players(net_itr, play_phase_len, worlds, trainer, cfg, idx_counter=Non
     :param idx_counter: (Actor) ray actor accessed by parallel rllib envs to assign them unique world_keys.
     :param logbook: (Logbook) qdpy logbook to record (evolution and) training stats.
     """
-    trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
+#   trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
     # toggle_exploration(trainer, explore=True, n_policies=n_policies)
-    i = 0
-    staleness_window = 10
-    done_training = False
-    recent_rewards = np.empty(staleness_window)
-    while not done_training:
-        start_time = timer()
-        # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
-        # weights start changing.
-        if i % 10 == 0:
-            save_model(trainer, cfg.save_dir)
-        replace = True if cfg.fixed_worlds else True
-        if isinstance(worlds, dict):
-            world_keys = list(worlds.keys())
-        else:
-            assert isinstance(worlds, Iterable)
-            world_keys = list(range(len(worlds)))
-        world_keys = np.random.choice(world_keys, cfg.world_batch_size, replace=replace)
-        # curr_lands = np.array(landscapes)[world_keys]
-        curr_worlds = [worlds[wk] for wk in world_keys]
-        worlds = {i: l for i, l in enumerate(curr_worlds)}
+#   i = 0
+#   staleness_window = 10
+#   done_training = False
+#   recent_rewards = np.empty(staleness_window)
+#   while not done_training:
+    start_time = timer()
+    # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
+    # weights start changing.
+#   if i % 10 == 0:
+#       save_model(trainer, cfg.save_dir)
+    replace = True if cfg.fixed_worlds else False
+    if isinstance(worlds, dict):
+        world_keys = list(worlds.keys())
+    else:
+        assert isinstance(worlds, Iterable)
+        world_keys = list(range(len(worlds)))
+    world_keys = np.random.choice(world_keys, cfg.world_batch_size, replace=replace)
+    # curr_lands = np.array(landscapes)[world_keys]
+    curr_worlds = [worlds[wk] for wk in world_keys]
+    worlds = {i: l for i, l in enumerate(curr_worlds)}
 
-        # Get world heuristics on first iteration only, since they won't change after this inside training loop
-        # calc_world_heuristics = (i == 0)
+    # Get world heuristics on first iteration only, since they won't change after this inside training loop
+    # calc_world_heuristics = (i == 0)
 
-        rl_stats, qd_stats, logbook_stats = evaluate_worlds(
-            net_itr=net_itr, trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, is_training_player=True,
-            start_time=start_time)
-        recent_rewards[:-1] = recent_rewards[1:]
-        recent_rewards[-1] = rl_stats['episode_reward_mean']
+    rl_stats, qd_stats, logbook_stats = evaluate_worlds(
+        trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, is_training_player=True,
+        start_time=start_time)
+
+    return logbook_stats
+#   recent_rewards[:-1] = recent_rewards[1:]
+#   recent_rewards[-1] = rl_stats['episode_reward_mean']
 
 #       if i == 0:
 #           mean_path_length = logbook_stats['meanPath']
 #           max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
 
-        # End training if within a certain margin of optimal performance
+    # End training if within a certain margin of optimal performance
 #       done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
-        done_training = False
+#   done_training = False
 
-        # if play_phase_len == -1:
-            # if i >= staleness_window:
-                # running_std = np.std(recent_rewards)
-                # print(f'Running reward std dev: {running_std}')
-                # done_training = running_std < 1.0 or i >= 100
-            # else:
-                # done_training = False
-        if not cfg.fixed_worlds:
-            logbook.record(**logbook_stats)
-            print(logbook.stream)
-        i += 1
-        if play_phase_len != -1:
-            done_training = done_training or i >= play_phase_len
-        net_itr += 1
+    # if play_phase_len == -1:
+        # if i >= staleness_window:
+            # running_std = np.std(recent_rewards)
+            # print(f'Running reward std dev: {running_std}')
+            # done_training = running_std < 1.0 or i >= 100
+        # else:
+            # done_training = False
+#   if not cfg.fixed_worlds:
+#       logbook.record(**logbook_stats)
+#       print(logbook.stream)
+#   i += 1
+#   if play_phase_len != -1:
+#       done_training = done_training or i >= play_phase_len
+#   net_itr += 1
     # toggle_exploration(trainer, explore=False, n_policies=n_policies)
-    trainer.workers.local_worker().set_policies_to_train([])
-    return net_itr
+#   trainer.workers.local_worker().set_policies_to_train([])
+#   return net_itr
 
 
 def init_particle_trainer(env, idx_counter, env_config, cfg):
@@ -269,7 +272,7 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         "evaluation_interval": evaluation_interval,
 
         # We'll only parallelize eval workers when doing evaluation on pre-trained agents.
-        "evaluation_num_workers": 3 if not (cfg.evaluate) else cfg.n_rllib_workers,
+        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.n_rllib_workers,
 
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
@@ -391,6 +394,13 @@ def toggle_exploration(trainer: Trainer, explore: bool, n_policies: int):
         trainer.workers.foreach_worker(lambda w: w.get_policy(f'policy_{i}').config.update({'explore': explore}))
 
 
+def toggle_train_player(trainer: Trainer, train_player: bool, cfg: Namespace):
+    if train_player:
+        trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
+    else:
+        trainer.workers.local_worker().set_policies_to_train([])
+
+
 def evo_evaluate(trainer: Trainer, eval_workers: WorkerSet) -> dict:
-    # TT()
+    # TODO: parallelize this boi
     trainer.evaluate()
