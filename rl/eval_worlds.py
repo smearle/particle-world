@@ -10,7 +10,7 @@ from evo.utils import compute_archive_world_heuristics
 
 
 def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, evaluate_only=False, 
-                          is_training_player=False):
+                          is_training_player=False) -> tuple:
     """
     Simulate play on a set of worlds, returning statistics corresponding to players/generators, using rllib's
     train/evaluate functions. 
@@ -23,15 +23,20 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
     population. Otherwise, return placeholder measures, and an objective corresponding to a contrastive measure of
     population fitnesses.
 
-    :param trainer: an rllib trainer, holding policy networks, and training/evaluation workers with environments.
-    :param worlds: a dictionary of words on which to simulate gameplay.
-    :param idx_counter:
-    :param evaluate_only: If True, we are not training, just evaluating some trained players/generators. (Normally,
-    during training, we also evaluate at regular intervals. This won't happen here.) If True, we do not collect stats
-    about generator fitness.
-    :param is_training_player: (bool) Whether we are currently training the player (i.e. its weights are unfrozen and 
-        rllib is set to train it). If so, we will print/log relevant stats.
-    :return:
+    Args:
+        trainer (Trainer): an rllib trainer, holding policy networks, and training/evaluation workers with environments.
+        worlds (dict): a dictionary of words on which to simulate gameplay.
+        idx_counter:
+        evaluate_only (bool): If True, we are not training, just evaluating some trained players/generators. (Normally,
+            during training, we also evaluate at regular intervals. This won't happen here.) If True, we do not collect stats
+            about generator fitness.
+        is_training_player (bool): Whether we are currently training the player (i.e. its weights are unfrozen and 
+            rllib is set to train it). If so, we will print/log relevant stats.
+
+    Returns:
+        aggregate_rl_stats (dict):
+        world_stats (dict):
+        logbook_stats (dict):
     """
     if start_time is None:
         start_time = timer()

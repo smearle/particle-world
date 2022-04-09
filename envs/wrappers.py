@@ -14,12 +14,8 @@ from utils import discrete_to_onehot
 
 
 def make_env(env_config):
-    # FIXME: shouldn't be popping any arguments anymore, so can probably remove this line.
-    # Copying config here because we pop certain settings in env subclasses before passing to parent classes
-    env_config = copy.copy(env_config)
-
     cfg = env_config.get('cfg')
-    environment_class = env_config.pop('environment_class')
+    environment_class = env_config.get('environment_class')
 
     if cfg.env_is_minerl:
     # if issubclass(environment_class, EnvSpec):
@@ -84,10 +80,6 @@ class WorldEvolutionWrapper(gym.Wrapper):
         
         We set flag ``need_world_reset`` to True, so that the next step will return done=True, and the environment will
         be reset, at which point, ``next_world`` will be loaded."""
-        # TODO: also accept mutable dictionaries corresponding to stats resulting from player simulation for each world,
-        #  then update these. This could make things more clear (use keys for different player rewards), and remove the
-        #  need for a call to get_world_stats(). We should also offload some of the objective/measure calculation to the
-        #  evolution/QD code.
 
         # Figure out which world to evaluate.
         # self.world_idx = 0

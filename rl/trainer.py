@@ -104,25 +104,33 @@ def train_players(worlds, trainer, cfg, idx_counter=None):
 #   return net_itr
 
 
-def init_particle_trainer(env, idx_counter, env_config, cfg):
-    """
-    Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
+def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: bool=False, play_only: bool=False):
+    """Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
+
     #TODO: abstract this to support training generators as well.
-    :param env: a dummy environment, created in the main script, from which we will draw environment variables. Will not
-    be used in actual training.
-    :param num_rllib_remote_workers: how many RLlib remote workers to use for training (1 core per worker). Just a local
-    worker if 0.
-    :param n_rllib_envs: how many environments to use for training. This determines how many worlds/generators can be
-    evaluated with each call to train. When evolving worlds, the determines the batch size.
-    :param evaluate: if True, then we are evaluating only (no training), and will launch n_rllib_workers-many
-    evaluation workers.
-    :param enjoy: if True, then the trainer is being initialized only to render and observe trained particles, so we
-    will set other rllib parameters accordingly.
-    :param render: whether to render an environment during training.
-    :param save_dir: The directory in which experiment logs and checkpoints are to be saved.
-    :param num_gpus: How many GPUs to use for training.
-    :return: An rllib PPOTrainer object
+
+    Args:
+        env: a dummy environment, created in the main script, from which we will draw environment variables. Will not
+            be used in actual training.
+        num_rllib_remote_workers: how many RLlib remote workers to use for training (1 core per worker). Just a local
+            worker if 0.
+        n_rllib_envs: how many environments to use for training. This determines how many worlds/generators can be
+            evaluated with each call to train. When evolving worlds, the determines the batch size.
+        evaluate: if True, then we are evaluating only (no training), and will launch n_rllib_workers-many
+            evaluation workers.
+        enjoy: if True, then the trainer is being initialized only to render and observe trained particles, so we
+            will set other rllib parameters accordingly.
+        render: whether to render an environment during training.
+        save_dir (str): The directory in which experiment logs and checkpoints are to be saved.
+        num_gpus (int): How many GPUs to use for training.
+        gen_only (bool): Whether the trainer is being initialized strictly for evolving generators (i.e. will never update 
+            player policies).
+        play_only (bool): Whether the trainer is being initialized strictly for training players. If this and `is_gen` are
+            both False, then the trainer is being initialized both for training players and evolving generators.
+
+    Returns: 
+        An rllib PPOTrainer object
     """
     # Create multiagent config dict if env is multi-agent
     # Create models specialized for small-scale grid-worlds
@@ -143,11 +151,14 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
         else:
             policies_dict = {f'policy_{i}': gen_policy(i, env.observation_spaces[i], env.action_spaces[i], env.fields_of_view[i])
                             for i, swarm in enumerate(env.swarms)}
-            # Add the oracle (flood-fill convolutional model) for fast path-length computations. obs/act spaces are dummy
-            policies_dict.update({
-                'oracle': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[0], 
-                action_space=env.action_spaces[0], config={})
-                })
+            # If this is a player-only, or generator-and-player trainer, we add the oracle (flood-fill convolutional 
+            # model) for fast path-length computations to estimate complexity of worlds in the archive. obs/act spaces 
+            # are dummy.
+            if not play_only:
+                policies_dict.update({
+                    'oracle': PolicySpec(policy_class=OraclePolicy, observation_space=env.observation_spaces[0], 
+                    action_space=env.action_spaces[0], config={})
+                    })
         multiagent_config = {
             "policies": policies_dict,
             "policy_mapping_fn":
@@ -213,15 +224,27 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
     # Because we only ever use a single worker for all evaluation environments.
     num_eval_envs = num_envs_per_worker
 
-    if cfg.env_is_minerl or cfg.gen_adversarial_worlds:
+    # TODO: testing environments for minerl evaluation.
+    # We don't need to evaluate if trainer only used for generators (this will be handled by player-only generator).
+    # If gen_adversarial_worlds, we're not updating player policies, so we don't need to evaluate.
+    if cfg.env_is_minerl or cfg.gen_adversarial_worlds or gen_only:
         evaluation_interval = 0
     else:
         # After how many calls to train do we evaluate?
-        # Evaluate policies once after every player-training phase. If we're evolving/training until convergence, just
+        # If we're evolving/training until convergence, just
         # evaluate every 10 iterations. If we're "enjoying", just need to set this to any number > 0 to ensure we 
         # initialize the evaluation workers.
-        evaluation_interval = ((cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size / cfg.n_eps_on_train \
-            if -1 not in [cfg.gen_phase_len, cfg.gen_phase_len] else 10) if not cfg.enjoy else 10
+        if -1 in [cfg.gen_phase_len, cfg.play_phase_len] or cfg.enjoy:
+            evaluation_interval = 10
+        # Otherwise, evaluate policies once after every player-training phase. If the trainer is for player-training and
+        # evolved world evaluation, we count the phases corresponding to each process, and the phase corresponding to 
+        # the re-evaluation of elites. 
+        # TODO: might want multiple rounds of elite-re-evaluation, would need to account for that here.
+        elif not cfg.parallel_gen_play:
+            evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
+        # If we're parallelizing generation and playing, we're evaluating on the player-only trainer.
+        else:
+            evaluation_interval = cfg.play_phase_len * cfg.world_batch_size // cfg.n_eps_on_train 
 
     if cfg.enjoy:
         # Technically, we have 2 episodes during each call to eval. Imagine we have just called ``trainer.queue_worlds()``.
@@ -320,7 +343,8 @@ def init_particle_trainer(env, idx_counter, env_config, cfg):
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs. We do not evaluate when 
     # evolving adversarial worlds.
-    if not cfg.enjoy and not cfg.gen_adversarial_worlds and not cfg.env_is_minerl:  # TODO: eval worlds in minerl
+    if trainer.evaluation_workers:
+    # if not cfg.enjoy and not cfg.gen_adversarial_worlds and not cfg.env_is_minerl:  # TODO: eval worlds in minerl
         # Set evaluation workers to eval_mazes. If more eval mazes then envs, the world_key of each env will be incremented
         # by len(eval_mazes) each reset.
         eval_workers = trainer.evaluation_workers
@@ -401,6 +425,7 @@ def toggle_train_player(trainer: Trainer, train_player: bool, cfg: Namespace):
         trainer.workers.local_worker().set_policies_to_train([])
 
 
-def evo_evaluate(trainer: Trainer, eval_workers: WorkerSet) -> dict:
-    # TODO: parallelize this boi
-    trainer.evaluate()
+def sync_player_policies(play_trainer: Trainer, gen_trainer: Trainer, cfg: Namespace):
+    """Sync player policies from the player-trainer to the generator-trainer."""
+    for i in range(cfg.n_policies):
+        gen_trainer.get_policy(f'policy_{i}').set_weights(play_trainer.get_weights()[f'policy_{i}'])

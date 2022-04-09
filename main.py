@@ -1,5 +1,3 @@
-import argparse
-import copy
 import json
 import math
 import os
@@ -16,6 +14,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
 import ray
+from ray.tune.logger import pretty_print
+from ray.tune.registry import register_env
 from deap import base
 from deap import creator
 from deap import tools
@@ -34,9 +34,7 @@ from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D,
 from evo.utils import compute_archive_world_heuristics, save
 from evo.evolve import WorldEvolver
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
-from ray.tune.logger import pretty_print
-from ray.tune.registry import register_env
-from rl.trainer import init_particle_trainer, toggle_train_player, train_players, toggle_exploration
+from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, train_players, toggle_exploration
 from rl.eval_worlds import evaluate_worlds
 from rl.utils import IdxCounter
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
@@ -92,11 +90,30 @@ if __name__ == '__main__':
     # n_sim_steps = 100
     pg_width = 500
     pg_scale = pg_width / cfg.width
-    # swarm_type = MemorySwarm
     cfg.save_interval = 100
-    cfg.archive_size = 1024
+    cfg.archive_size = 100
     cfg.translated_observations = True
-    cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
+    # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
+    cfg.n_rllib_envs = 3
+    cfg.n_eps_on_train = 6
+    cfg.world_batch_size = 12
+
+    # Whether to run rounds of player-training and generator-evolution in parallel.
+    cfg.parallel_gen_play = True
+
+    n_workers = (1 if cfg.n_rllib_workers == 0 else cfg.n_rllib_workers)
+
+    # We must have the same number of envs per worker, and want to meet our target number of envs exactly.
+    assert cfg.n_rllib_envs % n_workers == 0, \
+        f"n_rllib_envs ({cfg.n_rllib_envs}) must be divisible by n_workers ({cfg.n_workers})"
+
+    # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
+    assert cfg.world_batch_size % cfg.n_eps_on_train == 0, \
+        f"world_batch_size ({cfg.world_batch_size}) must be divisible by n_eps_on_train ({cfg.n_eps_on_train})"
+
+    # We don't want any wasted episodes when we call train() to evaluate worlds.
+    assert cfg.n_eps_on_train % cfg.n_rllib_envs == 0, \
+        f"n_eps_on_train ({cfg.n_eps_on_train}) must be divisible by n_rllib_envs ({cfg.n_rllib_envs})"
 
     # Whether to use rllib trainer to perform evaluations of evolved worlds.
     cfg.rllib_eval = True
@@ -135,19 +152,11 @@ if __name__ == '__main__':
         else:
             raise NotImplementedError
 
-        #       # set the environment, if specific to player-model
-        #       if cfg.model == 'nca':
-        #           environment_class = MazeEnvForNCAgents
-        #       else:
+#       # set the environment, if specific to player-model
+#       if cfg.model == 'nca':
+#           environment_class = MazeEnvForNCAgents
 
-        #       if cfg.fully_observable:
-        #           swarm_cls = MazeSwarm
-        #           environment_class = ParticleMazeEnv
-        #       else:
-        #           swarm_cls = DirectedMazeSwarm
-        #           environment_class = DirectedMazeEnv
-
-        #       # set the environment based on observation type
+        # set the environment based on observation type
         if cfg.rotated_observations:
             swarm_cls = DirectedMazeSwarm
             environment_class = DirectedMazeEnv
@@ -189,20 +198,11 @@ if __name__ == '__main__':
     env_config.update({'environment_class': environment_class, 'cfg': cfg})
 
     if (cfg.evaluate or cfg.enjoy) and cfg.render:
-        n_rllib_envs = 1
+        cfg.n_rllib_envs = 1
     else:
-        n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
-            else (1 if env_is_minerl else n_envs_per_worker)
-
-    cfg.n_rllib_envs = n_rllib_envs
-    cfg.world_batch_size = 12
-    cfg.n_eps_on_train = 6
-
-    # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
-    assert cfg.world_batch_size % cfg.n_eps_on_train == 0
-
-    # We don't want any wasted episodes when we call train() to evaluate worlds.
-    assert cfg.n_eps_on_train % cfg.n_rllib_envs == 0
+        # cfg.n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
+            # else (1 if env_is_minerl else n_envs_per_worker)
+        n_envs_per_worker = cfg.n_rllib_envs // n_workers
 
     register_env('world_evolution_env', make_env)
 
@@ -289,8 +289,14 @@ if __name__ == '__main__':
         # and all the individuals in the archive are in this bin.
         max_items_per_bin = 1 if max_total_bins != 1 else cfg.archive_size  # The number of items in each bin of the grid
 
-    trainer = None if cfg.load and cfg.visualize else \
-        init_particle_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
+    if not cfg.parallel_gen_play:
+        trainer = gen_trainer = play_trainer = None if cfg.load and cfg.visualize else \
+            init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
+    else:
+        gen_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, gen_only=True)
+        play_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, play_only=True)
+        # For enjoy/eval.
+        trainer = gen_trainer
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
@@ -360,7 +366,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if cfg.fixed_worlds:
                 trainer.workers.local_worker().set_policies_to_train([])
-                evaluate_worlds(trainer=trainer, worlds=training_worlds,
+                evaluate_worlds(trainer=gen_trainer, worlds=training_worlds,
                                       fixed_worlds=cfg.fixed_worlds, render=cfg.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
@@ -372,7 +378,7 @@ if __name__ == '__main__':
             elites = sorted(archive, key=lambda ind: ind.fitness, reverse=True)
             worlds = [i for i in elites]
             for i, elite in enumerate(worlds):
-                ret = evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
+                ret = evaluate_worlds(trainer=gen_trainer, worlds={i: elite}, idx_counter=idx_counter,
                                             evaluate_only=True, cfg=cfg)
             print('Done enjoying, goodbye!')
             sys.exit()
@@ -385,7 +391,7 @@ if __name__ == '__main__':
 
             # How many trials on each world? Kind of, minus garbage resets, and assuming evaluation_num_episodes == len(eval_worlds).
             for _ in range(10):
-                rllib_stats = trainer.evaluate()
+                rllib_stats = gen_trainer.evaluate()
                 qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=True, quality_diversity=cfg.quality_diversity)))
 
@@ -468,22 +474,12 @@ if __name__ == '__main__':
         archive = new_grid
 
     # Algorithm parameters
-    # dimension = len(initial_weights)  # The dimension of the target problem (i.e. genomes size)
-    # assert (dimension >= 2)
     assert (nb_features >= 1)
 
     nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
-    # Set the probability of mutating each value of a genome
-    #   if generator_cls == TileFlipGenerator:
-    #       mutation_pb = 0.03
-    #   elif generator_cls == SinCPPNGenerator:
-    #       mutation_pb = 0.03
-    #   else:
-    #       mutation_pb = 0.1
     eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
     ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
-    # fitness_domain = [(0., 1.)]                # The domain (min/max values) of the fitness
     verbose = True
     show_warnings = False  # Display warning and error messages. Set to True if you want to check if some individuals were out-of-bounds
     log_base_path = cfg.outputDir if cfg.outputDir is not None else "."
@@ -495,18 +491,11 @@ if __name__ == '__main__':
 
     # Create Toolbox
     toolbox = base.Toolbox()
-    # toolbox.register("attr_float", random.uniform, ind_domain[0], ind_domain[1])
-    # toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, dimension)
     toolbox.register("individual", generator_class, width=env.width - 2, n_chan=env.n_chan,
                      save_gen_sequence=cfg.render,
                      unique_chans=env.unique_chans)
-    # toolbox.register("individual", CPPNIndividual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    # toolbox.register("evaluate", illumination_rastrigin_normalised, nb_features = nb_features)
-    # toolbox.register("evaluate", qdpy_eval, env, generator)
     toolbox.register("clone", clone)
-    # toolbox.register("mutate", tools.mutPolynomialBounded, low=ind_domain[0], up=ind_domain[1], eta=eta,
-    #  indpb=mutation_pb)
     toolbox.register("mutate", lambda individual: individual.mutate())
     toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
     # toolbox.register("select", tools.selBest) # But you can also use all DEAP selection functions instead to create your own QD-algorithm
@@ -515,28 +504,20 @@ if __name__ == '__main__':
     results_infos = {'ind_domain': ind_domain, 'features_domain': features_domain, 'fitness_domain': cfg.fitness_domain,
                      'nb_bins': nb_bins, 'init_batch_size': cfg.world_batch_size, 'nb_iterations': nb_iterations,
                      'batch_size': cfg.world_batch_size, 'eta': eta}
-    # results_infos['dimension'] = dimension
-    # results_infos['mutation_pb'] = mutation_pb
 
-    # Turn off exploration before evolving. Henceforth toggled before/after player training.
-    # toggle_exploration(particle_trainer, explore=False, n_policies=n_policies)
-
-    # with ParallelismManager(cfg.parallelismType, toolbox=toolbox) as pMgr:
-    # qd_algo = partial(qdRLlibEval, rllib_trainer=trainer, cfg=cfg, net_itr=net_itr,
-                    #   gen_itr=gen_itr, logbook=logbook, play_itr=play_itr)
     # Create a QD algorithm
     world_evolver = WorldEvolver(toolbox=toolbox, container=archive, init_batch_siz=cfg.world_batch_size,
                            batch_size=cfg.world_batch_size, niter=nb_iterations, stats=stats,
                            verbose=verbose, show_warnings=show_warnings,
                            results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                            iteration_filename=f'{experiment_name}' + '/latest-{}.p',
-                           trainer=trainer, idx_counter=idx_counter, cfg=cfg, 
+                           trainer=gen_trainer, idx_counter=idx_counter, cfg=cfg, 
                            )
     # Run the illumination process !
     world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
 
     # The outer co-learning loop
-    toggle_train_player(trainer, train_player=False, cfg=cfg)
+    toggle_train_player(gen_trainer, train_player=False, cfg=cfg)
     done = False
     while not done:
 
@@ -550,7 +531,7 @@ if __name__ == '__main__':
             if done_gen_phase:
                 save(archive=archive, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook,
                                 save_dir=cfg.save_dir)
-                mean_path_length = compute_archive_world_heuristics(archive=archive, trainer=trainer)
+                mean_path_length = compute_archive_world_heuristics(archive=archive, trainer=gen_trainer)
                 stat_keys = ['mean', 'min', 'max']  # , 'std]
                 logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
 
@@ -583,15 +564,21 @@ if __name__ == '__main__':
         # Run player training
         # TODO: account for player staleness/optimality?
         while not done_play_phase:
-            toggle_train_player(trainer, train_player=True, cfg=cfg)
-            logbook_stats = train_players(training_worlds, trainer, cfg, idx_counter)
+            toggle_train_player(play_trainer, train_player=True, cfg=cfg)
+            logbook_stats = train_players(training_worlds, play_trainer, cfg, idx_counter)
             log(logbook, logbook_stats, net_itr)
             play_itr += 1
             done_play_phase = get_done_play_phase(play_itr, cfg)
             done = play_itr >= total_play_itrs
             net_itr += 1
 
-        toggle_train_player(trainer, train_player=False, cfg=cfg)
+        # Now that we've trained the player, update the generator-trainer before the next round of generator evolution.
+        sync_player_policies(gen_trainer, play_trainer, cfg)
+
+        # Only doing this in case gen_trainer = play_trainer (i.e. not parallel). Can remove this once parallel evo/train
+        # is implemented in separate loop (presumably).
+        toggle_train_player(gen_trainer, train_player=False, cfg=cfg)
+
         logbook_stats = world_evolver.reevaluate_elites()
         log(logbook, logbook_stats, net_itr)
 

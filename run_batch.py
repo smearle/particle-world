@@ -50,7 +50,7 @@ def main():
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-ev', '--evaluate', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
-    parser.add_argument('-cpus', '--num_cpus', type=int, default=12)
+    parser.add_argument('-nw', '--n_rllib_workers', type=int, default=12)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-lo', '--load', action='store_true')
@@ -58,7 +58,7 @@ def main():
     parser.add_argument('-gaw', '--gen_adversarial_worlds', action='store_true')
     args = parser.parse_args()
     job_time = 48
-    num_cpus = 0 if args.visualize else args.num_cpus
+    n_rllib_workers = 0 if args.visualize else args.n_rllib_workers
     num_gpus = 0 if args.visualize else args.num_gpus
     render = True if args.enjoy else args.render
     load = True if args.visualize or args.enjoy or args.evaluate else args.load
@@ -100,7 +100,7 @@ def main():
             'load': load or args.gen_adversarial_worlds,
             'model': model,
             'n_policies': n_policies,
-            'n_rllib_workers': num_cpus,
+            'n_rllib_workers': n_rllib_workers,
             'num_gpus': num_gpus,
             'objective_function': objective,
             'overwrite': args.overwrite,
@@ -122,7 +122,7 @@ def main():
         return 
 
     for exp_i, exp_set in enumerate(exp_sets):
-        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=num_cpus, local=args.local)
+        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers, local=args.local)
 
 
 
