@@ -240,11 +240,12 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # evolved world evaluation, we count the phases corresponding to each process, and the phase corresponding to 
         # the re-evaluation of elites. 
         # TODO: might want multiple rounds of elite-re-evaluation, would need to account for that here.
-        elif not cfg.parallel_gen_play:
-            evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
-        # If we're parallelizing generation and playing, we're evaluating on the player-only trainer.
-        else:
-            evaluation_interval = cfg.play_phase_len * cfg.world_batch_size // cfg.n_eps_on_train 
+#       elif not cfg.parallel_gen_play:
+#       evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
+        evaluation_interval = 1
+#       # If we're parallelizing generation and playing, we're evaluating on the player-only trainer.
+#       else:
+#           evaluation_interval = cfg.play_phase_len * cfg.world_batch_size // cfg.n_eps_on_train 
 
     if cfg.enjoy:
         # Technically, we have 2 episodes during each call to eval. Imagine we have just called ``trainer.queue_worlds()``.
@@ -295,15 +296,16 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "evaluation_interval": evaluation_interval,
 
         # We'll only parallelize eval workers when doing evaluation on pre-trained agents.
-        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.n_rllib_workers,
+        "evaluation_num_workers": 1 if not (cfg.evaluate) else cfg.n_rllib_workers,
 
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
         # trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number 
         # of steps.)
-        # if not (evaluate or enjoy) else len(eval_mazes) + 1,
         "evaluation_duration": evaluation_num_episodes,
-        "evaluation_duration_unit": "episodes",
+        "evaluation_duration": "auto",
+        # "evaluation_duration_unit": "episodes",
+        "evaluation_parallel_to_training": True,
 
         # We *almost* run the right number of episodes s.t. we simulate on each map the same number of times. But there
         # are some garbage resets in there (???).
@@ -315,7 +317,6 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
                 "evaluate": True if not cfg.enjoy else cfg.evaluate,
                 "num_eval_envs": num_eval_envs,
             },
-            "evaluation_parallel_to_training": True,
             "render_env": cfg.render,
             "explore": False if cfg.oracle_policy else True,
         },
@@ -339,7 +340,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
     print(f'Loading trainer with config:')
     pp.pprint(trainer_config_loggable)
 
-    trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
+    trainer = EnvEvoPPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs. We do not evaluate when 
     # evolving adversarial worlds.
@@ -429,3 +430,41 @@ def sync_player_policies(play_trainer: Trainer, gen_trainer: Trainer, cfg: Names
     """Sync player policies from the player-trainer to the generator-trainer."""
     for i in range(cfg.n_policies):
         gen_trainer.get_policy(f'policy_{i}').set_weights(play_trainer.get_weights()[f'policy_{i}'])
+
+
+def evo_evaluate(trainer: Trainer, workers: WorkerSet):
+    return trainer.evaluate()
+
+
+class EnvEvoPPOTrainer(ppo.PPOTrainer):
+    def train(self):
+        return super().train()
+
+    def evaluate(self, duration_fn=None):
+        # Two pieces of good news:
+        #   - we can do eval in parallel, until the concurrent call to `train()` is complete.
+        #   - calling `evaluate()` takes samples, which leads to the `on_sample_end()` callback being called, where we
+        #     can easily compute positive value loss, if necessary.
+        # This means we can take the following approach to parallel gen & play:
+        # TODO: Use additional eval workers, with eval duration set to `auto`. Use these additional workers to do evo
+        #   evaluation. Unfortunately, this ongoing evolution happens inside a `while Ture` loop inside the evaluate
+        #   function, but each time, duration_fn is called, so maybe we can smuggle in the world-evolution logic there?
+        #   Alternatively, we could implement world-evolution inside each worker's `sample()` function. This would 
+        #   additionally parallelize world-mutation.
+        print('evaluating')
+
+        def env_evo_duration_fn(*args, **kwargs):
+            # TODO: this function gets called multiple times in quick succession without additional episodes (saving 
+            #   results for the next time around, basically). Quick fix is to make sure number of train workers and 
+            #   eval duration are properly aligned so as to avoid this.
+            units_remaining = duration_fn(*args, **kwargs)
+
+            if units_remaining > 0:
+                self.env_evo()
+
+            return units_remaining
+
+        return super().evaluate(duration_fn=env_evo_duration_fn)
+
+    def env_evo(self):
+        print('do env evo')

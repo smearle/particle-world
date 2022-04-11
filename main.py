@@ -94,7 +94,7 @@ if __name__ == '__main__':
     cfg.archive_size = 100
     cfg.translated_observations = True
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
-    cfg.n_rllib_envs = 3
+    cfg.n_rllib_envs = 6
     cfg.n_eps_on_train = 6
     cfg.world_batch_size = 12
 
@@ -140,7 +140,7 @@ if __name__ == '__main__':
     env_is_minerl = False
 
     if cfg.environment_class == 'ParticleMazeEnv':
-        n_envs_per_worker = 6
+        # n_envs_per_worker = 6
 
         # set the generator
         if cfg.generator_class == 'TileFlipIndividual':
@@ -175,7 +175,7 @@ if __name__ == '__main__':
         # from minerl.herobraine.env_specs.obtain_specs import ObtainDiamond
         from envs.minecraft.touchstone import TouchStone
 
-        n_envs_per_worker = 1
+        # n_envs_per_worker = 1
 
         if cfg.generator_class == 'TileFlipIndividual':
             generator_class = TileFlipIndividual3D
@@ -278,25 +278,28 @@ if __name__ == '__main__':
         else:
             nb_features = 2  # The number of features to take into account in the container
         bins_per_dim = int(pow(max_total_bins, 1. / nb_features))
-        nb_bins = (
-                  bins_per_dim,) * nb_features  # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with $max_total_bins^(1/nb_features)$ bins each
 
-        # Specific to maze env: since each agent could be on the goal for at most, e.g. 99 steps given 100 max steps
-        features_domain = [(
-                           env.min_reward, env.max_reward)] * nb_features  # The domain (min/max values) of the features
+        # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with 
+        # $max_total_bins^(1/nb_features)$ bins each
+        nb_bins = (bins_per_dim,) * nb_features 
+
+        # The domain (min/max values) of the features. Assume we are using mean policy rewards as diversity measures.
+        features_domain = [(env.min_reward, env.max_reward)] * nb_features  
 
         # If doing QD (i.e. there is more than one bin), then we have 1 individual per bin. Otherwise, we have 1 bin,
         # and all the individuals in the archive are in this bin.
         max_items_per_bin = 1 if max_total_bins != 1 else cfg.archive_size  # The number of items in each bin of the grid
 
-    if not cfg.parallel_gen_play:
-        trainer = gen_trainer = play_trainer = None if cfg.load and cfg.visualize else \
-            init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
-    else:
-        gen_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, gen_only=True)
-        play_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, play_only=True)
-        # For enjoy/eval.
-        trainer = gen_trainer
+    # TODO: serializing these trainers doesn't work, so we need to use a single trainer, either by co-opting some eval
+    #   workers for evo-eval, or creating a separate WorkerSet for this purpose.
+#   if not cfg.parallel_gen_play:
+    trainer = gen_trainer = play_trainer = None if cfg.load and cfg.visualize else \
+        init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
+#   else:
+#       gen_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, gen_only=True)
+#       play_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, play_only=True)
+#       # For enjoy/eval.
+#       trainer = gen_trainer
 
     # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
     # env.set_trainer(particle_trainer)
