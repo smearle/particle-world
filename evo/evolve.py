@@ -130,6 +130,10 @@ class WorldEvolver(DEAPQDAlgorithm):
             start_time=self.start_time)
         # assert len(rllib_stats) == 1
 
+        self.tell(batch, world_stats)
+
+    def tell(self, batch, world_stats):
+
         update_individuals(batch, world_stats)
 
         if len(batch) == 0:
@@ -153,6 +157,7 @@ class WorldEvolver(DEAPQDAlgorithm):
         #     raise ValueError("No individual could be added to the container !")
 
         # Compile stats and update logs
+        logbook_stats = {}
         logbook_stats.update(self.stats.compile(self.container) if self.stats else {})
         logbook_stats.update({
             'containerSize': self.container.size_str(), 'evals': len(batch), 

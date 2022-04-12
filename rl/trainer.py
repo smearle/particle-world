@@ -625,6 +625,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 if i * 1 < units_left_to_do
             ])
             world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearning_config)
+            self.world_evolver.tell(offspring, world_qd_stats)
             print(f"Round {round_}.")
             # 1 episode per returned batch.
             if unit == "episodes":
