@@ -120,6 +120,18 @@ class WorldEvolver(DEAPQDAlgorithm):
         """
         invalid_inds = {i: ind for i, ind in enumerate(self._disturb_elites())}
 
+        return {i: ind for i, ind in enumerate(invalid_inds)}
+
+    def reevaluate_elites(self) -> dict:
+        """Assuming our evaluation function has changed, re-evaluate some elites in the archive. "The reckoning."
+        
+        This may apply if, e.g., our evaluation function depends on a co-learning player policy. We first remove elites
+        from the archive, then re-evaluate them, updating their objective and measure values, then attempt to re-insert
+        them in the archive. When doing QD, this may result in some "collisions," which see the archive left less 
+        populated than before.
+        """
+        invalid_inds = self.disturb_elites()
+
         return self.evolve(batch=invalid_inds)
 
         # NOTE: Here we are assuming that we've only evaluated each world once. If we have duplicate stats for a given world, we will overwrite all but one instance of statistics 

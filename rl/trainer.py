@@ -659,7 +659,9 @@ class WorldEvoPPOTrainer(algorithm):
         self.play_itr += 1
         self.net_itr += 1
 
-        return step_results
+            
+            # Collect the training results from the future.
+            step_results.update(train_future.result())
 
     def evo_eval(self, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
         """Evaluates current policy under `evaluation_config` settings.
