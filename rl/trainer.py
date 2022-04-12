@@ -563,10 +563,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
 
 
-    def evo_eval(
-            self,
-            duration_fn: Optional[Callable[[int], int]] = None,
-    ) -> dict:
+    def evo_eval(self, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
         """Evaluates current policy under `evaluation_config` settings.
 
         Note that this default implementation does not do anything beyond
@@ -611,7 +608,11 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         round_ = 0
         while True:
             offspring = self.world_evolver.generate_offspring()
-            self.set_worlds(offspring, self.evo_eval_workers)
+
+            # Otherwise we'll try to serialize `self` in the workerset lambda in the below function.
+            idx_counter = ray.get_actor("idx_counter")
+
+            set_worlds(offspring, self.evo_eval_workers, idx_counter, self.colearning_config)
 
             units_left_to_do = duration_fn(num_units_done=num_units_done)
             if units_left_to_do <= 0:
@@ -623,6 +624,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                     self.evo_eval_workers.remote_workers())
                 if i * 1 < units_left_to_do
             ])
+            world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearning_config)
             print(f"Round {round_}.")
             # 1 episode per returned batch.
             if unit == "episodes":
@@ -647,48 +649,76 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         # Also return the results here for convenience.
         return self.evaluation_metrics
 
-    def set_worlds(self, worlds: dict, workers: WorkerSet):
-        """Assign worlds to environments to be loaded at next reset."""
-        idxs = np.random.permutation(list(worlds.keys()))
-        world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
-            if self.config["render_env"] else None
+def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
+    """Assign worlds to environments to be loaded at next reset."""
+    idxs = np.random.permutation(list(worlds.keys()))
+    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
+        if cfg.render else None
 
-        worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
+    worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
 
-        # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
-        hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
-        hashes = [h for wh in hashes for h in wh]
-        n_envs = len(hashes)
-        print(f"{n_envs} environments, {len(idxs)} worlds")
+    # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
+    hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+    hashes = [h for wh in hashes for h in wh]
+    n_envs = len(hashes)
+    print(f"{n_envs} environments, {len(idxs)} worlds")
 
-        self.idx_counter.set_idxs.remote(idxs)
-        self.idx_counter.set_hashes.remote(hashes)
+    idx_counter.set_idxs.remote(idxs)
+    idx_counter.set_hashes.remote(hashes)
 
-        # FIXME: Sometimes hash-to-idx dict is not set by the above call?
-        assert ray.get(self.idx_counter.scratch.remote())
+    # FIXME: Sometimes hash-to-idx dict is not set by the above call?
+    assert ray.get(idx_counter.scratch.remote())
 
-        # Otherwise we'll try to serialize `self` in the below lambda
-        idx_counter = ray.get_actor("idx_counter")
+    # Assign envs to worlds
+    workers.foreach_worker(
+        lambda worker: worker.foreach_env(
+            lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
 
-        # Assign envs to worlds
-        workers.foreach_worker(
-            lambda worker: worker.foreach_env(
-                lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
 
-        # If using oracle, manually load the world
-        if self.colearning_config.oracle_policy:
-            flood_model = self.get_policy('policy_0').model
-            workers.foreach_worker(
-                lambda worker: worker.foreach_env(lambda env: env.reset()))
+def get_world_qd_stats(workers: WorkerSet, cfg: Namespace):
+    """Get world stats from workers."""
+    world_stats = workers.foreach_worker(
+        lambda worker: worker.foreach_env(lambda env: env.get_world_stats()))
+    world_stats = [s for ws in world_stats for s in ws]
+    # Extract QD stats (objectives and features) from the world stats.
+    new_qd_stats = {}
+    for stat_lst in world_stats:
+        for stats_dict in stat_lst:
+            world_key = stats_dict["world_key"]
+            if world_key in new_qd_stats:
+                warn_msg = ("Should not have redundant world evaluations inside this function unless training on "\
+                            "fixed worlds or doing evaluation/enjoyment.")
+                # assert cfg.fixed_worlds or evaluate_only, warn_msg
+                if not cfg.fixed_worlds and not cfg.evaluate:
+                    print(warn_msg)
 
-            # Hardcoded rendering
-            envs = workers.foreach_worker(
-                lambda worker: worker.foreach_env(lambda env: env))
-            envs = [e for we in envs for e in we]
-            envs[0].render()
+                # We'll create a list of stats from separate runs.
+                new_qd_stats[world_key] = new_qd_stats[world_key] + [stats_dict["qd_stats"]]
 
-            new_world_stats = workers.foreach_worker(
-                lambda worker: worker.foreach_env(
-                    # NOTE: need to match what is returned by env in get_world_stats here
-                    #  i.e., [(world_key, ((qd_objective,), (qd_features...)), [swarm_rewards...]), ...]
-                    lambda env: [(env.world_key, ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0)), [])]))
+            else:
+                # Note that this will be a tuple.
+                new_qd_stats[world_key] = [stats_dict["qd_stats"]]
+    
+    # Take the average of each objective and feature value across all runs.
+    aggregate_new_qd_stats = {}
+    for world_key, world_qd_stats in new_qd_stats.items():
+        n_trials = len(world_qd_stats)
+        if n_trials > 1:
+            aggregate_new_qd_stats[world_key] = ([], [])
+
+            # Get the mean in each objective value across trials.
+            n_objs = len(world_qd_stats[0][0])  # Length of objective tuple from first trial.
+            for obj_i in range(n_objs):
+                aggregate_new_qd_stats[world_key][0].append(np.mean([world_qd_stats[trial_i][0][obj_i] \
+                    for trial_i in range(n_trials)]))
+
+            # Get the mean in each feature value across trials.
+            n_feats = len(world_qd_stats[0][1])  # Length of feature list from first trial.
+            for feat_i in range(n_feats):
+                aggregate_new_qd_stats[world_key][1].append(np.mean([world_qd_stats[trial_i][1][feat_i] \
+                    for trial_i in range(n_trials)]))
+
+        else:
+            aggregate_new_qd_stats[world_key] = new_qd_stats[world_key][0]
+
+    return aggregate_new_qd_stats
