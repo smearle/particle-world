@@ -24,7 +24,7 @@ from ray.tune.logger import Logger
 from ray.rllib.agents import Trainer
 from ray.rllib.evaluation.worker_set import WorkerSet
 from ray.rllib.utils import merge_dicts
-from ray.rllib.utils.typing import PartialTrainerConfigDict, TrainerConfigDict, ResultDict
+from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict, TrainerConfigDict, ResultDict
 from timeit import default_timer as timer
 
 from envs import eval_mazes
@@ -486,8 +486,14 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         return cfg
 
+    def set_attrs(self, world_evolver, idx_counter, colearning_config):
+        self.world_evolver = world_evolver
+        self.idx_counter = idx_counter
+        self.colearning_config = colearning_config
+
     def setup(self, config: PartialTrainerConfigDict):
         super().setup(config)
+        self.world_evolver = None
         # Update with evaluation settings:
         user_evo_eval_config = copy.deepcopy(self.config["evo_eval_config"])
 
@@ -511,34 +517,6 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             )
 
     def step_attempt(self) -> ResultDict:
-
-        step_results = {}
-        # Parallel evo-eval + training.
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            print("Parallel evo eval.")
-            train_future = executor.submit(
-                lambda: self._exec_plan_or_training_iteration_fn())
-            # Automatically determine duration of the evaluation.
-            if self.config["evo_eval_duration"] == "auto":
-
-                # Always measuring evo-eval in terms of episodes.
-                # unit = self.config["evo_eval_duration_unit"]
-                unit = "episodes"
-
-                step_results.update(
-                    self.evo_eval(
-                        duration_fn=functools.partial(
-                            auto_duration_fn, unit, self.config[
-                                "num_workers"], {})))
-
-            # TODO: optionally, limit the amount of evo-eval, then do training.
-            else:
-                step_results.update(self.evo_eval())
-            # Collect the training results from the future.
-#           step_results.update(train_future.result())
-        return super().step_attempt()
-
-    def step_attempt(self) -> ResultDict:
         """Attempts a single training step, including player evaluation, if required. Performs evo-eval in parallel.
 
         Override this method in your Trainer sub-classes if you would like to
@@ -551,7 +529,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             and - if required - evaluation.
         """
 
-        def auto_duration_fn(unit, num_eval_workers, eval_cfg, num_units_done):
+        def auto_duration_fn(unit, num_workers, cfg, num_units_done):
             # Training is done and we already ran at least one
             # evaluation -> Nothing left to run.
             if num_units_done > 0 and \
@@ -559,109 +537,158 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 return 0
             # Count by episodes. -> Run n more
             # (n=num eval workers).
-            elif unit == "episodes":
-                return num_eval_workers
-            # Count by timesteps. -> Run n*m*p more
-            # (n=num eval workers; m=rollout fragment length;
-            # p=num-envs-per-worker).
-            else:
-                return num_eval_workers * \
-                       eval_cfg["rollout_fragment_length"] * \
-                       eval_cfg["num_envs_per_worker"]
-
-        # TODO: train multiple times before any world evo (...why though?(?))
-        # TODO: decouple evo-eval and eval?
-        # self._iteration gets incremented after this function returns,
-        # meaning that e. g. the first time this function is called,
-        # self._iteration will be 0.
-        evo_eval_this_iter = True
-        evaluate_this_iter = True
-#       evaluate_this_iter = \
-#           self.config["evaluation_interval"] and \
-#           (self._iteration + 1) % self.config["evaluation_interval"] == 0
+            return num_workers * self.config["num_envs_per_worker"]
 
         step_results = {}
 
-        # No evaluation or evo-eval necessary, just run the next training iteration.
-        if not evaluate_this_iter and not evo_eval_this_iter:
-            step_results = self._exec_plan_or_training_iteration_fn()
-        # We have to evaluate in this training iteration.
-        else:
-            # No parallelism.
-#           if not self.config["evaluation_parallel_to_training"]:
-#               step_results = self._exec_plan_or_training_iteration_fn()
+        # Kick off evaluation-loop (and parallel train() call,
+        # if requested).
+        # Parallel eval + training.
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            train_future = executor.submit(
+                lambda: self._exec_plan_or_training_iteration_fn())
+            print('Training')
 
-            # Kick off evaluation-loop (and parallel train() call,
-            # if requested).
-            # Parallel eval + training.
+            step_results.update(self.evaluate())
 
-            # TODO: allow for sequential eval, and parallel evo-eval at the same time?
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                train_future = executor.submit(
-                    lambda: self._exec_plan_or_training_iteration_fn())
-
-                # Automatically determine duration of the evaluation.
-#               if self.config["evaluation_duration"] == "auto":
-#                   raise Exception("Should not do this much player eval! Need to evolve worlds here.")
-
-#                   unit = self.config["evaluation_duration_unit"]
-#                   step_results.update(
-#                       self.evaluate(
-#                           duration_fn=functools.partial(
-#                               auto_duration_fn, unit, self.config[
-#                                   "evaluation_num_workers"], self.config[
-#                                       "evaluation_config"])))
-#               else:
-#                   # TODO: evaluate only every n player training steps (why though?)
-                step_results.update(self.evaluate())
-
-                # Run evo-eval indefinitely
-                if self.config["evo_eval_duration"] == "auto":
-                    # unit = self.config["evaluation_duration_unit"]
-                    unit = "episodes"
-                    step_results.update(
-                        self.evo_eval(
-                            duration_fn=functools.partial(
-                                auto_duration_fn, unit, self.config[
-                                    "num_workers"], self.config[
-                                        "evo_eval_config"])))
-
-                # TODO: optionally, limit the amount of evo-eval, then do training.
-                else:
-                    raise NotImplementedError
-                    step_results.update(self.evo_eval())
-
-                # Collect the training results from the future.
-                step_results.update(train_future.result())
-
-
-        # Attach latest available evaluation results to train results,
-        # if necessary.
-        if (not evaluate_this_iter
-                and self.config["always_attach_evaluation_results"]):
-            assert isinstance(self.evaluation_metrics, dict), \
-                "Trainer.evaluate() needs to return a dict."
-            step_results.update(self.evaluation_metrics)
-
-        # Check `env_task_fn` for possible update of the env's task.
-        if self.config["env_task_fn"] is not None:
-            if not callable(self.config["env_task_fn"]):
-                raise ValueError(
-                    "`env_task_fn` must be None or a callable taking "
-                    "[train_results, env, env_ctx] as args!")
-
-            def fn(env, env_context, task_fn):
-                new_task = task_fn(step_results, env, env_context)
-                cur_task = env.get_task()
-                if cur_task != new_task:
-                    env.set_task(new_task)
-
-            fn = functools.partial(fn, task_fn=self.config["env_task_fn"])
-            self.workers.foreach_env_with_context(fn)
+            # Run evo-eval indefinitely
+            step_results.update(
+                self.evo_eval(
+                    duration_fn=functools.partial(
+                        auto_duration_fn, unit="episodes", num_workers=self.config[
+                            "num_workers"], cfg=self.config[
+                                "evo_eval_config"])))
 
         return step_results
 
 
-    def evo_eval(self, duration_fn):
-        print('do world evo')
-        return {}
+
+    def evo_eval(
+            self,
+            duration_fn: Optional[Callable[[int], int]] = None,
+    ) -> dict:
+        """Evaluates current policy under `evaluation_config` settings.
+
+        Note that this default implementation does not do anything beyond
+        merging evaluation_config with the normal trainer config.
+
+        Args:
+            duration_fn: An optional callable taking the already run
+                num episodes as only arg and returning the number of
+                episodes left to run. It's used to find out whether
+                evaluation should continue.
+        """
+        # Sync weights to the evaluation WorkerSet.
+        self.evo_eval_workers.sync_weights(
+            from_worker=self.workers.local_worker())
+        self._sync_filters_if_needed(self.evo_eval_workers)
+
+        # How many episodes/timesteps do we need to run?
+        # In "auto" mode (only for parallel eval + training): Run as long
+        # as training lasts.
+        unit = "episodes"
+        evo_eval_cfg = self.config["evo_eval_config"]
+        # rollout = evo_eval_cfg["rollout_fragment_length"]
+        num_envs = self.config["num_envs_per_worker"]
+        duration = self.config["num_workers"] * self.config["num_envs_per_worker"]
+#       duration = self.config["evo_eval_duration"] if \
+#           self.config["evo_eval_duration"] != "auto" else \
+#           (self.config["num_workers"] or 1) * \
+#           (1 if unit == "episodes" else rollout)
+        num_ts_run = 0
+
+        # Default done-function returns True, whenever num episodes
+        # have been completed.
+        if duration_fn is None:
+
+            def duration_fn(num_units_done):
+                return duration - num_units_done
+
+        metrics = {}
+
+        # How many episodes have we run (across all eval workers)?
+        num_units_done = 0
+        round_ = 0
+        while True:
+            offspring = self.world_evolver.generate_offspring()
+            self.set_worlds(offspring, self.evo_eval_workers)
+
+            units_left_to_do = duration_fn(num_units_done=num_units_done)
+            if units_left_to_do <= 0:
+                break
+
+            round_ += 1
+            batches = ray.get([
+                w.sample.remote() for i, w in enumerate(
+                    self.evo_eval_workers.remote_workers())
+                if i * 1 < units_left_to_do
+            ])
+            print(f"Round {round_}.")
+            # 1 episode per returned batch.
+            if unit == "episodes":
+                num_units_done += len(batches)
+            # n timesteps per returned batch.
+            else:
+                ts = sum(len(b) for b in batches)
+                num_ts_run += ts
+                num_units_done += ts
+
+#       if metrics is None:
+#           metrics = collect_metrics(
+#               self.evaluation_workers.local_worker(),
+#               self.evaluation_workers.remote_workers())
+        metrics["timesteps_this_iter"] = num_ts_run
+
+        # Evaluation does not run for every step.
+        # Save evaluation metrics on trainer, so it can be attached to
+        # subsequent step results as latest evaluation result.
+        # self.evo_eval_metrics = {"evaluation": metrics}
+
+        # Also return the results here for convenience.
+        return self.evaluation_metrics
+
+    def set_worlds(self, worlds: dict, workers: WorkerSet):
+        """Assign worlds to environments to be loaded at next reset."""
+        idxs = np.random.permutation(list(worlds.keys()))
+        world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
+            if self.config["render_env"] else None
+
+        worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
+
+        # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
+        hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+        hashes = [h for wh in hashes for h in wh]
+        n_envs = len(hashes)
+        print(f"{n_envs} environments, {len(idxs)} worlds")
+
+        self.idx_counter.set_idxs.remote(idxs)
+        self.idx_counter.set_hashes.remote(hashes)
+
+        # FIXME: Sometimes hash-to-idx dict is not set by the above call?
+        assert ray.get(self.idx_counter.scratch.remote())
+
+        # Otherwise we'll try to serialize `self` in the below lambda
+        idx_counter = ray.get_actor("idx_counter")
+
+        # Assign envs to worlds
+        workers.foreach_worker(
+            lambda worker: worker.foreach_env(
+                lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
+
+        # If using oracle, manually load the world
+        if self.colearning_config.oracle_policy:
+            flood_model = self.get_policy('policy_0').model
+            workers.foreach_worker(
+                lambda worker: worker.foreach_env(lambda env: env.reset()))
+
+            # Hardcoded rendering
+            envs = workers.foreach_worker(
+                lambda worker: worker.foreach_env(lambda env: env))
+            envs = [e for we in envs for e in we]
+            envs[0].render()
+
+            new_world_stats = workers.foreach_worker(
+                lambda worker: worker.foreach_env(
+                    # NOTE: need to match what is returned by env in get_world_stats here
+                    #  i.e., [(world_key, ((qd_objective,), (qd_features...)), [swarm_rewards...]), ...]
+                    lambda env: [(env.world_key, ((flood_model.get_solution_length(th.Tensor(env.world).unsqueeze(0)),), (0,0)), [])]))

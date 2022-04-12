@@ -217,7 +217,7 @@ if __name__ == '__main__':
     n_sim_steps = env.max_episode_steps
     unique_chans = env.unique_chans
 
-    total_play_itrs = 50000
+    cfg.total_play_itrs = 50000
     multi_proc = cfg.parallelismType != 'None'
     rllib_save_interval = 10
 
@@ -293,7 +293,7 @@ if __name__ == '__main__':
     # TODO: serializing these trainers doesn't work, so we need to use a single trainer, either by co-opting some eval
     #   workers for evo-eval, or creating a separate WorkerSet for this purpose.
 #   if not cfg.parallel_gen_play:
-    trainer = gen_trainer = play_trainer = None if cfg.load and cfg.visualize else \
+    trainer = None if cfg.load and cfg.visualize else \
         init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
 #   else:
 #       gen_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, gen_only=True)
@@ -369,7 +369,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             if cfg.fixed_worlds:
                 trainer.workers.local_worker().set_policies_to_train([])
-                evaluate_worlds(trainer=gen_trainer, worlds=training_worlds,
+                evaluate_worlds(trainer=trainer, worlds=training_worlds,
                                       fixed_worlds=cfg.fixed_worlds, render=cfg.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
@@ -381,7 +381,7 @@ if __name__ == '__main__':
             elites = sorted(archive, key=lambda ind: ind.fitness, reverse=True)
             worlds = [i for i in elites]
             for i, elite in enumerate(worlds):
-                ret = evaluate_worlds(trainer=gen_trainer, worlds={i: elite}, idx_counter=idx_counter,
+                ret = evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
                                             evaluate_only=True, cfg=cfg)
             print('Done enjoying, goodbye!')
             sys.exit()
@@ -394,7 +394,7 @@ if __name__ == '__main__':
 
             # How many trials on each world? Kind of, minus garbage resets, and assuming evaluation_num_episodes == len(eval_worlds).
             for _ in range(10):
-                rllib_stats = gen_trainer.evaluate()
+                rllib_stats = trainer.evaluate()
                 qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
                     lambda env: env.get_world_stats(evaluate=True, quality_diversity=cfg.quality_diversity)))
 
@@ -479,7 +479,7 @@ if __name__ == '__main__':
     # Algorithm parameters
     assert (nb_features >= 1)
 
-    nb_iterations = total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
+    nb_iterations = cfg.total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
     ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
@@ -514,13 +514,19 @@ if __name__ == '__main__':
                            verbose=verbose, show_warnings=show_warnings,
                            results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                            iteration_filename=f'{experiment_name}' + '/latest-{}.p',
-                           trainer=gen_trainer, idx_counter=idx_counter, cfg=cfg, 
+                           trainer=trainer, idx_counter=idx_counter, cfg=cfg, 
                            )
     # Run the illumination process !
     world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
 
     # The outer co-learning loop
-    toggle_train_player(gen_trainer, train_player=False, cfg=cfg)
+    if cfg.parallel_gen_play:
+        trainer.set_attrs(world_evolver, idx_counter, cfg)
+        for _ in range(cfg.total_play_itrs):
+            trainer.train()
+        sys.exit()
+
+    toggle_train_player(trainer, train_player=False, cfg=cfg)
     done = False
     while not done:
 
@@ -534,7 +540,7 @@ if __name__ == '__main__':
             if done_gen_phase:
                 save(archive=archive, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook,
                                 save_dir=cfg.save_dir)
-                mean_path_length = compute_archive_world_heuristics(archive=archive, trainer=gen_trainer)
+                mean_path_length = compute_archive_world_heuristics(archive=archive, trainer=trainer)
                 stat_keys = ['mean', 'min', 'max']  # , 'std]
                 logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
 
@@ -567,12 +573,12 @@ if __name__ == '__main__':
         training_worlds *= math.ceil(cfg.world_batch_size / len(training_worlds))
 
         while not done_play_phase:
-            toggle_train_player(play_trainer, train_player=True, cfg=cfg)
-            logbook_stats = train_players(training_worlds, play_trainer, cfg, idx_counter)
+            toggle_train_player(trainer, train_player=True, cfg=cfg)
+            logbook_stats = train_players(training_worlds, trainer, cfg, idx_counter)
             log(logbook, logbook_stats, net_itr)
             play_itr += 1
             done_play_phase = get_done_play_phase(play_itr, cfg)
-            done = play_itr >= total_play_itrs
+            done = play_itr >= cfg.total_play_itrs
             net_itr += 1
 
 #       # Now that we've trained the player, update the generator-trainer before the next round of generator evolution.
@@ -580,7 +586,7 @@ if __name__ == '__main__':
 
         # Only doing this in case gen_trainer = play_trainer (i.e. not parallel). Can remove this once parallel evo/train
         # is implemented in separate loop (presumably).
-        toggle_train_player(gen_trainer, train_player=False, cfg=cfg)
+        toggle_train_player(trainer, train_player=False, cfg=cfg)
 
         logbook_stats = world_evolver.reevaluate_elites()
         log(logbook, logbook_stats, net_itr)

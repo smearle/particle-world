@@ -80,24 +80,11 @@ class WorldEvolver(DEAPQDAlgorithm):
         # NOTE: Here we are assuming that we've only evaluated each world once. If we have duplicate stats for a given world, we will overwrite all but one instance of statistics 
         #  resulting from playthrough in this world.
 
-
-    def evolve(self, batch=None) -> dict:
-        """One step of a simple QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer.
-
-        Args:
-            batch (Iterable): Sequence of individuals used as the current batch.
-        """
-        start_time = timer()
-
-        # If the batch has been supplied externally, use it.
-        if batch is not None:
-            pass
-
+    def generate_offspring(self) -> dict:
         # On the first iteration, randomly generate the initial batch if necessary.
-        elif self.curr_itr == 0:
-            batch = self.init_batch 
+        if self.curr_itr == 0:
+            offspring = self.init_batch 
 
-        # Otherwise, generate a new batch by applying genetic operators to a subset of the individuals in the archive.
         else:
             batch = self.toolbox.select(self.container, self.batch_size)
 
@@ -116,12 +103,29 @@ class WorldEvolver(DEAPQDAlgorithm):
                     offspring[i], = self.toolbox.mutate(offspring[i])
                     del offspring[i].fitness.values
 
-            # Evaluate the individuals with an invalid fitness
-            batch = [ind for ind in offspring if not ind.fitness.valid]
-            # print(f"{len(batch)} new offspring up for evaluation.")
+        offspring = {i: ind for i, ind in enumerate(offspring)}
+        # print(f"{len(batch)} new offspring generated.")
+
+        return offspring
+
+    def evolve(self, batch=None) -> dict:
+        """One step of a simple QD algorithm using DEAP, modified to evaluate generated worlds inside an RLlib trainer.
+
+        Args:
+            batch (Iterable): Sequence of individuals used as the current batch.
+        """
+        start_time = timer()
+
+        # If the batch has been supplied externally, use it.
+        if batch is not None:
+            pass
+
+        # Otherwise, generate a new batch by applying genetic operators to a subset of the individuals in the archive.
+        else:
+            batch = self.generate_offspring()
 
         rllib_stats, world_stats, logbook_stats = evaluate_worlds(
-            trainer=self.trainer, worlds={i: ind for i, ind in enumerate(batch)}, cfg=self.cfg, 
+            trainer=self.trainer, worlds=batch, cfg=self.cfg, 
             idx_counter=self.idx_counter,
             start_time=self.start_time)
         # assert len(rllib_stats) == 1
