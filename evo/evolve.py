@@ -56,14 +56,7 @@ class WorldEvolver(DEAPQDAlgorithm):
         # Evaluate the individuals with an invalid fitness
         # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
 
-    def reevaluate_elites(self) -> dict:
-        """Assuming our evaluation function has changed, re-evaluate some elites in the archive. "The reckoning."
-        
-        This may apply if, e.g., our evaluation function depends on a co-learning player policy. We first remove elites
-        from the archive, then re-evaluate them, updating their objective and measure values, then attempt to re-insert
-        them in the archive. When doing QD, this may result in some "collisions," which see the archive left less 
-        populated than before.
-        """
+    def disturb_elites(self) -> list:
         # Pop individuals from the container for re-evaluation.
         # Randomly select individuals to pop, without replacement
         invalid_inds = random.sample(self.container, k=min(self.cfg.world_batch_size, len(self.container)))
@@ -74,6 +67,18 @@ class WorldEvolver(DEAPQDAlgorithm):
         #  then discarding by index using ``discard_by_index``.
         [self.container.discard(ind) for ind in invalid_inds]
         # container.clear_all()
+
+        return {i: ind for i, ind in enumerate(invalid_inds)}
+
+    def reevaluate_elites(self) -> dict:
+        """Assuming our evaluation function has changed, re-evaluate some elites in the archive. "The reckoning."
+        
+        This may apply if, e.g., our evaluation function depends on a co-learning player policy. We first remove elites
+        from the archive, then re-evaluate them, updating their objective and measure values, then attempt to re-insert
+        them in the archive. When doing QD, this may result in some "collisions," which see the archive left less 
+        populated than before.
+        """
+        invalid_inds = self.disturb_elites()
 
         return self.evolve(batch=invalid_inds)
 
@@ -144,7 +149,7 @@ class WorldEvolver(DEAPQDAlgorithm):
             self.halloffame.update(self.init_batch)
 
         # Store batch in container
-        n_updated = self.container.update(batch, issue_warning=self.show_warnings)
+        n_updated = self.container.update([ind for ind in batch.values()], issue_warning=self.show_warnings)
 
         self.staleness += n_updated == 0
         self.stale_generators = self.staleness > self.time_until_stale
@@ -161,7 +166,9 @@ class WorldEvolver(DEAPQDAlgorithm):
         logbook_stats.update(self.stats.compile(self.container) if self.stats else {})
         logbook_stats.update({
             'containerSize': self.container.size_str(), 'evals': len(batch), 
-            'nbUpdated': n_updated, 'elapsed': timer() - start_time})
+            'nbUpdated': n_updated, \
+                # 'elapsed': timer() - start_time
+            })
         # self.logbook.record(**logbook_stats)
         self.curr_itr += 1
 

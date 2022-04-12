@@ -28,11 +28,12 @@ from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict,
 from timeit import default_timer as timer
 
 from envs import eval_mazes
+from evo.utils import compute_archive_world_heuristics, save
 from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import RegretCallbacks
 from rl.eval_worlds import evaluate_worlds
-from utils import get_solution
+from utils import log, get_solution
 
 
 def train_players(worlds, trainer, cfg, idx_counter=None):
@@ -302,7 +303,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "evaluation_interval": evaluation_interval,
 
         # We'll only parallelize eval workers when doing evaluation on pre-trained agents.
-        "evaluation_num_workers": 1 if not (cfg.evaluate) else cfg.n_rllib_workers,
+        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.n_rllib_workers,
 
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
@@ -452,31 +453,6 @@ def evo_evaluate(trainer: Trainer, workers: WorkerSet):
 
 class WorldEvoPPOTrainer(ppo.PPOTrainer):
     """A subclass of PPOTrainer that adds the ability to evolve worlds in parallel to player training."""
-#   def evaluate(self, duration_fn=None):
-#       # Two pieces of good news:
-#       #   - we can do eval in parallel, until the concurrent call to `train()` is complete.
-#       #   - calling `evaluate()` takes samples, which leads to the `on_sample_end()` callback being called, where we
-#       #     can easily compute positive value loss, if necessary.
-#       # This means we can take the following approach to parallel gen & play:
-#       # TODO: Use additional eval workers, with eval duration set to `auto`. Use these additional workers to do evo
-#       #   evaluation. Unfortunately, this ongoing evolution happens inside a `while Ture` loop inside the evaluate
-#       #   function, but each time, duration_fn is called, so maybe we can smuggle in the world-evolution logic there?
-#       #   Alternatively, we could implement world-evolution inside each worker's `sample()` function. This would 
-#       #   additionally parallelize world-mutation.
-#       print('evaluating')
-
-#       def env_evo_duration_fn(*args, **kwargs):
-#           # TODO: this function gets called multiple times in quick succession without additional episodes (saving 
-#           #   results for the next time around, basically). Quick fix is to make sure number of train workers and 
-#           #   eval duration are properly aligned so as to avoid this.
-#           units_remaining = duration_fn(*args, **kwargs)
-
-#           if units_remaining > 0:
-#               self.world_evo()
-
-#           return units_remaining
-
-#       return super().evaluate(duration_fn=env_evo_duration_fn)
 
     @classmethod
     def get_default_config(cls) -> TrainerConfigDict:
@@ -486,14 +462,16 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         return cfg
 
-    def set_attrs(self, world_evolver, idx_counter, colearning_config):
+    def set_attrs(self, world_evolver, idx_counter, logbook, colearning_config):
         self.world_evolver = world_evolver
         self.idx_counter = idx_counter
+        self.logbook = logbook
         self.colearning_config = colearning_config
 
     def setup(self, config: PartialTrainerConfigDict):
         super().setup(config)
         self.world_evolver = None
+        self.gen_itr, self.play_itr, self.net_itr = 0, 0, 0
         # Update with evaluation settings:
         user_evo_eval_config = copy.deepcopy(self.config["evo_eval_config"])
 
@@ -539,7 +517,26 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             # (n=num eval workers).
             return num_workers * self.config["num_envs_per_worker"]
 
+        training_worlds = self.world_evolver.generate_offspring() if self.net_itr == 0 else \
+            {k: ind for k, ind in enumerate(self.world_evolver.container)}
+            # sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True)
+
+        if self.colearning_config.quality_diversity:
+            # Eliminate impossible worlds
+            training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
+
+            # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
+            if len(training_worlds) == 0:
+                done_play_phase = True
+
+        replace = True if self.colearning_config.fixed_worlds else False
+        world_keys = np.random.choice(list(training_worlds.keys()), self.colearning_config.world_batch_size, replace=replace)
+        training_worlds = {k: training_worlds[k] for k in world_keys}
+
+        set_worlds(training_worlds, self.workers, self.idx_counter, self.colearning_config)
+
         step_results = {}
+        logbook_stats = {}
 
         # Kick off evaluation-loop (and parallel train() call,
         # if requested).
@@ -547,21 +544,30 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             train_future = executor.submit(
                 lambda: self._exec_plan_or_training_iteration_fn())
-            print('Training')
 
             step_results.update(self.evaluate())
 
             # Run evo-eval indefinitely
-            step_results.update(
-                self.evo_eval(
+            logbook_archive_stats = self.evo_eval(
                     duration_fn=functools.partial(
                         auto_duration_fn, unit="episodes", num_workers=self.config[
                             "num_workers"], cfg=self.config[
-                                "evo_eval_config"])))
+                                "evo_eval_config"]))
+
+            
+            # Collect the training results from the future.
+            step_results.update(train_future.result())
+
+            stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
+            logbook_stats.update({
+                f'{k}Rew': step_results[f'episode_reward_{k}'] for k in stat_keys})
+        
+        logbook_stats.update(logbook_archive_stats)
+        log(self.logbook, logbook_stats, self.net_itr)
+        self.play_itr += 1
+        self.net_itr += 1
 
         return step_results
-
-
 
     def evo_eval(self, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
         """Evaluates current policy under `evaluation_config` settings.
@@ -588,10 +594,6 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         # rollout = evo_eval_cfg["rollout_fragment_length"]
         num_envs = self.config["num_envs_per_worker"]
         duration = self.config["num_workers"] * self.config["num_envs_per_worker"]
-#       duration = self.config["evo_eval_duration"] if \
-#           self.config["evo_eval_duration"] != "auto" else \
-#           (self.config["num_workers"] or 1) * \
-#           (1 if unit == "episodes" else rollout)
         num_ts_run = 0
 
         # Default done-function returns True, whenever num episodes
@@ -607,9 +609,11 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         num_units_done = 0
         round_ = 0
         while True:
-            offspring = self.world_evolver.generate_offspring()
+            # De-throne and re-evaluate elites after player update, otherwise get a batch of new offspring.
+            offspring = self.world_evolver.disturb_elites() if self.net_itr > 0 and round_ == 0 else \
+                self.world_evolver.generate_offspring()
 
-            # Otherwise we'll try to serialize `self` in the workerset lambda in the below function.
+            # New variable, otherwise we'll try to serialize `self` in the workerset lambda in the below function.
             idx_counter = ray.get_actor("idx_counter")
 
             set_worlds(offspring, self.evo_eval_workers, idx_counter, self.colearning_config)
@@ -625,8 +629,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 if i * 1 < units_left_to_do
             ])
             world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearning_config)
-            self.world_evolver.tell(offspring, world_qd_stats)
-            print(f"Round {round_}.")
+            logbook_stats = self.world_evolver.tell(offspring, world_qd_stats)
             # 1 episode per returned batch.
             if unit == "episodes":
                 num_units_done += len(batches)
@@ -635,6 +638,18 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 ts = sum(len(b) for b in batches)
                 num_ts_run += ts
                 num_units_done += ts
+            log(self.logbook, logbook_stats, self.net_itr)
+            self.gen_itr += 1
+            self.net_itr += 1
+
+        # The training step is complete, so we are done this phase of generator-evolution.
+        logbook_stats = {}
+        save(archive=self.world_evolver.container, gen_itr=self.gen_itr, net_itr=self.net_itr, play_itr=self.play_itr, \
+            logbook=self.logbook,
+                        save_dir=self.colearning_config.save_dir)
+        mean_path_length = compute_archive_world_heuristics(archive=self.world_evolver.container, trainer=self)
+        stat_keys = ['mean', 'min', 'max']  # , 'std]
+        logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
 
 #       if metrics is None:
 #           metrics = collect_metrics(
@@ -648,7 +663,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         # self.evo_eval_metrics = {"evaluation": metrics}
 
         # Also return the results here for convenience.
-        return self.evaluation_metrics
+        return logbook_stats
 
 def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
     """Assign worlds to environments to be loaded at next reset."""
@@ -662,7 +677,6 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
     hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
     hashes = [h for wh in hashes for h in wh]
     n_envs = len(hashes)
-    print(f"{n_envs} environments, {len(idxs)} worlds")
 
     idx_counter.set_idxs.remote(idxs)
     idx_counter.set_hashes.remote(hashes)

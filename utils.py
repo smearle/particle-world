@@ -6,6 +6,7 @@ from pprint import PrettyPrinter
 # from ribs.visualize import grid_archive_heatmap
 from timeit import default_timer as timer
 
+from deap import tools
 import numpy as np
 import pygame
 import ray
@@ -226,12 +227,17 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
 
 
 def update_individuals(individuals, qd_stats):
-    qd_stats = [qd_stats[k] for k in range(len(qd_stats))]
+    assert len(individuals) == len(qd_stats), f"Number of individuals, {len(individuals)} != {len(qd_stats)}, number "\
+        f"of qd_stats."
+    
+    # qd_stats = [qd_stats[k] for k in range(len(qd_stats))]
     # print(f"Updating individuals with new qd stats: {qd_stats}.")
 
-    for ind, s in zip(individuals, qd_stats):
-        ind.fitness.values = s[0]
-        ind.features = s[1]
+    # for ind, s in zip(individuals, qd_stats):
+    for k in individuals:
+        assert k in qd_stats, f"Individual {k} not in qd_stats."
+        individuals[k].fitness.values = qd_stats[k][0]
+        individuals[k].features = qd_stats[k][1]
 
 
 def get_experiment_name(cfg):
@@ -286,3 +292,9 @@ def compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_d
     }
     with open(os.path.join(save_dir, 'train_stats.json'), 'w') as f:
         json.dump(stats, f, indent=4)
+
+
+def log(logbook: tools.Logbook, stats: dict, net_itr: int):
+    stats.update({'iteration': net_itr, **stats})
+    logbook.record(**stats)
+    print(logbook.stream)

@@ -67,7 +67,6 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
             hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
             hashes = [h for wh in hashes for h in wh]
             n_envs = len(hashes)
-            print(f"{n_envs} environments, {len(idxs)} worlds")
 
             # Select a subset of the worlds to simulate on in this call to ``train()``.
             sub_idxs = idxs[world_id:min(world_id + cfg.n_eps_on_train, len(idxs))]

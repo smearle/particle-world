@@ -38,7 +38,7 @@ from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, 
 from rl.eval_worlds import evaluate_worlds
 from rl.utils import IdxCounter
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
-from utils import compile_train_stats, get_experiment_name, load_config
+from utils import compile_train_stats, get_experiment_name, load_config, log
 from visualize import visualize_train_stats, visualize_archive
 
 seed = None
@@ -50,12 +50,6 @@ generator_phase = True  # Do we start by evolving generators, or training player
 fitness_weight = -1.0
 creator.create("FitnessMin", base.Fitness, weights=(-fitness_weight,))
 creator.create("Individual", list, fitness=creator.FitnessMin, features=list)
-
-
-def log(logbook: tools.Logbook, stats: dict, net_itr: int):
-    stats.update({'iteration': net_itr, **stats})
-    logbook.record(**stats)
-    print(logbook.stream)
 
 
 def get_done_gen_phase(world_evolver, gen_itr, cfg):
@@ -94,9 +88,9 @@ if __name__ == '__main__':
     cfg.archive_size = 100
     cfg.translated_observations = True
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
-    cfg.n_rllib_envs = 6
-    cfg.n_eps_on_train = 6
-    cfg.world_batch_size = 12
+    cfg.n_rllib_envs = 12
+    cfg.n_eps_on_train = cfg.n_rllib_envs
+    cfg.world_batch_size = cfg.n_eps_on_train 
 
     # Whether to run rounds of player-training and generator-evolution in parallel.
     cfg.parallel_gen_play = True
@@ -521,7 +515,9 @@ if __name__ == '__main__':
 
     # The outer co-learning loop
     if cfg.parallel_gen_play:
-        trainer.set_attrs(world_evolver, idx_counter, cfg)
+        toggle_train_player(trainer, train_player=True, cfg=cfg)
+        # TODO: remove this function and initialize most of these objects in the trainer setup function.
+        trainer.set_attrs(world_evolver, idx_counter, logbook, cfg)
         for _ in range(cfg.total_play_itrs):
             trainer.train()
         sys.exit()
