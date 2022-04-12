@@ -1,7 +1,9 @@
 # Each policy can have a different configuration (including custom model).
 from argparse import Namespace
+import concurrent
 import copy
 from functools import partial
+import functools
 import math
 import os
 from pathlib import Path
@@ -21,6 +23,8 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import Logger
 from ray.rllib.agents import Trainer
 from ray.rllib.evaluation.worker_set import WorkerSet
+from ray.rllib.utils import merge_dicts
+from ray.rllib.utils.typing import PartialTrainerConfigDict, TrainerConfigDict, ResultDict
 from timeit import default_timer as timer
 
 from envs import eval_mazes
@@ -236,13 +240,15 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # initialize the evaluation workers.
         if -1 in [cfg.gen_phase_len, cfg.play_phase_len] or cfg.enjoy:
             evaluation_interval = 10
+
         # Otherwise, evaluate policies once after every player-training phase. If the trainer is for player-training and
         # evolved world evaluation, we count the phases corresponding to each process, and the phase corresponding to 
         # the re-evaluation of elites. 
         # TODO: might want multiple rounds of elite-re-evaluation, would need to account for that here.
 #       elif not cfg.parallel_gen_play:
-#       evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
-        evaluation_interval = 1
+        evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
+
+#       evaluation_interval = 1
 #       # If we're parallelizing generation and playing, we're evaluating on the player-only trainer.
 #       else:
 #           evaluation_interval = cfg.play_phase_len * cfg.world_batch_size // cfg.n_eps_on_train 
@@ -303,8 +309,8 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # trainer.train(), evaluate() waits until n episodes are completed, as opposed to proceeding for a fixed number 
         # of steps.)
         "evaluation_duration": evaluation_num_episodes,
-        "evaluation_duration": "auto",
-        # "evaluation_duration_unit": "episodes",
+        # "evaluation_duration": "auto",
+        "evaluation_duration_unit": "episodes",
         "evaluation_parallel_to_training": True,
 
         # We *almost* run the right number of episodes s.t. we simulate on each map the same number of times. But there
@@ -320,6 +326,11 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
             "render_env": cfg.render,
             "explore": False if cfg.oracle_policy else True,
         },
+
+#       # TODO: provide more options here?
+#       "evo_eval_duration": "auto",
+#       "evo_eval_config": {},
+
         # "lr": 0.1,
         # "log_level": "INFO",
         # "record_env": True,
@@ -340,7 +351,10 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
     print(f'Loading trainer with config:')
     pp.pprint(trainer_config_loggable)
 
-    trainer = EnvEvoPPOTrainer(env='world_evolution_env', config=trainer_config)
+    if cfg.parallel_gen_play:
+        trainer = WorldEvoPPOTrainer(env='world_evolution_env', config=trainer_config)
+    else:
+        trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs. We do not evaluate when 
     # evolving adversarial worlds.
@@ -436,35 +450,218 @@ def evo_evaluate(trainer: Trainer, workers: WorkerSet):
     return trainer.evaluate()
 
 
-class EnvEvoPPOTrainer(ppo.PPOTrainer):
-    def train(self):
-        return super().train()
+class WorldEvoPPOTrainer(ppo.PPOTrainer):
+    """A subclass of PPOTrainer that adds the ability to evolve worlds in parallel to player training."""
+#   def evaluate(self, duration_fn=None):
+#       # Two pieces of good news:
+#       #   - we can do eval in parallel, until the concurrent call to `train()` is complete.
+#       #   - calling `evaluate()` takes samples, which leads to the `on_sample_end()` callback being called, where we
+#       #     can easily compute positive value loss, if necessary.
+#       # This means we can take the following approach to parallel gen & play:
+#       # TODO: Use additional eval workers, with eval duration set to `auto`. Use these additional workers to do evo
+#       #   evaluation. Unfortunately, this ongoing evolution happens inside a `while Ture` loop inside the evaluate
+#       #   function, but each time, duration_fn is called, so maybe we can smuggle in the world-evolution logic there?
+#       #   Alternatively, we could implement world-evolution inside each worker's `sample()` function. This would 
+#       #   additionally parallelize world-mutation.
+#       print('evaluating')
 
-    def evaluate(self, duration_fn=None):
-        # Two pieces of good news:
-        #   - we can do eval in parallel, until the concurrent call to `train()` is complete.
-        #   - calling `evaluate()` takes samples, which leads to the `on_sample_end()` callback being called, where we
-        #     can easily compute positive value loss, if necessary.
-        # This means we can take the following approach to parallel gen & play:
-        # TODO: Use additional eval workers, with eval duration set to `auto`. Use these additional workers to do evo
-        #   evaluation. Unfortunately, this ongoing evolution happens inside a `while Ture` loop inside the evaluate
-        #   function, but each time, duration_fn is called, so maybe we can smuggle in the world-evolution logic there?
-        #   Alternatively, we could implement world-evolution inside each worker's `sample()` function. This would 
-        #   additionally parallelize world-mutation.
-        print('evaluating')
+#       def env_evo_duration_fn(*args, **kwargs):
+#           # TODO: this function gets called multiple times in quick succession without additional episodes (saving 
+#           #   results for the next time around, basically). Quick fix is to make sure number of train workers and 
+#           #   eval duration are properly aligned so as to avoid this.
+#           units_remaining = duration_fn(*args, **kwargs)
 
-        def env_evo_duration_fn(*args, **kwargs):
-            # TODO: this function gets called multiple times in quick succession without additional episodes (saving 
-            #   results for the next time around, basically). Quick fix is to make sure number of train workers and 
-            #   eval duration are properly aligned so as to avoid this.
-            units_remaining = duration_fn(*args, **kwargs)
+#           if units_remaining > 0:
+#               self.world_evo()
 
-            if units_remaining > 0:
-                self.env_evo()
+#           return units_remaining
 
-            return units_remaining
+#       return super().evaluate(duration_fn=env_evo_duration_fn)
 
-        return super().evaluate(duration_fn=env_evo_duration_fn)
+    @classmethod
+    def get_default_config(cls) -> TrainerConfigDict:
+        cfg = ppo.PPOTrainer.get_default_config()
+        cfg["evo_eval_duration"] = "auto"
+        cfg["evo_eval_config"] = {}
 
-    def env_evo(self):
-        print('do env evo')
+        return cfg
+
+    def setup(self, config: PartialTrainerConfigDict):
+        super().setup(config)
+        # Update with evaluation settings:
+        user_evo_eval_config = copy.deepcopy(self.config["evo_eval_config"])
+
+        # Merge user-provided eval config with the base config. This makes sure
+        # the eval config is always complete, no matter whether we have eval
+        # workers or perform evaluation on the (non-eval) local worker.
+        evo_eval_config = merge_dicts(self.config, user_evo_eval_config)
+
+        # Create a separate evolution evaluation worker set for evo eval.
+        # If num_workers=0, use the evo eval set's local
+        # worker for evaluation, otherwise, use its remote workers
+        # (parallelized evaluation).
+        self.evo_eval_workers: WorkerSet = self._make_workers(
+            env_creator=self.env_creator,
+            validate_env=None,
+            policy_class=self.get_default_policy_class(self.config),
+            config=evo_eval_config,
+            num_workers=self.config["num_workers"],
+            # Don't even create a local worker if num_workers > 0.
+            local_worker=False,
+            )
+
+    def step_attempt(self) -> ResultDict:
+
+        step_results = {}
+        # Parallel evo-eval + training.
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            print("Parallel evo eval.")
+            train_future = executor.submit(
+                lambda: self._exec_plan_or_training_iteration_fn())
+            # Automatically determine duration of the evaluation.
+            if self.config["evo_eval_duration"] == "auto":
+
+                # Always measuring evo-eval in terms of episodes.
+                # unit = self.config["evo_eval_duration_unit"]
+                unit = "episodes"
+
+                step_results.update(
+                    self.evo_eval(
+                        duration_fn=functools.partial(
+                            auto_duration_fn, unit, self.config[
+                                "num_workers"], {})))
+
+            # TODO: optionally, limit the amount of evo-eval, then do training.
+            else:
+                step_results.update(self.evo_eval())
+            # Collect the training results from the future.
+#           step_results.update(train_future.result())
+        return super().step_attempt()
+
+    def step_attempt(self) -> ResultDict:
+        """Attempts a single training step, including player evaluation, if required. Performs evo-eval in parallel.
+
+        Override this method in your Trainer sub-classes if you would like to
+        keep the n step-attempts logic (catch worker failures) in place or
+        override `step()` directly if you would like to handle worker
+        failures yourself.
+
+        Returns:
+            The results dict with stats/infos on sampling, training,
+            and - if required - evaluation.
+        """
+
+        def auto_duration_fn(unit, num_eval_workers, eval_cfg, num_units_done):
+            # Training is done and we already ran at least one
+            # evaluation -> Nothing left to run.
+            if num_units_done > 0 and \
+                    train_future.done():
+                return 0
+            # Count by episodes. -> Run n more
+            # (n=num eval workers).
+            elif unit == "episodes":
+                return num_eval_workers
+            # Count by timesteps. -> Run n*m*p more
+            # (n=num eval workers; m=rollout fragment length;
+            # p=num-envs-per-worker).
+            else:
+                return num_eval_workers * \
+                       eval_cfg["rollout_fragment_length"] * \
+                       eval_cfg["num_envs_per_worker"]
+
+        # TODO: train multiple times before any world evo (...why though?(?))
+        # TODO: decouple evo-eval and eval?
+        # self._iteration gets incremented after this function returns,
+        # meaning that e. g. the first time this function is called,
+        # self._iteration will be 0.
+        evo_eval_this_iter = True
+        evaluate_this_iter = True
+#       evaluate_this_iter = \
+#           self.config["evaluation_interval"] and \
+#           (self._iteration + 1) % self.config["evaluation_interval"] == 0
+
+        step_results = {}
+
+        # No evaluation or evo-eval necessary, just run the next training iteration.
+        if not evaluate_this_iter and not evo_eval_this_iter:
+            step_results = self._exec_plan_or_training_iteration_fn()
+        # We have to evaluate in this training iteration.
+        else:
+            # No parallelism.
+#           if not self.config["evaluation_parallel_to_training"]:
+#               step_results = self._exec_plan_or_training_iteration_fn()
+
+            # Kick off evaluation-loop (and parallel train() call,
+            # if requested).
+            # Parallel eval + training.
+
+            # TODO: allow for sequential eval, and parallel evo-eval at the same time?
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                train_future = executor.submit(
+                    lambda: self._exec_plan_or_training_iteration_fn())
+
+                # Automatically determine duration of the evaluation.
+#               if self.config["evaluation_duration"] == "auto":
+#                   raise Exception("Should not do this much player eval! Need to evolve worlds here.")
+
+#                   unit = self.config["evaluation_duration_unit"]
+#                   step_results.update(
+#                       self.evaluate(
+#                           duration_fn=functools.partial(
+#                               auto_duration_fn, unit, self.config[
+#                                   "evaluation_num_workers"], self.config[
+#                                       "evaluation_config"])))
+#               else:
+#                   # TODO: evaluate only every n player training steps (why though?)
+                step_results.update(self.evaluate())
+
+                # Run evo-eval indefinitely
+                if self.config["evo_eval_duration"] == "auto":
+                    # unit = self.config["evaluation_duration_unit"]
+                    unit = "episodes"
+                    step_results.update(
+                        self.evo_eval(
+                            duration_fn=functools.partial(
+                                auto_duration_fn, unit, self.config[
+                                    "num_workers"], self.config[
+                                        "evo_eval_config"])))
+
+                # TODO: optionally, limit the amount of evo-eval, then do training.
+                else:
+                    raise NotImplementedError
+                    step_results.update(self.evo_eval())
+
+                # Collect the training results from the future.
+                step_results.update(train_future.result())
+
+
+        # Attach latest available evaluation results to train results,
+        # if necessary.
+        if (not evaluate_this_iter
+                and self.config["always_attach_evaluation_results"]):
+            assert isinstance(self.evaluation_metrics, dict), \
+                "Trainer.evaluate() needs to return a dict."
+            step_results.update(self.evaluation_metrics)
+
+        # Check `env_task_fn` for possible update of the env's task.
+        if self.config["env_task_fn"] is not None:
+            if not callable(self.config["env_task_fn"]):
+                raise ValueError(
+                    "`env_task_fn` must be None or a callable taking "
+                    "[train_results, env, env_ctx] as args!")
+
+            def fn(env, env_context, task_fn):
+                new_task = task_fn(step_results, env, env_context)
+                cur_task = env.get_task()
+                if cur_task != new_task:
+                    env.set_task(new_task)
+
+            fn = functools.partial(fn, task_fn=self.config["env_task_fn"])
+            self.workers.foreach_env_with_context(fn)
+
+        return step_results
+
+
+    def evo_eval(self, duration_fn):
+        print('do world evo')
+        return {}

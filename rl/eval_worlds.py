@@ -67,6 +67,7 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
             hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
             hashes = [h for wh in hashes for h in wh]
             n_envs = len(hashes)
+            print(f"{n_envs} environments, {len(idxs)} worlds")
 
             # Select a subset of the worlds to simulate on in this call to ``train()``.
             sub_idxs = idxs[world_id:min(world_id + cfg.n_eps_on_train, len(idxs))]
@@ -192,7 +193,8 @@ def evaluate_worlds(trainer, worlds, cfg, start_time=None, idx_counter=None, eva
         # deterministic, so re-evaluation is redundant, and we may sometimes have redundant evaluations because we have too many envs).
         # Otherwise, we count the number of evaluations (e.g. when evaluating on a single fixed world).
         if idx_counter:
-            assert len(aggregate_new_qd_stats) == len(sub_idxs)
+            assert len(aggregate_new_qd_stats) == len(sub_idxs), f"Expected {len(sub_idxs)} worlds, but "\
+                f"got {len(aggregate_new_qd_stats)}"
             world_id = len(world_stats)
         else:
             world_id += len(new_world_stats)

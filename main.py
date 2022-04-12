@@ -524,7 +524,7 @@ if __name__ == '__main__':
     done = False
     while not done:
 
-        # Run world evolution
+        # Run environment evolution
         done_gen_phase = False
         while not done_gen_phase:
             logbook_stats = world_evolver.evolve()
@@ -550,6 +550,8 @@ if __name__ == '__main__':
             print('Done generating adversarial worlds.')
             sys.exit()
 
+        # Run player training
+        # TODO: account for player staleness/optimality?
         done_play_phase = False
         training_worlds = sorted(archive, key=lambda i: i.fitness.values[0], reverse=True)
 
@@ -559,13 +561,11 @@ if __name__ == '__main__':
 
             # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
             if len(training_worlds) == 0:
-                # TODO: set done_play_phase = True in a way that won't be overwritten
                 done_play_phase = True
 
+        # Use duplicate worlds if we don't have enough to match the number of rllib environments.
         training_worlds *= math.ceil(cfg.world_batch_size / len(training_worlds))
 
-        # Run player training
-        # TODO: account for player staleness/optimality?
         while not done_play_phase:
             toggle_train_player(play_trainer, train_player=True, cfg=cfg)
             logbook_stats = train_players(training_worlds, play_trainer, cfg, idx_counter)
@@ -575,8 +575,8 @@ if __name__ == '__main__':
             done = play_itr >= total_play_itrs
             net_itr += 1
 
-        # Now that we've trained the player, update the generator-trainer before the next round of generator evolution.
-        sync_player_policies(gen_trainer, play_trainer, cfg)
+#       # Now that we've trained the player, update the generator-trainer before the next round of generator evolution.
+#       sync_player_policies(gen_trainer, play_trainer, cfg)
 
         # Only doing this in case gen_trainer = play_trainer (i.e. not parallel). Can remove this once parallel evo/train
         # is implemented in separate loop (presumably).
