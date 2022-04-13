@@ -1,9 +1,11 @@
+from argparse import Namespace
 import math
 from pdb import set_trace as TT
 from timeit import default_timer as timer
 
 import numpy as np
 import ray
+from ray.rllib.evaluation.worker_set import WorkerSet
 import torch as th
 
 from utils import discrete_to_onehot, get_solution
@@ -75,3 +77,77 @@ class IdxCounter:
 
     def scratch(self):
         return self.hashes_to_idxs
+
+
+def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
+    """Assign worlds to environments to be loaded at next reset."""
+    idxs = np.random.permutation(list(worlds.keys()))
+    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
+        if cfg.render else None
+
+    worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
+
+    # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
+    hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+    hashes = [h for wh in hashes for h in wh]
+    n_envs = len(hashes)
+
+    idx_counter.set_idxs.remote(idxs)
+    idx_counter.set_hashes.remote(hashes)
+
+    # FIXME: Sometimes hash-to-idx dict is not set by the above call?
+    assert ray.get(idx_counter.scratch.remote())
+
+    # Assign envs to worlds
+    workers.foreach_worker(
+        lambda worker: worker.foreach_env(
+            lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
+
+
+def get_world_qd_stats(workers: WorkerSet, cfg: Namespace):
+    """Get world stats from workers."""
+    world_stats = workers.foreach_worker(
+        lambda worker: worker.foreach_env(lambda env: env.get_world_stats()))
+    world_stats = [s for ws in world_stats for s in ws]
+    # Extract QD stats (objectives and features) from the world stats.
+    new_qd_stats = {}
+    for stat_lst in world_stats:
+        for stats_dict in stat_lst:
+            world_key = stats_dict["world_key"]
+            if world_key in new_qd_stats:
+                warn_msg = ("Should not have redundant world evaluations inside this function unless training on "\
+                            "fixed worlds or doing evaluation/enjoyment.")
+                # assert cfg.fixed_worlds or evaluate_only, warn_msg
+                if not cfg.fixed_worlds and not cfg.evaluate:
+                    print(warn_msg)
+
+                # We'll create a list of stats from separate runs.
+                new_qd_stats[world_key] = new_qd_stats[world_key] + [stats_dict["qd_stats"]]
+
+            else:
+                # Note that this will be a tuple.
+                new_qd_stats[world_key] = [stats_dict["qd_stats"]]
+    
+    # Take the average of each objective and feature value across all runs.
+    aggregate_new_qd_stats = {}
+    for world_key, world_qd_stats in new_qd_stats.items():
+        n_trials = len(world_qd_stats)
+        if n_trials > 1:
+            aggregate_new_qd_stats[world_key] = ([], [])
+
+            # Get the mean in each objective value across trials.
+            n_objs = len(world_qd_stats[0][0])  # Length of objective tuple from first trial.
+            for obj_i in range(n_objs):
+                aggregate_new_qd_stats[world_key][0].append(np.mean([world_qd_stats[trial_i][0][obj_i] \
+                    for trial_i in range(n_trials)]))
+
+            # Get the mean in each feature value across trials.
+            n_feats = len(world_qd_stats[0][1])  # Length of feature list from first trial.
+            for feat_i in range(n_feats):
+                aggregate_new_qd_stats[world_key][1].append(np.mean([world_qd_stats[trial_i][1][feat_i] \
+                    for trial_i in range(n_trials)]))
+
+        else:
+            aggregate_new_qd_stats[world_key] = new_qd_stats[world_key][0]
+
+    return aggregate_new_qd_stats

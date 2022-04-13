@@ -33,7 +33,11 @@ from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNM
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import RegretCallbacks
 from rl.eval_worlds import evaluate_worlds
+from rl.utils import get_world_qd_stats, set_worlds
 from utils import log, get_solution
+
+
+stat_keys = ["mean", "min", "max"]  # , 'std]  # Would need to compute std manually
 
 
 def train_players(worlds, trainer, cfg, idx_counter=None):
@@ -517,6 +521,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             # (n=num eval workers).
             return num_workers * self.config["num_envs_per_worker"]
 
+        train_start_time = timer()
         training_worlds = self.world_evolver.generate_offspring() if self.net_itr == 0 else \
             {k: ind for k, ind in enumerate(self.world_evolver.container)}
             # sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True)
@@ -529,12 +534,12 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             if len(training_worlds) == 0:
                 done_play_phase = True
 
+        # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
+        #   flexible).
         replace = True if self.colearning_config.fixed_worlds else False
         world_keys = np.random.choice(list(training_worlds.keys()), self.colearning_config.world_batch_size, replace=replace)
         training_worlds = {k: training_worlds[k] for k in world_keys}
-
         set_worlds(training_worlds, self.workers, self.idx_counter, self.colearning_config)
-
         step_results = {}
         logbook_stats = {}
 
@@ -545,7 +550,12 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             train_future = executor.submit(
                 lambda: self._exec_plan_or_training_iteration_fn())
 
+            eval_start_time = timer()
             step_results.update(self.evaluate())
+            logbook_stats.update({
+                f'{k}EvalRew': step_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
+            logbook_stats.update({'elapsed': timer() - eval_start_time})
+            log(self.logbook, logbook_stats, self.net_itr)
 
             # Run evo-eval indefinitely
             logbook_archive_stats = self.evo_eval(
@@ -553,16 +563,17 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                         auto_duration_fn, unit="episodes", num_workers=self.config[
                             "num_workers"], cfg=self.config[
                                 "evo_eval_config"]))
-
             
             # Collect the training results from the future.
             step_results.update(train_future.result())
 
-            stat_keys = ['mean', 'min', 'max']  # , 'std]  # Would need to compute std manually
             logbook_stats.update({
-                f'{k}Rew': step_results[f'episode_reward_{k}'] for k in stat_keys})
+                f'{k}Rew': step_results[f"episode_reward_{k}"] for k in stat_keys})
         
+        # Note that we report stats about the worlds in the archive at step t, and the result of training at step t,
+        # though each has been evolved/trained on the policy/worlds at step t-1.
         logbook_stats.update(logbook_archive_stats)
+        logbook_stats.update({"elapsed": timer() - train_start_time})
         log(self.logbook, logbook_stats, self.net_itr)
         self.play_itr += 1
         self.net_itr += 1
@@ -581,7 +592,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 episodes left to run. It's used to find out whether
                 evaluation should continue.
         """
-        # Sync weights to the evaluation WorkerSet.
+        # Sync weights to the evo-eval WorkerSet.
         self.evo_eval_workers.sync_weights(
             from_worker=self.workers.local_worker())
         self._sync_filters_if_needed(self.evo_eval_workers)
@@ -609,6 +620,8 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         num_units_done = 0
         round_ = 0
         while True:
+            evo_start_time = timer()
+            # TODO: re-evaluate more elites.
             # De-throne and re-evaluate elites after player update, otherwise get a batch of new offspring.
             offspring = self.world_evolver.disturb_elites() if self.net_itr > 0 and round_ == 0 else \
                 self.world_evolver.generate_offspring()
@@ -638,6 +651,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 ts = sum(len(b) for b in batches)
                 num_ts_run += ts
                 num_units_done += ts
+            logbook_stats.update({"elapsed": timer() - evo_start_time})
             log(self.logbook, logbook_stats, self.net_itr)
             self.gen_itr += 1
             self.net_itr += 1
@@ -657,83 +671,4 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 #               self.evaluation_workers.remote_workers())
         metrics["timesteps_this_iter"] = num_ts_run
 
-        # Evaluation does not run for every step.
-        # Save evaluation metrics on trainer, so it can be attached to
-        # subsequent step results as latest evaluation result.
-        # self.evo_eval_metrics = {"evaluation": metrics}
-
-        # Also return the results here for convenience.
         return logbook_stats
-
-def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
-    """Assign worlds to environments to be loaded at next reset."""
-    idxs = np.random.permutation(list(worlds.keys()))
-    world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
-        if cfg.render else None
-
-    worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
-
-    # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
-    hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
-    hashes = [h for wh in hashes for h in wh]
-    n_envs = len(hashes)
-
-    idx_counter.set_idxs.remote(idxs)
-    idx_counter.set_hashes.remote(hashes)
-
-    # FIXME: Sometimes hash-to-idx dict is not set by the above call?
-    assert ray.get(idx_counter.scratch.remote())
-
-    # Assign envs to worlds
-    workers.foreach_worker(
-        lambda worker: worker.foreach_env(
-            lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
-
-
-def get_world_qd_stats(workers: WorkerSet, cfg: Namespace):
-    """Get world stats from workers."""
-    world_stats = workers.foreach_worker(
-        lambda worker: worker.foreach_env(lambda env: env.get_world_stats()))
-    world_stats = [s for ws in world_stats for s in ws]
-    # Extract QD stats (objectives and features) from the world stats.
-    new_qd_stats = {}
-    for stat_lst in world_stats:
-        for stats_dict in stat_lst:
-            world_key = stats_dict["world_key"]
-            if world_key in new_qd_stats:
-                warn_msg = ("Should not have redundant world evaluations inside this function unless training on "\
-                            "fixed worlds or doing evaluation/enjoyment.")
-                # assert cfg.fixed_worlds or evaluate_only, warn_msg
-                if not cfg.fixed_worlds and not cfg.evaluate:
-                    print(warn_msg)
-
-                # We'll create a list of stats from separate runs.
-                new_qd_stats[world_key] = new_qd_stats[world_key] + [stats_dict["qd_stats"]]
-
-            else:
-                # Note that this will be a tuple.
-                new_qd_stats[world_key] = [stats_dict["qd_stats"]]
-    
-    # Take the average of each objective and feature value across all runs.
-    aggregate_new_qd_stats = {}
-    for world_key, world_qd_stats in new_qd_stats.items():
-        n_trials = len(world_qd_stats)
-        if n_trials > 1:
-            aggregate_new_qd_stats[world_key] = ([], [])
-
-            # Get the mean in each objective value across trials.
-            n_objs = len(world_qd_stats[0][0])  # Length of objective tuple from first trial.
-            for obj_i in range(n_objs):
-                aggregate_new_qd_stats[world_key][0].append(np.mean([world_qd_stats[trial_i][0][obj_i] \
-                    for trial_i in range(n_trials)]))
-
-            # Get the mean in each feature value across trials.
-            n_feats = len(world_qd_stats[0][1])  # Length of feature list from first trial.
-            for feat_i in range(n_feats):
-                aggregate_new_qd_stats[world_key][1].append(np.mean([world_qd_stats[trial_i][1][feat_i] \
-                    for trial_i in range(n_trials)]))
-
-        else:
-            aggregate_new_qd_stats[world_key] = new_qd_stats[world_key][0]
-
-    return aggregate_new_qd_stats
