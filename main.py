@@ -88,7 +88,7 @@ if __name__ == '__main__':
     cfg.archive_size = 100
     cfg.translated_observations = True
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
-    cfg.n_rllib_envs = 12
+    cfg.n_rllib_envs = 6
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
 
@@ -326,7 +326,7 @@ if __name__ == '__main__':
             with open(os.path.join(loadfile_name), "rb") as f:
                 data = pickle.load(f)
 
-            archive = data['arhive']
+            archive = data['archive']
             gen_itr = data['gen_itr']
             play_itr = data['play_itr']
             net_itr = data['net_itr']

@@ -1,6 +1,7 @@
 import os
 from pdb import set_trace as TT
 import random
+from typing import Optional
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 import ray
 
@@ -8,6 +9,7 @@ import deap
 from timeit import default_timer as timer
 
 from rl.eval_worlds import evaluate_worlds
+from submodules.qdpy.qdpy.containers import OrderedSet
 from utils import update_individuals
 
 
@@ -24,6 +26,7 @@ class WorldEvolver(DEAPQDAlgorithm):
         self.time_until_stale = 10
         self.staleness = 0
         self.curr_itr = 0
+        self.stale_individuals = []
 
     def reset_staleness(self) -> None:
         self.stale_generators = False
@@ -56,19 +59,28 @@ class WorldEvolver(DEAPQDAlgorithm):
         # Evaluate the individuals with an invalid fitness
         # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
 
-    def disturb_elites(self) -> list:
+    def disturb_elites(self, batch_size: int) -> list:
         # Pop individuals from the container for re-evaluation.
+        invalid_inds = []
+        i = 0
+        while len(invalid_inds) < batch_size and i < len(self.stale_individuals):
+            ind = self.stale_individuals[i]
+            if ind in self.container:
+                invalid_inds.append(ind)
+            i += 1
+        self.stale_individuals = self.stale_individuals[i:]
+        [self.container.discard(ind) for ind in invalid_inds]
         # Randomly select individuals to pop, without replacement
-        invalid_inds = random.sample(self.container, k=min(self.cfg.world_batch_size, len(self.container)))
+        # invalid_inds = random.sample(self.stale_individuals, k=min(batch_size, len(self.stale_individuals)))
         # invalid_ind = [ind for ind in container]
         # print(f"{len(invalid_inds)} up for re-evaluation.")
 
         # TODO: we have an n-time lookup in discard. We should be getting the indices of the individuals directly,
         #  then discarding by index using ``discard_by_index``.
-        [self.container.discard(ind) for ind in invalid_inds]
         # container.clear_all()
+        self.reset_ages(invalid_inds)
 
-        return {i: ind for i, ind in enumerate(invalid_inds)}
+        return invalid_inds
 
     def reevaluate_elites(self) -> dict:
         """Assuming our evaluation function has changed, re-evaluate some elites in the archive. "The reckoning."
@@ -78,20 +90,22 @@ class WorldEvolver(DEAPQDAlgorithm):
         them in the archive. When doing QD, this may result in some "collisions," which see the archive left less 
         populated than before.
         """
-        invalid_inds = self.disturb_elites()
+        invalid_inds = {i: ind for i, ind in enumerate(self.disturb_elites())}
 
         return self.evolve(batch=invalid_inds)
 
         # NOTE: Here we are assuming that we've only evaluated each world once. If we have duplicate stats for a given world, we will overwrite all but one instance of statistics 
         #  resulting from playthrough in this world.
 
-    def generate_offspring(self) -> dict:
+    def generate_offspring(self, batch_size: Optional[int] = None) -> dict:
+        batch_size = self.batch_size if batch_size is None else batch_size
         # On the first iteration, randomly generate the initial batch if necessary.
         if self.curr_itr == 0:
-            offspring = self.init_batch 
+            assert len(self.init_batch) >= batch_size
+            offspring = self.init_batch[:batch_size]
 
         else:
-            batch = self.toolbox.select(self.container, self.batch_size)
+            batch = self.toolbox.select(self.container, batch_size)
 
             ## Vary the pool of individuals
             # offspring = deap.algorithms.varAnd(batch, toolbox, cxpb, mutpb)
@@ -149,7 +163,7 @@ class WorldEvolver(DEAPQDAlgorithm):
             self.halloffame.update(self.init_batch)
 
         # Store batch in container
-        n_updated = self.container.update([ind for ind in batch.values()], issue_warning=self.show_warnings)
+        n_updated, contested_individuals = self.container.update([ind for ind in batch.values()], issue_warning=self.show_warnings)
 
         self.staleness += n_updated == 0
         self.stale_generators = self.staleness > self.time_until_stale
@@ -172,4 +186,17 @@ class WorldEvolver(DEAPQDAlgorithm):
         # self.logbook.record(**logbook_stats)
         self.curr_itr += 1
 
-        return logbook_stats
+        return logbook_stats, contested_individuals
+
+    def increment_ages(self):
+        self.stale_individuals = []
+        for ind in self.container:
+            ind.fitness.age += 1
+            # Note that `stale_individuals` is ordered debcreasing by age.
+            self.stale_individuals.append(ind)
+            # FIXME: we can do better than O(n * log n) here. Why can't we hash individuals? Find a way.
+            self.stale_individuals = sorted(self.stale_individuals, key=lambda ind: ind.fitness.age, reverse=True)
+
+    def reset_ages(self, individuals):
+        for ind in individuals:
+            ind.fitness.age = 0

@@ -1,8 +1,11 @@
+"""Individuals are genotype-phenotype pairs for use in evolutionary algorithms."""
 import copy
 from pdb import set_trace as TT
+from typing import Any
 
 import numpy as np
-from qdpy.phenotype import Features, Fitness
+from qdpy.phenotype import Features
+from qdpy.phenotype import Fitness as QdpyFitness
 from qdpy.phenotype import Individual as QdpyIndividual
 
 from generators.representations import NCAGenerator
@@ -16,7 +19,21 @@ def clone(ind):
     # Clear the individual's statistics, so that they are recomputed.
     new_ind.reset_stats()
 
+    new_ind.fitness.age = 0
+
     return new_ind
+
+
+class Fitness(QdpyFitness):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.age = 0
+
+#   def dominates(self, other: Any, obj: Any = slice(None)) -> bool:
+#       assert self.age == 0, "Since we have just re-evaluated the challenger, its age should be 0."
+#       if other.age > 0:
+#           return True
+#       return super().dominates(other, obj)
 
 
 class Individual(QdpyIndividual):
@@ -25,6 +42,9 @@ class Individual(QdpyIndividual):
         self.reset_stats()
 
     def reset_stats(self):
+        # Number of player policy update steps since the individual was last evaluated.
+        self.age = 0
+
         self.stats = {
             "heuristics": {},
 

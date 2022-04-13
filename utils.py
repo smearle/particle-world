@@ -5,6 +5,7 @@ from pdb import set_trace as TT
 from pprint import PrettyPrinter
 # from ribs.visualize import grid_archive_heatmap
 from timeit import default_timer as timer
+from typing import Optional
 
 from deap import tools
 import numpy as np
@@ -294,7 +295,7 @@ def compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr, quality_d
         json.dump(stats, f, indent=4)
 
 
-def log(logbook: tools.Logbook, stats: dict, net_itr: int):
-    stats.update({'iteration': net_itr, **stats})
+def log(logbook: tools.Logbook, stats: dict, net_itr: Optional[int] = None):
+    stats.update({'iteration': net_itr})
     logbook.record(**stats)
     print(logbook.stream)

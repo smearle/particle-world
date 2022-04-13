@@ -1,6 +1,3 @@
-[submodule "pytorch-neat"]
-	path = submodules/pytorch-neat
-	url = git@github.com:smearle/pytorch-neat
 [submodule "qdpy"]
 	path = submodules/qdpy
 	url = git@gitlab.com:smearle/qdpy

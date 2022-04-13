@@ -522,8 +522,8 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             return num_workers * self.config["num_envs_per_worker"]
 
         train_start_time = timer()
-        training_worlds = self.world_evolver.generate_offspring() if self.net_itr == 0 else \
-            {k: ind for k, ind in enumerate(self.world_evolver.container)}
+        training_worlds = self.world_evolver.generate_offspring() if self.net_itr == 0 \
+            else {k: ind for k, ind in enumerate(self.world_evolver.container)}
             # sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True)
 
         if self.colearning_config.quality_diversity:
@@ -556,6 +556,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 f'{k}EvalRew': step_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
             logbook_stats.update({'elapsed': timer() - eval_start_time})
             log(self.logbook, logbook_stats, self.net_itr)
+            logbook_stats = {}
 
             # Run evo-eval indefinitely
             logbook_archive_stats = self.evo_eval(
@@ -566,6 +567,9 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             
             # Collect the training results from the future.
             step_results.update(train_future.result())
+
+            # The player is one update ahead of the worlds, relative the policy the worlds were evolved for.
+            self.world_evolver.increment_ages()
 
             logbook_stats.update({
                 f'{k}Rew': step_results[f"episode_reward_{k}"] for k in stat_keys})
@@ -616,24 +620,29 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         metrics = {}
 
+        contested_individuals = []
         # How many episodes have we run (across all eval workers)?
         num_units_done = 0
         round_ = 0
         while True:
             evo_start_time = timer()
-            # TODO: re-evaluate more elites.
-            # De-throne and re-evaluate elites after player update, otherwise get a batch of new offspring.
-            offspring = self.world_evolver.disturb_elites() if self.net_itr > 0 and round_ == 0 else \
-                self.world_evolver.generate_offspring()
+            units_left_to_do = duration_fn(num_units_done=num_units_done)
+            if units_left_to_do <= 0:
+                # TODO: evaluate and try to add any leftover contested individuals here, to decrease likelihood we leave
+                #   very low-fitness individuals in archive from last round, in case they displaced elites on the basis
+                #   of age alone?
+                print(f"Abandoning {len(contested_individuals)} leftover contested individuals.")
+                break
+            print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
+            contested_individuals = self.world_evolver.disturb_elites(self.colearning_config.world_batch_size // 2)
+            batch_size = self.colearning_config.world_batch_size - len(contested_individuals)
+            offspring = self.world_evolver.generate_offspring(batch_size)
+            offspring.update({batch_size + i: ind for i, ind in enumerate(contested_individuals)})
 
             # New variable, otherwise we'll try to serialize `self` in the workerset lambda in the below function.
             idx_counter = ray.get_actor("idx_counter")
 
             set_worlds(offspring, self.evo_eval_workers, idx_counter, self.colearning_config)
-
-            units_left_to_do = duration_fn(num_units_done=num_units_done)
-            if units_left_to_do <= 0:
-                break
 
             round_ += 1
             batches = ray.get([
@@ -642,7 +651,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 if i * 1 < units_left_to_do
             ])
             world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearning_config)
-            logbook_stats = self.world_evolver.tell(offspring, world_qd_stats)
+            logbook_stats, _ = self.world_evolver.tell(offspring, world_qd_stats)
             # 1 episode per returned batch.
             if unit == "episodes":
                 num_units_done += len(batches)
