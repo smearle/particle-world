@@ -297,7 +297,8 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # },
         "env_config": env_config,
         "num_gpus": cfg.num_gpus,
-        "num_workers": cfg.n_rllib_workers if not (cfg.enjoy or cfg.evaluate) else 0,
+        "num_workers": num_workers if not (cfg.enjoy or cfg.evaluate) else 0,
+#       "num_workers": 1 if not (cfg.enjoy or cfg.evaluate) else 0,
         "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
         "render_env": cfg.render if not cfg.enjoy else True,
@@ -333,6 +334,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         },
 
 #       # TODO: provide more options here?
+        "evo_eval_num_workers": cfg.n_rllib_workers,
 #       "evo_eval_duration": "auto",
 #       "evo_eval_config": {},
 
@@ -461,6 +463,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
     @classmethod
     def get_default_config(cls) -> TrainerConfigDict:
         cfg = ppo.PPOTrainer.get_default_config()
+        cfg["evo_eval_num_workers"] = 1
         cfg["evo_eval_duration"] = "auto"
         cfg["evo_eval_config"] = {}
 
@@ -470,7 +473,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         self.world_evolver = world_evolver
         self.idx_counter = idx_counter
         self.logbook = logbook
-        self.colearning_config = colearning_config
+        self.colearn_cfg = colearning_config
 
     def setup(self, config: PartialTrainerConfigDict):
         super().setup(config)
@@ -493,7 +496,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             validate_env=None,
             policy_class=self.get_default_policy_class(self.config),
             config=evo_eval_config,
-            num_workers=self.config["num_workers"],
+            num_workers=self.config["evo_eval_num_workers"],
             # Don't even create a local worker if num_workers > 0.
             local_worker=False,
             )
@@ -526,7 +529,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             else {k: ind for k, ind in enumerate(self.world_evolver.container)}
             # sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True)
 
-        if self.colearning_config.quality_diversity:
+        if self.colearn_cfg.quality_diversity:
             # Eliminate impossible worlds
             training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
 
@@ -536,10 +539,10 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
-        replace = True if self.colearning_config.fixed_worlds else False
-        world_keys = np.random.choice(list(training_worlds.keys()), self.colearning_config.world_batch_size, replace=replace)
+        replace = True if self.colearn_cfg.fixed_worlds else False
+        world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
         training_worlds = {k: training_worlds[k] for k in world_keys}
-        set_worlds(training_worlds, self.workers, self.idx_counter, self.colearning_config)
+        set_worlds(training_worlds, self.workers, self.idx_counter, self.colearn_cfg)
         step_results = {}
         logbook_stats = {}
 
@@ -573,12 +576,13 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
             logbook_stats.update({
                 f'{k}Rew': step_results[f"episode_reward_{k}"] for k in stat_keys})
-        
+
         # Note that we report stats about the worlds in the archive at step t, and the result of training at step t,
         # though each has been evolved/trained on the policy/worlds at step t-1.
         logbook_stats.update(logbook_archive_stats)
         logbook_stats.update({"elapsed": timer() - train_start_time})
         log(self.logbook, logbook_stats, self.net_itr)
+        save_model(self, self.colearn_cfg.save_dir)
         self.play_itr += 1
         self.net_itr += 1
 
@@ -620,7 +624,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         metrics = {}
 
-        contested_individuals = []
+        # contested_individuals = []
         # How many episodes have we run (across all eval workers)?
         num_units_done = 0
         round_ = 0
@@ -631,18 +635,18 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 # TODO: evaluate and try to add any leftover contested individuals here, to decrease likelihood we leave
                 #   very low-fitness individuals in archive from last round, in case they displaced elites on the basis
                 #   of age alone?
-                print(f"Abandoning {len(contested_individuals)} leftover contested individuals.")
+                # print(f"Abandoning {len(contested_individuals)} leftover contested individuals.")
                 break
-            print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
-            contested_individuals = self.world_evolver.disturb_elites(self.colearning_config.world_batch_size // 2)
-            batch_size = self.colearning_config.world_batch_size - len(contested_individuals)
+#           print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
+            contested_individuals = self.world_evolver.disturb_elites(self.colearn_cfg.world_batch_size // 2)
+            batch_size = self.colearn_cfg.world_batch_size - len(contested_individuals)
             offspring = self.world_evolver.generate_offspring(batch_size)
             offspring.update({batch_size + i: ind for i, ind in enumerate(contested_individuals)})
 
             # New variable, otherwise we'll try to serialize `self` in the workerset lambda in the below function.
             idx_counter = ray.get_actor("idx_counter")
 
-            set_worlds(offspring, self.evo_eval_workers, idx_counter, self.colearning_config)
+            set_worlds(offspring, self.evo_eval_workers, idx_counter, self.colearn_cfg)
 
             round_ += 1
             batches = ray.get([
@@ -650,8 +654,8 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                     self.evo_eval_workers.remote_workers())
                 if i * 1 < units_left_to_do
             ])
-            world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearning_config)
-            logbook_stats, _ = self.world_evolver.tell(offspring, world_qd_stats)
+            world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg)
+            logbook_stats = self.world_evolver.tell(offspring, world_qd_stats)
             # 1 episode per returned batch.
             if unit == "episodes":
                 num_units_done += len(batches)
@@ -669,7 +673,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         logbook_stats = {}
         save(archive=self.world_evolver.container, gen_itr=self.gen_itr, net_itr=self.net_itr, play_itr=self.play_itr, \
             logbook=self.logbook,
-                        save_dir=self.colearning_config.save_dir)
+                        save_dir=self.colearn_cfg.save_dir)
         mean_path_length = compute_archive_world_heuristics(archive=self.world_evolver.container, trainer=self)
         stat_keys = ['mean', 'min', 'max']  # , 'std]
         logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})

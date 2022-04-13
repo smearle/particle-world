@@ -163,7 +163,7 @@ class WorldEvolver(DEAPQDAlgorithm):
             self.halloffame.update(self.init_batch)
 
         # Store batch in container
-        n_updated, contested_individuals = self.container.update([ind for ind in batch.values()], issue_warning=self.show_warnings)
+        n_updated = self.container.update([ind for ind in batch.values()], issue_warning=self.show_warnings)
 
         self.staleness += n_updated == 0
         self.stale_generators = self.staleness > self.time_until_stale
@@ -186,7 +186,7 @@ class WorldEvolver(DEAPQDAlgorithm):
         # self.logbook.record(**logbook_stats)
         self.curr_itr += 1
 
-        return logbook_stats, contested_individuals
+        return logbook_stats
 
     def increment_ages(self):
         self.stale_individuals = []

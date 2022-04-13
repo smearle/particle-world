@@ -12,11 +12,13 @@
         # "TouchStone",  # A WIP Minecraft navigation task.
     ],
 
+# NOTE: currently ignoring these intervals and doing as much world-evolution as possible in parallal to each player 
+# training step.
     # List of [n_gen_itr, n_play_itr] hyperparameters. These indicate the number of steps of generator-evolution and 
     # player-training to take, respectively, before switching to a phase of the opposite type. If either is -1, then
     # we iterate until generator/player convergence (or "staleness") is reached. 0 is an invalid value.
     "ngen_nplay": [
-        [3, 1],
+        [1, 1],
 #       [10, 1],
 #       [20, 1],
 #       [50, 1],
@@ -39,7 +41,7 @@
     # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
     # number of cells the agent can see in each direction (excluding its own position).
     "fullobs_fov_models": [
-        [false, 2, "paired"],
-#       [true, -1, "paired"],
+#       [false, 2, "paired"],
+        [true, -1, "paired"],
     ]
 }

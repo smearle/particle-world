@@ -76,6 +76,9 @@ if __name__ == '__main__':
     parser = init_parser()
     cfg = parser.parse_args()
 
+    if cfg.load_config is not None:
+        cfg = load_config(cfg, cfg.load_config)
+
     # TODO: do this better?
     cfg.fitness_domain = [(-np.inf, np.inf)]
     cfg.width = 15
@@ -88,7 +91,10 @@ if __name__ == '__main__':
     cfg.archive_size = 100
     cfg.translated_observations = True
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
-    cfg.n_rllib_envs = 6
+
+    # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
+    # worker fo training simulation so as not to waste CPUs).
+    cfg.n_rllib_envs = 30
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
 
@@ -99,7 +105,7 @@ if __name__ == '__main__':
 
     # We must have the same number of envs per worker, and want to meet our target number of envs exactly.
     assert cfg.n_rllib_envs % n_workers == 0, \
-        f"n_rllib_envs ({cfg.n_rllib_envs}) must be divisible by n_workers ({cfg.n_workers})"
+        f"n_rllib_envs ({cfg.n_rllib_envs}) must be divisible by n_workers ({n_workers})"
 
     # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
     assert cfg.world_batch_size % cfg.n_eps_on_train == 0, \
@@ -116,8 +122,6 @@ if __name__ == '__main__':
     if cfg.model == 'flood':
         assert cfg.fully_observable
 
-    if cfg.load_config is not None:
-        cfg = load_config(cfg, cfg.load_config)
     if cfg.oracle_policy:
         gen_phase_len = -1
         play_phase_len = 0
@@ -196,6 +200,8 @@ if __name__ == '__main__':
     else:
         # cfg.n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
             # else (1 if env_is_minerl else n_envs_per_worker)
+
+        # NOTE: this is also the number of episodes we will train players on.
         n_envs_per_worker = cfg.n_rllib_envs // n_workers
 
     register_env('world_evolution_env', make_env)

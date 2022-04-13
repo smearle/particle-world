@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
-#SBATCH --time=48:00:00
-#SBATCH --mem=30GB
+#SBATCH --time=24:00:00
+#SBATCH --mem=16GB
 #SBATCH --job-name=prtcl_11
 #SBATCH --mail-type=BEGIN,END
 #SBATCH --mail-user=sam.earle@nyu.edu

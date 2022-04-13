@@ -8,6 +8,7 @@ from collections import namedtuple
 from itertools import product
 import json
 import os
+from pdb import set_trace as TT
 import re
 import yaml
 
