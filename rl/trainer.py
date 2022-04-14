@@ -475,15 +475,21 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         return cfg
 
-    def set_attrs(self, world_evolver: WorldEvolver, idx_counter, logbook, colearning_config):
-        self.world_evolver = world_evolver
+    def set_attrs(self, world_evolver: WorldEvolver, idx_counter, logbook, colearning_config, net_itr, gen_itr, play_itr):
+        if world_evolver:
+            self.world_evolver = world_evolver
+            self.world_archive = world_evolver.container
         self.idx_counter = idx_counter
         self.logbook = logbook
         self.colearn_cfg = colearning_config
+        self.net_itr = net_itr
+        self.gen_itr = gen_itr
+        self.play_itr = play_itr
 
     def setup(self, config: PartialTrainerConfigDict):
         super().setup(config)
         self.world_evolver = None
+        self.world_archive = None
         self.gen_itr, self.play_itr, self.net_itr = 0, 0, 0
         # Update with evaluation settings:
         user_evo_eval_config = copy.deepcopy(self.config["evo_eval_config"])
@@ -494,6 +500,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         evo_eval_config = merge_dicts(self.config, user_evo_eval_config)
 
         if evo_eval_config["fixed_worlds"]:
+            self.world_archive = full_obs_test_mazes
             return
 
         # Create a separate evolution evaluation worker set for evo eval.
@@ -535,7 +542,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         train_start_time = timer()
         if self.colearn_cfg.fixed_worlds:
-            training_worlds = full_obs_test_mazes
+            training_worlds = self.world_archive
         elif self.net_itr == 0:
             training_worlds = self.world_evolver.generate_offspring()
         else:
@@ -578,7 +585,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
                 log(self.logbook, logbook_stats, self.net_itr)
                 logbook_stats = {}
 
-            if not self.config["evo_eval_config"]["fixed_worlds"]:
+            if not self.colearn_cfg.fixed_worlds:
                 # Run evo-eval indefinitely
                 logbook_archive_stats = self.evo_eval(
                         duration_fn=functools.partial(
@@ -599,6 +606,9 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         log(self.logbook, logbook_stats, self.net_itr)
         if not self.colearn_cfg.fixed_worlds or self.play_itr % 10 == 0:
             save_model(self, self.colearn_cfg.save_dir)
+            save(archive=self.world_archive, gen_itr=self.gen_itr, net_itr=self.net_itr, play_itr=self.play_itr, \
+                logbook=self.logbook,
+                            save_dir=self.colearn_cfg.save_dir)
         self.play_itr += 1
         self.net_itr += 1
 
@@ -690,9 +700,6 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         # The training step is complete, so we are done this phase of generator-evolution.
         logbook_stats = {}
-        save(archive=self.world_evolver.container, gen_itr=self.gen_itr, net_itr=self.net_itr, play_itr=self.play_itr, \
-            logbook=self.logbook,
-                        save_dir=self.colearn_cfg.save_dir)
         mean_path_length = compute_archive_world_heuristics(archive=self.world_evolver.container, trainer=self)
         stat_keys = ['mean', 'min', 'max']  # , 'std]
         logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
