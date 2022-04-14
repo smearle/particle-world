@@ -94,7 +94,7 @@ if __name__ == '__main__':
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
     # worker fo training simulation so as not to waste CPUs).
-    cfg.n_rllib_envs = 28
+    cfg.n_rllib_envs = 30
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
 
@@ -367,21 +367,21 @@ if __name__ == '__main__':
         if cfg.enjoy:
 
             # TODO: support multiple fixed worlds
+            # We'll look at each world independently in our single env
             if cfg.fixed_worlds:
-                trainer.workers.local_worker().set_policies_to_train([])
-                evaluate_worlds(trainer=trainer, worlds=training_worlds,
-                                      fixed_worlds=cfg.fixed_worlds, render=cfg.render)
+                worlds = list(eval_mazes.values())
+#               evaluate_worlds(trainer=trainer, worlds=training_worlds,
+#                                     fixed_worlds=cfg.fixed_worlds, render=cfg.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
                 #     lambda worker: worker.foreach_env(lambda env: env.set_landscape(generator.world)))
                 # particle_trainer.evaluate()
-                print('Done enjoying, goodbye!')
-                sys.exit()
 
-            # We'll look at each world independently in our single env
-            elites = sorted(archive, key=lambda ind: ind.fitness, reverse=True)
-            worlds = [i for i in elites]
-            # FIXME: Hack: avoid skipping world 0. Something about the way eval calls reset at step 0 of episode 0?
-            worlds = [worlds[0]] + worlds
+            else:
+                elites = sorted(archive, key=lambda ind: ind.fitness, reverse=True)
+                worlds = [i for i in elites]
+                # FIXME: Hack: avoid skipping world 0. Something about the way eval calls reset at step 0 of episode 0?
+                worlds = [worlds[0]] + worlds
+
             for i, elite in enumerate(worlds):
                 print(f"Evaluating world {i}")
                 set_worlds({i: elite}, trainer.evaluation_workers, idx_counter, cfg)

@@ -16,7 +16,8 @@ import numpy as np
 import ray
 import torch as th
 from ray.rllib import MultiAgentEnv
-from ray.rllib.agents.ppo import ppo
+from ray.rllib.agents.ppo import PPOTrainer
+from ray.rllib.agents.impala import ImpalaTrainer
 # from ray.tune.logger import pretty_print
 from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
 from ray.rllib.policy.policy import PolicySpec
@@ -461,12 +462,16 @@ def evo_evaluate(trainer: Trainer, workers: WorkerSet):
     return trainer.evaluate()
 
 
-class WorldEvoPPOTrainer(ppo.PPOTrainer):
+# algorithm = PPOTrainer
+algorithm = ImpalaTrainer
+
+
+class WorldEvoPPOTrainer(algorithm):
     """A subclass of PPOTrainer that adds the ability to evolve worlds in parallel to player training."""
 
     @classmethod
     def get_default_config(cls) -> TrainerConfigDict:
-        cfg = ppo.PPOTrainer.get_default_config()
+        cfg = algorithm.get_default_config()
         cfg["evo_eval_num_workers"] = 1
         cfg["evo_eval_duration"] = "auto"
         cfg["evo_eval_config"] = {
