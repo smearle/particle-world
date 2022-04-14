@@ -442,7 +442,9 @@ def contrastive_fitness(fits):
 def min_solvable_fitness(rews, max_rew, trg_rew=0):
     """ A fitness function rewarding levels that result in the least non-zero reward.
     :param rews: a list of lists of rewards achieved by distinct agents from distinct populations (length 1 or greater)
-    :param max_rew: the maximum reward achievable by a given population
+    :param max_rew: An uppser bound on the maximum reward achievable by a given population. Note this should not 
+        actually be achievable by the agent, or impossible episodes will rank equal to extremely easy ones. Though the
+        former is worse in principle.
     :return: a fitness value
     """
     assert len(rews) >= 1
@@ -450,10 +452,10 @@ def min_solvable_fitness(rews, max_rew, trg_rew=0):
     rews = np.mean(rews, axis=1)  # get mean per-population rewards
     if np.all(rews == 0):
         # return 0
-        return -max_rew
+        return - max_rew
     else:
         # return max_rew - np.mean(rews)
-        return -np.abs(np.mean(rews) - trg_rew)
+        return - np.abs(np.mean(rews) - trg_rew)
 
 
 def toroidal_distance(a, b, width):

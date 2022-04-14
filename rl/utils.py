@@ -107,7 +107,7 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
 def get_world_qd_stats(workers: WorkerSet, cfg: Namespace):
     """Get world stats from workers."""
     world_stats = workers.foreach_worker(
-        lambda worker: worker.foreach_env(lambda env: env.get_world_stats()))
+        lambda worker: worker.foreach_env(lambda env: env.get_world_stats(quality_diversity=cfg.quality_diversity)))
     world_stats = [s for ws in world_stats for s in ws]
     # Extract QD stats (objectives and features) from the world stats.
     new_qd_stats = {}

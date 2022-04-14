@@ -224,7 +224,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # stats are of the form (world_key, qdpy_stats, policy_rewards)
             if quality_diversity:
                 # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
-                obj = -np.mean(swarm_rewards[0])
+                obj = min_solvable_fitness(swarm_rewards[0:1], max_rew=self.max_reward)
                 measures = [np.mean(sr) for sr in swarm_rewards[1:]]
 
             else:
