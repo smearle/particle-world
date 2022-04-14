@@ -62,7 +62,7 @@ class IdxCounter:
 
     def set_hashes(self, hashes):
         """
-        Note that we may assign the same environment/hash to multiple worlds.
+        Note that we may assign multiple worlds to a single environment, or a single world to multiple environments.
 
         Args:
             hashes: A list of hashes, one per environment object.
@@ -85,12 +85,17 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
     world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
         if cfg.render else None
 
-    worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
+    # If not `fixed_worlds`, these will be Individuals. Otherwise, they are already simply arrays.
+    if not isinstance(list(worlds.values())[0], np.ndarray):
+        worlds = {k: np.array(world.discrete) for k, world in worlds.items()}
 
     # Have to get hashes on remote workers. Objects have different hashes in "envs" above.
     hashes = workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
     hashes = [h for wh in hashes for h in wh]
     n_envs = len(hashes)
+
+    # Pad the list of indices with duplicates in case we have more than enough eval environments
+    idxs = np.repeat(idxs, math.ceil(n_envs / len(idxs)))
 
     idx_counter.set_idxs.remote(idxs)
     idx_counter.set_hashes.remote(hashes)

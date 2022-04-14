@@ -88,13 +88,13 @@ if __name__ == '__main__':
     pg_width = 500
     pg_scale = pg_width / cfg.width
     cfg.save_interval = 100
-    cfg.archive_size = 100
+    cfg.archive_size = 1024 if not cfg.quality_diversity else 2500
     cfg.translated_observations = True
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
     # worker fo training simulation so as not to waste CPUs).
-    cfg.n_rllib_envs = 30
+    cfg.n_rllib_envs = 28
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
 
@@ -455,20 +455,65 @@ if __name__ == '__main__':
             archive = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=cfg.fitness_domain,
                                    fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
 
-        # TODO: use this when ``fixed_worlds``...?
-        logbook = tools.Logbook()
-        # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
-        # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
-        logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + stats.fields + ["meanRew", \
-            "meanEvalRew", "meanPath", "maxPath", "elapsed"]
+            # TODO: use this when ``fixed_worlds``...?
+            logbook = tools.Logbook()
+            # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
+            # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
+            logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + stats.fields + ["meanRew", \
+                "meanEvalRew", "meanPath", "maxPath", "elapsed"]
 
-    if cfg.fixed_worlds:
-        for i in range(1000):
-            logbook_stats = train_players(trainer=trainer, worlds=training_worlds,
-                        # TODO: initialize logbook even if not evolving worlds
-                        cfg=cfg)
-        print('Done training, goodbye!')
-        sys.exit()
+            # Evolutionary algorithm parameters
+            assert (nb_features >= 1)
+
+            nb_iterations = cfg.total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
+
+            eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
+            ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
+            verbose = True
+            show_warnings = False  # Display warning and error messages. Set to True if you want to check if some individuals were out-of-bounds
+            log_base_path = cfg.outputDir if cfg.outputDir is not None else "."
+
+            # Create Toolbox
+            toolbox = base.Toolbox()
+            toolbox.register("individual", generator_class, width=env.width - 2, n_chan=env.n_chan,
+                            save_gen_sequence=cfg.render,
+                            unique_chans=env.unique_chans)
+            toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+            toolbox.register("clone", clone)
+            toolbox.register("mutate", lambda individual: individual.mutate())
+            toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
+            # toolbox.register("select", tools.selBest) # But you can also use all DEAP selection functions instead to create your own QD-algorithm
+
+            # Create a dict storing all relevant infos
+            results_infos = {'ind_domain': ind_domain, 'features_domain': features_domain, 'fitness_domain': cfg.fitness_domain,
+                            'nb_bins': nb_bins, 'init_batch_size': cfg.world_batch_size, 'nb_iterations': nb_iterations,
+                            'batch_size': cfg.world_batch_size, 'eta': eta}
+
+            # Create a QD algorithm
+            world_evolver = WorldEvolver(toolbox=toolbox, container=archive, init_batch_siz=cfg.world_batch_size,
+                                batch_size=cfg.world_batch_size, niter=nb_iterations, stats=stats,
+                                verbose=verbose, show_warnings=show_warnings,
+                                results_infos=results_infos, log_base_path=log_base_path, save_period=None,
+                                iteration_filename=f'{experiment_name}' + '/latest-{}.p',
+                                trainer=trainer, idx_counter=idx_counter, cfg=cfg, 
+                                )
+            # Run the illumination process !
+            world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
+
+        else:
+            world_evolver = None
+            logbook = tools.Logbook()
+            # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
+            # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
+            logbook.header = ["iteration", "meanRew", "meanEvalRew", "elapsed"]
+
+#   if cfg.fixed_worlds:
+#       for i in range(1000):
+#           logbook_stats = train_players(trainer=trainer, worlds=training_worlds,
+#                       # TODO: initialize logbook even if not evolving worlds
+#                       cfg=cfg)
+#       print('Done training, goodbye!')
+#       sys.exit()
 
     if cfg.gen_adversarial_worlds:
         cfg.gen_phase_len = -1
@@ -476,48 +521,10 @@ if __name__ == '__main__':
                                    fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
         archive = new_grid
 
-    # Algorithm parameters
-    assert (nb_features >= 1)
-
-    nb_iterations = cfg.total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
-
-    eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
-    ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
-    verbose = True
-    show_warnings = False  # Display warning and error messages. Set to True if you want to check if some individuals were out-of-bounds
-    log_base_path = cfg.outputDir if cfg.outputDir is not None else "."
-
     # Update and print seed
     np.random.seed(seed)
     random.seed(seed)
     print(f"Seed: {seed}")
-
-    # Create Toolbox
-    toolbox = base.Toolbox()
-    toolbox.register("individual", generator_class, width=env.width - 2, n_chan=env.n_chan,
-                     save_gen_sequence=cfg.render,
-                     unique_chans=env.unique_chans)
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    toolbox.register("clone", clone)
-    toolbox.register("mutate", lambda individual: individual.mutate())
-    toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
-    # toolbox.register("select", tools.selBest) # But you can also use all DEAP selection functions instead to create your own QD-algorithm
-
-    # Create a dict storing all relevant infos
-    results_infos = {'ind_domain': ind_domain, 'features_domain': features_domain, 'fitness_domain': cfg.fitness_domain,
-                     'nb_bins': nb_bins, 'init_batch_size': cfg.world_batch_size, 'nb_iterations': nb_iterations,
-                     'batch_size': cfg.world_batch_size, 'eta': eta}
-
-    # Create a QD algorithm
-    world_evolver = WorldEvolver(toolbox=toolbox, container=archive, init_batch_siz=cfg.world_batch_size,
-                           batch_size=cfg.world_batch_size, niter=nb_iterations, stats=stats,
-                           verbose=verbose, show_warnings=show_warnings,
-                           results_infos=results_infos, log_base_path=log_base_path, save_period=None,
-                           iteration_filename=f'{experiment_name}' + '/latest-{}.p',
-                           trainer=trainer, idx_counter=idx_counter, cfg=cfg, 
-                           )
-    # Run the illumination process !
-    world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
 
     # The outer co-learning loop
     if cfg.parallel_gen_play:

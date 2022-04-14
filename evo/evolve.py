@@ -41,7 +41,7 @@ class WorldEvolver(DEAPQDAlgorithm):
         else:
             self.init_batch = init_batch
         # The co-learning loop will always start here, with at least a single round of world-generation
-        idx_counter = ray.get_actor("idx_counter")
+#       idx_counter = ray.get_actor("idx_counter")
 
 #       if self.logbook is None:
 #           self.logbook = deap.tools.Logbook()
@@ -67,9 +67,14 @@ class WorldEvolver(DEAPQDAlgorithm):
             ind = self.stale_individuals[i]
             if ind in self.container:
                 invalid_inds.append(ind)
+                self.container.discard(ind)
             i += 1
         self.stale_individuals = self.stale_individuals[i:]
-        [self.container.discard(ind) for ind in invalid_inds]
+
+#       # FIXME: Having to check the container again implies we have duplicates in invalid_inds, in stale_individuals, 
+#       # and thus in the container... How?
+#       [self.container.discard(ind) for ind in invalid_inds if ind in self.container]
+
         # Randomly select individuals to pop, without replacement
         # invalid_inds = random.sample(self.stale_individuals, k=min(batch_size, len(self.stale_individuals)))
         # invalid_ind = [ind for ind in container]

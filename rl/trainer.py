@@ -27,7 +27,8 @@ from ray.rllib.utils import merge_dicts
 from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict, TrainerConfigDict, ResultDict
 from timeit import default_timer as timer
 
-from envs import eval_mazes
+from envs import eval_mazes, full_obs_test_mazes
+from evo.evolve import WorldEvolver
 from evo.utils import compute_archive_world_heuristics, save
 from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
@@ -52,9 +53,9 @@ def train_players(worlds, trainer, cfg, idx_counter=None):
     :param idx_counter: (Actor) ray actor accessed by parallel rllib envs to assign them unique world_keys.
     :param logbook: (Logbook) qdpy logbook to record (evolution and) training stats.
     """
-#   trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
+    trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
     # toggle_exploration(trainer, explore=True, n_policies=n_policies)
-#   i = 0
+    i = 0
 #   staleness_window = 10
 #   done_training = False
 #   recent_rewards = np.empty(staleness_window)
@@ -62,8 +63,8 @@ def train_players(worlds, trainer, cfg, idx_counter=None):
     start_time = timer()
     # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
     # weights start changing.
-#   if i % 10 == 0:
-#       save_model(trainer, cfg.save_dir)
+    if i % 10 == 0:
+        save_model(trainer, cfg.save_dir)
     replace = True if cfg.fixed_worlds else False
     if isinstance(worlds, dict):
         world_keys = list(worlds.keys())
@@ -239,19 +240,20 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
     if cfg.env_is_minerl or cfg.gen_adversarial_worlds or gen_only:
         evaluation_interval = 0
     else:
+        evaluation_interval = 10 if cfg.fixed_worlds else 1
         # After how many calls to train do we evaluate?
         # If we're evolving/training until convergence, just
         # evaluate every 10 iterations. If we're "enjoying", just need to set this to any number > 0 to ensure we 
         # initialize the evaluation workers.
-        if -1 in [cfg.gen_phase_len, cfg.play_phase_len] or cfg.enjoy:
-            evaluation_interval = 10
+#       if -1 in [cfg.gen_phase_len, cfg.play_phase_len] or cfg.enjoy:
+#           evaluation_interval = 10
 
         # Otherwise, evaluate policies once after every player-training phase. If the trainer is for player-training and
         # evolved world evaluation, we count the phases corresponding to each process, and the phase corresponding to 
         # the re-evaluation of elites. 
         # TODO: might want multiple rounds of elite-re-evaluation, would need to account for that here.
 #       elif not cfg.parallel_gen_play:
-        evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
+#       evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
 
 #       evaluation_interval = 1
 #       # If we're parallelizing generation and playing, we're evaluating on the player-only trainer.
@@ -319,6 +321,13 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "evaluation_duration_unit": "episodes",
         "evaluation_parallel_to_training": True,
 
+#       # TODO: provide more options here?  
+        "evo_eval_num_workers": cfg.n_rllib_workers,
+#       "evo_eval_duration": "auto",
+        "evo_eval_config": {
+            "fixed_worlds": cfg.fixed_worlds,
+        },
+
         # We *almost* run the right number of episodes s.t. we simulate on each map the same number of times. But there
         # are some garbage resets in there (???).
         "evaluation_config": {
@@ -332,11 +341,6 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
             "render_env": cfg.render,
             "explore": False if cfg.oracle_policy else True,
         },
-
-#       # TODO: provide more options here?
-        "evo_eval_num_workers": cfg.n_rllib_workers,
-#       "evo_eval_duration": "auto",
-#       "evo_eval_config": {},
 
         # "lr": 0.1,
         # "log_level": "INFO",
@@ -358,10 +362,10 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
     print(f'Loading trainer with config:')
     pp.pprint(trainer_config_loggable)
 
-    if cfg.parallel_gen_play:
-        trainer = WorldEvoPPOTrainer(env='world_evolution_env', config=trainer_config)
-    else:
-        trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
+    # if cfg.parallel_gen_play and not (cfg.fixed_worlds or cfg.enjoy or cfg.evaluate):
+    trainer = WorldEvoPPOTrainer(env='world_evolution_env', config=trainer_config)
+    # else:
+        # trainer = ppo.PPOTrainer(env='world_evolution_env', config=trainer_config)
 
     # When enjoying, eval envs are set from the evolved world archive in rllib_eval_envs. We do not evaluate when 
     # evolving adversarial worlds.
@@ -465,11 +469,13 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         cfg = ppo.PPOTrainer.get_default_config()
         cfg["evo_eval_num_workers"] = 1
         cfg["evo_eval_duration"] = "auto"
-        cfg["evo_eval_config"] = {}
+        cfg["evo_eval_config"] = {
+            "fixed_worlds": False,
+        }
 
         return cfg
 
-    def set_attrs(self, world_evolver, idx_counter, logbook, colearning_config):
+    def set_attrs(self, world_evolver: WorldEvolver, idx_counter, logbook, colearning_config):
         self.world_evolver = world_evolver
         self.idx_counter = idx_counter
         self.logbook = logbook
@@ -486,6 +492,9 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         # the eval config is always complete, no matter whether we have eval
         # workers or perform evaluation on the (non-eval) local worker.
         evo_eval_config = merge_dicts(self.config, user_evo_eval_config)
+
+        if evo_eval_config["fixed_worlds"]:
+            return
 
         # Create a separate evolution evaluation worker set for evo eval.
         # If num_workers=0, use the evo eval set's local
@@ -525,8 +534,12 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             return num_workers * self.config["num_envs_per_worker"]
 
         train_start_time = timer()
-        training_worlds = self.world_evolver.generate_offspring() if self.net_itr == 0 else \
-            {k: ind for k, ind in enumerate(
+        if self.colearn_cfg.fixed_worlds:
+            training_worlds = full_obs_test_mazes
+        elif self.net_itr == 0:
+            training_worlds = self.world_evolver.generate_offspring()
+        else:
+            training_worlds = {k: ind for k, ind in enumerate(
                 sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
             # else {k: ind for k, ind in enumerate(self.world_evolver.container)}
 
@@ -540,7 +553,7 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
 
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
-        replace = True if self.colearn_cfg.fixed_worlds and len(training_worlds) >= self.colearn_cfg.world_batch_size\
+        replace = True if self.colearn_cfg.fixed_worlds and len(training_worlds) < self.colearn_cfg.world_batch_size\
              else False
         world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
         training_worlds = {k: training_worlds[k] for k in world_keys}
@@ -554,27 +567,27 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             train_future = executor.submit(
                 lambda: self._exec_plan_or_training_iteration_fn())
+            logbook_archive_stats = {}
 
-            eval_start_time = timer()
-            step_results.update(self.evaluate())
-            logbook_stats.update({
-                f'{k}EvalRew': step_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
-            logbook_stats.update({'elapsed': timer() - eval_start_time})
-            log(self.logbook, logbook_stats, self.net_itr)
-            logbook_stats = {}
+            if self.play_itr % self.config["evaluation_interval"] == 0:
+                eval_start_time = timer()
+                step_results.update(self.evaluate())
+                logbook_stats.update({
+                    f'{k}EvalRew': step_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
+                logbook_stats.update({'elapsed': timer() - eval_start_time})
+                log(self.logbook, logbook_stats, self.net_itr)
+                logbook_stats = {}
 
-            # Run evo-eval indefinitely
-            logbook_archive_stats = self.evo_eval(
-                    duration_fn=functools.partial(
-                        auto_duration_fn, unit="episodes", num_workers=self.config[
-                            "num_workers"], cfg=self.config[
-                                "evo_eval_config"]))
+            if not self.config["evo_eval_config"]["fixed_worlds"]:
+                # Run evo-eval indefinitely
+                logbook_archive_stats = self.evo_eval(
+                        duration_fn=functools.partial(
+                            auto_duration_fn, unit="episodes", num_workers=self.config[
+                                "num_workers"], cfg=self.config[
+                                    "evo_eval_config"]))
             
             # Collect the training results from the future.
             step_results.update(train_future.result())
-
-            # The player is one update ahead of the worlds, relative the policy the worlds were evolved for.
-            self.world_evolver.increment_ages()
 
             logbook_stats.update({
                 f'{k}Rew': step_results[f"episode_reward_{k}"] for k in stat_keys})
@@ -584,7 +597,8 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
         logbook_stats.update(logbook_archive_stats)
         logbook_stats.update({"elapsed": timer() - train_start_time})
         log(self.logbook, logbook_stats, self.net_itr)
-        save_model(self, self.colearn_cfg.save_dir)
+        if not self.colearn_cfg.fixed_worlds or self.play_itr % 10 == 0:
+            save_model(self, self.colearn_cfg.save_dir)
         self.play_itr += 1
         self.net_itr += 1
 
@@ -634,6 +648,9 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             evo_start_time = timer()
             units_left_to_do = duration_fn(num_units_done=num_units_done)
             if units_left_to_do <= 0:
+                # The player is one update ahead of the worlds, relative the policy the worlds were evolved for.
+                self.world_evolver.increment_ages()
+
                 # TODO: evaluate and try to add any leftover contested individuals here, to decrease likelihood we leave
                 #   very low-fitness individuals in archive from last round, in case they displaced elites on the basis
                 #   of age alone?
