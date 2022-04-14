@@ -525,21 +525,23 @@ class WorldEvoPPOTrainer(ppo.PPOTrainer):
             return num_workers * self.config["num_envs_per_worker"]
 
         train_start_time = timer()
-        training_worlds = self.world_evolver.generate_offspring() if self.net_itr == 0 \
-            else {k: ind for k, ind in enumerate(self.world_evolver.container)}
-            # sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True)
+        training_worlds = self.world_evolver.generate_offspring() if self.net_itr == 0 else \
+            {k: ind for k, ind in enumerate(
+                sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
+            # else {k: ind for k, ind in enumerate(self.world_evolver.container)}
 
-        if self.colearn_cfg.quality_diversity:
-            # Eliminate impossible worlds
-            training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
+#       if self.colearn_cfg.quality_diversity:
+#           # Eliminate impossible worlds
+#           training_worlds = {k: ind for k, ind in training_worlds.items() if not ind.features == [0, 0]}
 
-            # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
-            if len(training_worlds) == 0:
-                done_play_phase = True
+#           # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
+#           if len(training_worlds) == 0:
+#               done_play_phase = True
 
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
-        replace = True if self.colearn_cfg.fixed_worlds else False
+        replace = True if self.colearn_cfg.fixed_worlds and len(training_worlds) >= self.colearn_cfg.world_batch_size\
+             else False
         world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
         training_worlds = {k: training_worlds[k] for k in world_keys}
         set_worlds(training_worlds, self.workers, self.idx_counter, self.colearn_cfg)
