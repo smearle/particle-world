@@ -470,7 +470,7 @@ class NCA(TorchModelV2, nn.Module):
         return {'value': val, 'action': act}
 
 
-class FloodModel(TorchModelV2, nn.Module):
+class FloodModel(TorchRNN, nn.Module):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
                 model_config: ModelConfigDict, name: str, player_chan=None, **kwargs):
         TorchModelV2.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
@@ -520,6 +520,7 @@ class FloodModel(TorchModelV2, nn.Module):
         # Only working with the previous state
         assert len(state) == 1
 
+        print(input.shape)
         x = th.cat((input, state[0]), dim=1)
         # n_batches = input.shape[0]
         x = th.relu(self.conv_0(x))
@@ -540,7 +541,10 @@ class FloodModel(TorchModelV2, nn.Module):
         # NOTE: taking a neighborhood is tricky, so we just take the channels at the player's tile and assume the neural
         #  net has embedded the desired movement into them.
         hid_neighb = x[player_pos[0], :, player_pos[1], player_pos[2]]
+        print(hid_neighb.shape)
         act = th.sigmoid(self.act_dense(hid_neighb))
+        print(act.shape)
+        print()
 
         return act, [x]
 
@@ -556,11 +560,11 @@ class FloodModel(TorchModelV2, nn.Module):
 # This is prohibitively slow
 class FloodMemoryModel(TorchRNN, nn.Module):
     def __init__(self, obs_space: gym.spaces.Space, action_space: gym.spaces.Space, num_outputs: int, 
-                model_config: ModelConfigDict, name: str):
+                model_config: ModelConfigDict, name: str, **kwargs):
         TorchRNN.__init__(self, obs_space=obs_space, action_space=action_space, num_outputs=num_outputs,
                                              model_config=model_config, name=name)
         nn.Module.__init__(self)
-        self.player_chan = model_config['custom_model_config'].pop("player_chan")
+        self.player_chan = kwargs["player_chan"]
         assert self.player_chan is not None
         self.obs_space = obs_space
         self.n_hid_chans = n_hid_chans = 64
@@ -603,6 +607,8 @@ class FloodMemoryModel(TorchRNN, nn.Module):
         acts = []
         last_states = []
         last_state = state[0]
+
+        print(input.shape[1])
 
         for t in range(input.shape[1]):
             input_t = input[:, t, ...]

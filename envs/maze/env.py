@@ -33,7 +33,7 @@ class ParticleSwarmEnv(object):
     """An environment in continuous 2D space in which populations of particles can accelerate in certain directions,
     propelling themselves toward desirable regions in the fitness world."""
     def __init__(self, width, swarm_cls, n_policies, n_pop, n_chan=1, pg_width=None, fully_observable=False, 
-                 field_of_view=4, rotated_observations=True, translated_observations=True):
+                 field_of_view=4, rotated_observations=True, translated_observations=True, **kwargs):
         self.rotated_observations = rotated_observations
         self.n_chan = n_chan
         if not pg_width:
@@ -144,10 +144,10 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
     goal_chan = None
 
     def __init__(self, width, swarm_cls, n_policies, n_pop, pg_width=500, n_chan=1, fully_observable=False, field_of_view=4,
-                 rotated_observations=False, translated_observations=False, **env_config):
+                 rotated_observations=False, **kwargs):
         ParticleSwarmEnv.__init__(self, 
             width, swarm_cls, n_policies, n_pop, n_chan=n_chan, pg_width=pg_width, fully_observable=fully_observable, field_of_view=field_of_view,
-            rotated_observations=rotated_observations)
+            rotated_observations=rotated_observations, **kwargs)
         MultiAgentEnv.__init__(self)
         
         self.actions = [(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1)]

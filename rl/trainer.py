@@ -334,6 +334,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "evaluation_config": {
             "env_config": {
                 # "n_pop": 1,
+                **env_config,
 
                 # If enjoying, then we look at generated levels instead of eval levels. (Because we user trainer.evaluate() when enjoying.)
                 "evaluate": True if not cfg.enjoy else cfg.evaluate,

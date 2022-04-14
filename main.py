@@ -79,7 +79,12 @@ if __name__ == '__main__':
     if cfg.load_config is not None:
         cfg = load_config(cfg, cfg.load_config)
 
-    # TODO: do this better?
+    # TODO: ClArgsConfig class.
+    if cfg.model == 'flood':
+        cfg.rotated_observations = False
+        cfg.translated_observations = False
+    else:
+        cfg.translated_observations = True
     cfg.fitness_domain = [(-np.inf, np.inf)]
     cfg.width = 15
     pg_delay = 50  # Delay for rendering in pygame (ms?). Probably not needed!
@@ -89,7 +94,6 @@ if __name__ == '__main__':
     pg_scale = pg_width / cfg.width
     cfg.save_interval = 100
     cfg.archive_size = 1024 if not cfg.quality_diversity else 2500
-    cfg.translated_observations = True
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
