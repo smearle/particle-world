@@ -55,7 +55,7 @@ def main():
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-lo', '--load', action='store_true')
-    parser.add_argument('-bc', '--batch_config', type=str, default='0')
+    parser.add_argument('-bc', '--batch_config', type=str, default='batch')
     parser.add_argument('-gaw', '--gen_adversarial_worlds', action='store_true')
     args = parser.parse_args()
     job_time = 19
