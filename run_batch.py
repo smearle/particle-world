@@ -16,7 +16,7 @@ from cross_eval import vis_cross_eval
 from utils import get_experiment_name
 
 
-def launch_job(sbatch_file, exp_i, job_time, job_cpus, local):
+def launch_job(sbatch_file, exp_i, job_time, job_cpus, job_mem, local):
     cmd = f'python main.py --load_config {exp_i}'
 
     if local:
@@ -33,6 +33,7 @@ def launch_job(sbatch_file, exp_i, job_time, job_cpus, local):
             content = re.sub('prtcl_(eval_)?\d+', job_name, content)
             content = re.sub('#SBATCH --time=\d+:', '#SBATCH --time={}:'.format(job_time), content)
             content = re.sub('#SBATCH --cpus-per-task=\d+:', '#SBATCH --cpus-per-task={}:'.format(job_cpus), content)
+            content = re.sub('#SBATCH --mem=\d+GB', '#SBATCH --mem={}GB'.format(job_mem), content)
             cmd = '\n' + cmd
             new_content = re.sub('\n.*python main.py.*', cmd, content)
 
@@ -122,8 +123,20 @@ def main():
 
         return 
 
+    # Ad hoc: request RAM based on network size and number.
+    if not fully_observable:
+        job_mem = 16
+    else:
+        if n_policies == 1:
+            job_mem = 35
+        elif n_policies == 2:
+            job_mem = 65
+        else:
+            job_mem = 90
+
     for exp_i, exp_set in enumerate(exp_sets):
-        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers, local=args.local)
+        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers, job_mem=job_mem,
+            local=args.local)
 
 
 

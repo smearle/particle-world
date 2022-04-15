@@ -27,8 +27,8 @@
     "npol_qd_objectives": [
 #       [3, true, null],
 #       [2, false, "contrastive"],
-#       [1, false, "regret"],
-        [1, false, "min_solvable"],
+        [1, false, "regret"],
+#       [1, false, "min_solvable"],
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 
@@ -36,7 +36,7 @@
     # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
     # number of cells the agent can see in each direction (excluding its own position).
     "fullobs_fov_models": [
-#       [false, 2, "paired"],
-        [true, -1, "paired"],
+        [false, 2, "paired"],
+#       [true, -1, "paired"],
     ]
 }

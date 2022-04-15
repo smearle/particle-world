@@ -10,7 +10,7 @@ from ray.rllib import MultiAgentEnv
 # from minerl.herobraine.env_spec import EnvSpec
 # from envs.minecraft.touchstone import TouchStone
 from envs.maze.swarm import min_solvable_fitness, contrastive_fitness, regret_fitness
-from utils import discrete_to_onehot
+from envs.minecraft.wrappers import MineRLWrapper
 
 
 def make_env(env_config):
@@ -173,11 +173,14 @@ class WorldEvolutionWrapper(gym.Wrapper):
         return obs
 
     def set_regret_loss(self, losses):
-        if self.last_world_key not in losses:
-            # assert self.evaluate, 'Samples should cover all simultaneously evaluated worlds except during evaluation.'
+        # If this environment is handled by a training worker, then the we care about `last_world_key`. Something about
+        # resetting behavior during evaluation vs. training.
+        if self.world_key not in losses:
+            assert self.evaluate, f"No regret loss for world {self.world_key}.Samples should cover all simultaneously "\
+                "evaluated worlds except during evaluation."
             return
-        loss = losses[self.last_world_key]
-        self.regret_losses.append((self.last_world_key, loss))
+        loss = losses[self.world_key]
+        self.regret_losses.append((self.world_key, loss))
 
     def get_world_stats(self, evaluate=False, quality_diversity=False):
         """
@@ -210,9 +213,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
             world_key_2, regret_loss = self.regret_losses[i] if len(self.regret_losses) > 0 else (None, None)
             
             # FIXME: Mismatched world keys between agent_rewards and regret_losses during evaluation. Ignoring so we can
-            #  render all eval mazes
-            if not self.evaluate \
-                and world_key_2:  # i.e. we have a regret loss
+            #  render all eval mazes. This is fixed yeah?
+            if not self.evaluate and world_key_2:  # i.e. we have a regret loss
                 assert world_key == world_key_2
 
             # Convert agent to policy rewards. Get a list of lists, where outer list is per-policy, and inner list is 

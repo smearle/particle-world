@@ -463,8 +463,8 @@ def evo_evaluate(trainer: Trainer, workers: WorkerSet):
     return trainer.evaluate()
 
 
-# algorithm = PPOTrainer
-algorithm = ImpalaTrainer
+algorithm = PPOTrainer
+# algorithm = ImpalaTrainer
 
 
 class WorldEvoPPOTrainer(algorithm):
@@ -523,6 +523,8 @@ class WorldEvoPPOTrainer(algorithm):
             local_worker=False,
             )
 
+        # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
+
     def step_attempt(self) -> ResultDict:
         """Attempts a single training step, including player evaluation, if required. Performs evo-eval in parallel.
 
@@ -550,7 +552,9 @@ class WorldEvoPPOTrainer(algorithm):
         if self.colearn_cfg.fixed_worlds:
             training_worlds = self.world_archive
         elif self.net_itr == 0:
-            training_worlds = self.world_evolver.generate_offspring()
+            # On the first iteration, we'll just train on some random individuals (the initial batch stored in the 
+            # `world_evolver`).
+            training_worlds = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
         else:
             training_worlds = {k: ind for k, ind in enumerate(
                 sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
@@ -566,7 +570,7 @@ class WorldEvoPPOTrainer(algorithm):
 
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
-        replace = True if self.colearn_cfg.fixed_worlds and len(training_worlds) < self.colearn_cfg.world_batch_size\
+        replace = True if self.colearn_cfg.fixed_worlds or len(training_worlds) < self.colearn_cfg.world_batch_size\
              else False
         world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
         training_worlds = {k: training_worlds[k] for k in world_keys}
@@ -673,15 +677,12 @@ class WorldEvoPPOTrainer(algorithm):
                 # print(f"Abandoning {len(contested_individuals)} leftover contested individuals.")
                 break
 #           print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
-            contested_individuals = self.world_evolver.disturb_elites(self.colearn_cfg.world_batch_size // 2)
-            batch_size = self.colearn_cfg.world_batch_size - len(contested_individuals)
-            offspring = self.world_evolver.generate_offspring(batch_size)
-            offspring.update({batch_size + i: ind for i, ind in enumerate(contested_individuals)})
+            batch = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
 
             # New variable, otherwise we'll try to serialize `self` in the workerset lambda in the below function.
             idx_counter = ray.get_actor("idx_counter")
 
-            set_worlds(offspring, self.evo_eval_workers, idx_counter, self.colearn_cfg)
+            set_worlds(batch, self.evo_eval_workers, idx_counter, self.colearn_cfg)
 
             round_ += 1
             batches = ray.get([
@@ -690,7 +691,7 @@ class WorldEvoPPOTrainer(algorithm):
                 if i * 1 < units_left_to_do
             ])
             world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg)
-            logbook_stats = self.world_evolver.tell(offspring, world_qd_stats)
+            logbook_stats = self.world_evolver.tell(batch, world_qd_stats)
             # 1 episode per returned batch.
             if unit == "episodes":
                 num_units_done += len(batches)

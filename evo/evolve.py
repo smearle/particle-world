@@ -59,15 +59,37 @@ class WorldEvolver(DEAPQDAlgorithm):
         # Evaluate the individuals with an invalid fitness
         # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
 
-    def disturb_elites(self, batch_size: int) -> list:
-        # Pop individuals from the container for re-evaluation.
+    def generate_batch(self, batch_size: int) -> list:
+        """Generate a batch of individuals to evaluate.
+
+        Where possible, we return an even mix of new mutants and "stale" elites.
+
+        Args:
+            batch_size (int): Number of individuals to generate.
+        """
+        contested_inds = self._disturb_elites(batch_size)
+        offspring = self._generate_offspring(batch_size - len(contested_inds))
+        [self.container.discard(ind) for ind in contested_inds]
+        batch = contested_inds + offspring
+        batch = {i: ind for i, ind in enumerate(batch)}
+
+        return batch
+
+    def _disturb_elites(self, batch_size: int) -> list:
+        """Collect maximally stale individuals from the archive so that they may be re-evaluated.
+        
+        Note that we may return a list of individuals smaller than the requested batch size.
+
+        Args:
+            batch_size (int): Number of individuals to return (ideally).
+        """
         invalid_inds = []
         i = 0
         while len(invalid_inds) < batch_size and i < len(self.stale_individuals):
             ind = self.stale_individuals[i]
             if ind in self.container:
                 invalid_inds.append(ind)
-                self.container.discard(ind)
+                # self.container.discard(ind)
             i += 1
         self.stale_individuals = self.stale_individuals[i:]
 
@@ -95,14 +117,14 @@ class WorldEvolver(DEAPQDAlgorithm):
         them in the archive. When doing QD, this may result in some "collisions," which see the archive left less 
         populated than before.
         """
-        invalid_inds = {i: ind for i, ind in enumerate(self.disturb_elites())}
+        invalid_inds = {i: ind for i, ind in enumerate(self._disturb_elites())}
 
         return self.evolve(batch=invalid_inds)
 
         # NOTE: Here we are assuming that we've only evaluated each world once. If we have duplicate stats for a given world, we will overwrite all but one instance of statistics 
         #  resulting from playthrough in this world.
 
-    def generate_offspring(self, batch_size: Optional[int] = None) -> dict:
+    def _generate_offspring(self, batch_size: Optional[int] = None) -> dict:
         batch_size = self.batch_size if batch_size is None else batch_size
         # On the first iteration, randomly generate the initial batch if necessary.
         if self.curr_itr == 0:
@@ -127,7 +149,7 @@ class WorldEvolver(DEAPQDAlgorithm):
                     offspring[i], = self.toolbox.mutate(offspring[i])
                     del offspring[i].fitness.values
 
-        offspring = {i: ind for i, ind in enumerate(offspring)}
+        # offspring = {i: ind for i, ind in enumerate(offspring)}
         # print(f"{len(batch)} new offspring generated.")
 
         return offspring
@@ -146,7 +168,7 @@ class WorldEvolver(DEAPQDAlgorithm):
 
         # Otherwise, generate a new batch by applying genetic operators to a subset of the individuals in the archive.
         else:
-            batch = self.generate_offspring()
+            batch = {i: ind for i, ind in enumerate(self._generate_offspring())}
 
         rllib_stats, world_stats, logbook_stats = evaluate_worlds(
             trainer=self.trainer, worlds=batch, cfg=self.cfg, 

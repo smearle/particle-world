@@ -14,6 +14,7 @@ from ray.rllib.utils.typing import AgentID, PolicyID
 class RegretCallbacks(DefaultCallbacks):
     def __init__(self, *args, regret_objective=False, **kwargs):
         super().__init__(*args, **kwargs)
+        # print(f"Regret objective: {regret_objective}")
         self.regret_objective = regret_objective
 
 #   def on_episode_step(
@@ -112,7 +113,9 @@ class RegretCallbacks(DefaultCallbacks):
         This is achieved by computing positive value loss, as in ACCEL (https://arxiv.org/pdf/2203.01302.pdf) and PLR 
         (https://arxiv.org/pdf/2010.03934.pdf)"""
         if not self.regret_objective:
+            # print(f"Regret objective is not enabled on worker {worker}.")
             return
+        # print(f"Regret objective enabled on worker {worker}.")
 
         if hasattr(samples, 'policy_batches'):
             # TODO: collect regret scores of multiple policies
@@ -138,6 +141,8 @@ class RegretCallbacks(DefaultCallbacks):
 
             w_advantages = advantages[idxs]
             pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
+
+        # print(f"Regret objective is {pos_val_losses}. Passing to worker environments.")
 
         # TODO: should be able to pass this info back more naturally somehow, as below
         # pol_batch['pos_val_losses'] = pos_val_losses
