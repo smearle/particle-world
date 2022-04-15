@@ -14,6 +14,7 @@ from envs.maze.swarm import min_solvable_fitness, contrastive_fitness, regret_fi
 from envs.minecraft.wrappers import MineRLWrapper
 from generators.representations import render_landscape
 from utils import discrete_to_onehot
+from envs.minecraft.wrappers import MineRLWrapper
 
 
 def make_env(env_config):
