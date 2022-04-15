@@ -32,7 +32,7 @@ def launch_job(sbatch_file, exp_i, job_time, job_cpus, job_mem, local):
             job_name += str(exp_i)
             content = re.sub('prtcl_(eval_)?\d+', job_name, content)
             content = re.sub('#SBATCH --time=\d+:', '#SBATCH --time={}:'.format(job_time), content)
-            content = re.sub('#SBATCH --cpus-per-task=\d+:', '#SBATCH --cpus-per-task={}:'.format(job_cpus), content)
+            content = re.sub('#SBATCH --cpus-per-task=\d+', '#SBATCH --cpus-per-task={}'.format(job_cpus), content)
             content = re.sub('#SBATCH --mem=\d+GB', '#SBATCH --mem={}GB'.format(job_mem), content)
             cmd = '\n' + cmd
             new_content = re.sub('\n.*python main.py.*', cmd, content)
@@ -135,7 +135,8 @@ def main():
             job_mem = 90
 
     for exp_i, exp_set in enumerate(exp_sets):
-        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers, job_mem=job_mem,
+        # Because of our parallel evo/train implementation, we have twice as many total workers/cpus.
+        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers*2, job_mem=job_mem,
             local=args.local)
 
 
