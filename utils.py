@@ -228,7 +228,7 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
 
 
 def update_individuals(individuals, qd_stats):
-    assert len(individuals) == len(qd_stats), f"Number of individuals, {len(individuals)} != {len(qd_stats)}, number "\
+    assert len(individuals) == len(qd_stats), f"Number of individuals, {len(individuals)}, != {len(qd_stats)}, number "\
         f"of qd_stats."
     
     # qd_stats = [qd_stats[k] for k in range(len(qd_stats))]

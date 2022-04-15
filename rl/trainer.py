@@ -300,8 +300,8 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # },
         "env_config": env_config,
         "num_gpus": cfg.num_gpus,
-        "num_workers": num_workers if not (cfg.enjoy or cfg.evaluate) else 0,
-#       "num_workers": 1 if not (cfg.enjoy or cfg.evaluate) else 0,
+#       "num_workers": num_workers if not (cfg.enjoy or cfg.evaluate) else 0,
+        "num_workers": 1 if not (cfg.enjoy or cfg.evaluate) else 0,
         "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
         "render_env": cfg.render if not cfg.enjoy else True,
@@ -351,7 +351,8 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
 
         # TODO: try increasing batch size to ~500k, expect a few minutes update time
-        "train_batch_size": env.max_episode_steps * cfg.n_eps_on_train,
+        # "train_batch_size": env.max_episode_steps * cfg.n_eps_on_train,
+        "train_batch_size": env.max_episode_steps * num_envs_per_worker,
         # "sgd_minibatch_size": env.max_episode_steps * cfg.n_rllib_envs if (cfg.enjoy or cfg.evaluate) and cfg.render else 128,
         "logger_config": logger_config if not (cfg.enjoy or cfg.evaluate) else {},
     }
@@ -688,7 +689,8 @@ class WorldEvoPPOTrainer(algorithm):
             batches = ray.get([
                 w.sample.remote() for i, w in enumerate(
                     self.evo_eval_workers.remote_workers())
-                if i * 1 < units_left_to_do
+                # This `units_left_to_do` is wrong here. Do we need it? No?
+#               if i * 1 < units_left_to_do
             ])
             world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg)
             logbook_stats = self.world_evolver.tell(batch, world_qd_stats)

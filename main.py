@@ -97,8 +97,9 @@ if __name__ == '__main__':
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
-    # worker fo training simulation so as not to waste CPUs).
-    cfg.n_rllib_envs = 30
+    # worker for training simulation so as not to waste CPUs).
+    cfg.n_rllib_envs = cfg.n_rllib_workers * 40  # Note that this effectively sets n_envs_per_worker to 40.
+    # cfg.n_rllib_envs = 400
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
 

@@ -52,7 +52,7 @@ def main():
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-ev', '--evaluate', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
-    parser.add_argument('-nw', '--n_rllib_workers', type=int, default=12)
+    parser.add_argument('-nw', '--n_rllib_workers', type=int, default=10)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-lo', '--load', action='store_true')
@@ -135,8 +135,9 @@ def main():
             job_mem = 90
 
     for exp_i, exp_set in enumerate(exp_sets):
-        # Because of our parallel evo/train implementation, we have twice as many total workers/cpus.
-        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers*2, job_mem=job_mem,
+        # Because of our parallel evo/train implementation, we need an additional CPU for the remote trainer, and 
+        # anoter for the local worker (actually the latter is not true, but... for breathing room).
+        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers+2, job_mem=job_mem,
             local=args.local)
 
 
