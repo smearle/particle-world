@@ -59,7 +59,7 @@ def main():
     parser.add_argument('-bc', '--batch_config', type=str, default='batch')
     parser.add_argument('-gaw', '--gen_adversarial_worlds', action='store_true')
     args = parser.parse_args()
-    job_time = 19
+    job_time = 48
     n_rllib_workers = 0 if args.visualize else args.n_rllib_workers
     num_gpus = 0 if args.visualize else args.num_gpus
     render = True if args.enjoy else args.render

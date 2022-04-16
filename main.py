@@ -98,7 +98,8 @@ if __name__ == '__main__':
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
     # worker for training simulation so as not to waste CPUs).
-    cfg.n_rllib_envs = cfg.n_rllib_workers * 40  # Note that this effectively sets n_envs_per_worker to 40.
+    cfg.n_envs_per_worker = 40
+    cfg.n_rllib_envs = cfg.n_rllib_workers * cfg.n_envs_per_worker  # Note that this effectively sets n_envs_per_worker to 40.
     # cfg.n_rllib_envs = 400
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
@@ -207,7 +208,7 @@ if __name__ == '__main__':
             # else (1 if env_is_minerl else n_envs_per_worker)
 
         # NOTE: this is also the number of episodes we will train players on.
-        n_envs_per_worker = cfg.n_rllib_envs // n_workers
+        assert cfg.n_envs_per_worker == cfg.n_rllib_envs // n_workers
 
     register_env('world_evolution_env', make_env)
 
@@ -374,7 +375,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             # We'll look at each world independently in our single env
             if cfg.fixed_worlds:
-                worlds = list(eval_mazes.values())
+                worlds = list(full_obs_test_mazes.values())
 #               evaluate_worlds(trainer=trainer, worlds=training_worlds,
 #                                     fixed_worlds=cfg.fixed_worlds, render=cfg.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
@@ -452,13 +453,13 @@ if __name__ == '__main__':
                 # Ahhh it's TBXLogger? Can just skip this check?
                 raise Exception(f"The save directory '{save_dir}' already exists. Use --overwrite to overwrite it.")
 
-        # Remove the save directory if it exists and we are overwriting.
-        else:
-            print(f"Overwriting save directory '{save_dir}'.")
-            shutil.rmtree(save_dir)
+#       # Remove the save directory if it exists and we are overwriting.
+#       else:
+#           print(f"Overwriting save directory '{save_dir}'.")
+#           shutil.rmtree(save_dir)
 
-        # Create the new save directory.
-        os.mkdir(save_dir)
+#       # Create the new save directory.
+#       os.mkdir(save_dir)
 
         # If not loading, do some initial setup for world evolution if applicable.
         if not cfg.fixed_worlds:
