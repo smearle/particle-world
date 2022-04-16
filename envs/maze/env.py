@@ -365,9 +365,9 @@ class ParticleMazeEnv(ParticleGymRLlib):
 
         obs = {}
 
-        # If level is fully observable, and we are not rotating observations, then we observe the whole map, including
+        # If level is fully observable, and we are not rotating, nor translating observations, then we observe the whole map, including
         # an additional channel for the player.
-        if self.fully_observable and not self.rotated_observations:
+        if self.fully_observable and not self.rotated_observations and not self.translated_observations:
             swarms_obs = []
             for i, swarm in enumerate(self.swarms):
                 obs_i = swarm.get_full_observations(
@@ -375,6 +375,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
                     flatten=False,
                     )
                 swarms_obs.append(obs_i)
+
         # Otherwise, we get a local observation, centered on the player, of the surrounding area. Note that if the level
         # is fully observable, with rotated observations, we basically take a very large, padded, local observation, and
         # rotate it.
@@ -459,7 +460,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
 
         # Ugly hack to deal with eval envs resetting before end of sample. last_world_key = world_key during training,
         # since the new world key is set right before reset. During eval, this is actually the last world_key, since
-        # reset happens before the end of the evaluate() batch.
+        # reset happens before the end of the evaluate() batch. <--...wut?
         # print(f"reset world {self.world_key} on step {self.n_step}")
 
         obs = super().reset()
@@ -468,6 +469,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
             swarm.ps[:] = self.start_idx
 
         obs = self.get_particle_observations()
+        # print(f"MazeEnv observation shape: {obs[(0,0)].shape}")
 
         return obs
 

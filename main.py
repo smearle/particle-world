@@ -96,18 +96,18 @@ if __name__ == '__main__':
     cfg.archive_size = 1024 if not cfg.quality_diversity else 2500
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
+    n_workers = (1 if cfg.n_rllib_workers == 0 else cfg.n_rllib_workers)
+
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
     # worker for training simulation so as not to waste CPUs).
     cfg.n_envs_per_worker = 40
-    cfg.n_rllib_envs = cfg.n_rllib_workers * cfg.n_envs_per_worker  # Note that this effectively sets n_envs_per_worker to 40.
+    cfg.n_rllib_envs = n_workers * cfg.n_envs_per_worker  # Note that this effectively sets n_envs_per_worker to 40.
     # cfg.n_rllib_envs = 400
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
 
     # Whether to run rounds of player-training and generator-evolution in parallel.
     cfg.parallel_gen_play = True
-
-    n_workers = (1 if cfg.n_rllib_workers == 0 else cfg.n_rllib_workers)
 
     # We must have the same number of envs per worker, and want to meet our target number of envs exactly.
     assert cfg.n_rllib_envs % n_workers == 0, \
@@ -216,6 +216,23 @@ if __name__ == '__main__':
     save_dir = os.path.join(cfg.outputDir, experiment_name)
     cfg.save_dir = save_dir
     cfg.env_is_minerl = env_is_minerl
+
+    if not cfg.load:
+        # If we're not loading, and not overwriting, and the relevant ``save_dir`` exists, then raise Exception.
+        if not cfg.overwrite:
+            if os.path.exists(save_dir):
+                # FIXME: even when we are running new experiment, the directoy already exists at this point. Why?
+                # Ahhh it's TBXLogger? Can just skip this check?
+                raise Exception(f"The save directory '{save_dir}' already exists. Use --overwrite to overwrite it.")
+
+        # Remove the save directory if it exists and we are overwriting.
+        else:
+            print(f"Overwriting save directory '{save_dir}'.")
+            shutil.rmtree(save_dir)
+
+        # Create the new save directory.
+        os.mkdir(save_dir)
+
 
     # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
@@ -446,21 +463,6 @@ if __name__ == '__main__':
         play_itr = 0
         net_itr = 0
         
-        # If we're not loading, and not overwriting, and the relevant ``save_dir`` exists, then raise Exception.
-        if not cfg.overwrite:
-            if os.path.exists(save_dir):
-                # FIXME: even when we are running new experiment, the directoy already exists at this point. Why?
-                # Ahhh it's TBXLogger? Can just skip this check?
-                raise Exception(f"The save directory '{save_dir}' already exists. Use --overwrite to overwrite it.")
-
-#       # Remove the save directory if it exists and we are overwriting.
-#       else:
-#           print(f"Overwriting save directory '{save_dir}'.")
-#           shutil.rmtree(save_dir)
-
-#       # Create the new save directory.
-#       os.mkdir(save_dir)
-
         # If not loading, do some initial setup for world evolution if applicable.
         if not cfg.fixed_worlds:
             # Create empty container.
