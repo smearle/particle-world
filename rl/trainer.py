@@ -495,6 +495,7 @@ class WorldEvoPPOTrainer(algorithm):
         self.net_itr = net_itr
         self.gen_itr = gen_itr
         self.play_itr = play_itr
+        self.net_train_start_time = None
 
     def setup(self, config: PartialTrainerConfigDict):
         super().setup(config)
@@ -553,6 +554,8 @@ class WorldEvoPPOTrainer(algorithm):
             return num_workers * self.config["num_envs_per_worker"]
 
         train_start_time = timer()
+        if self.net_itr == 0:
+            self.net_train_start_time = train_start_time
         if self.colearn_cfg.fixed_worlds:
             training_worlds = self.world_archive
         elif self.net_itr == 0:
@@ -611,12 +614,16 @@ class WorldEvoPPOTrainer(algorithm):
             step_results.update(train_future.result())
 
             logbook_stats.update({
-                f'{k}Rew': step_results[f"episode_reward_{k}"] for k in stat_keys})
+                f"{k}Rew": step_results[f"episode_reward_{k}"] for k in stat_keys})
+            train_end_time = timer()
+            logbook_stats.update({
+                "fps": step_results["agent_timesteps_total"] / (train_end_time - self.net_train_start_time),
+            })
 
         # Note that we report stats about the worlds in the archive at step t, and the result of training at step t,
         # though each has been evolved/trained on the policy/worlds at step t-1.
         logbook_stats.update(logbook_archive_stats)
-        logbook_stats.update({"elapsed": timer() - train_start_time})
+        logbook_stats.update({"elapsed": train_end_time - train_start_time})
         log(self.logbook, logbook_stats, self.net_itr)
         if not self.colearn_cfg.fixed_worlds or self.play_itr % 10 == 0:
             save_model(self, self.colearn_cfg.save_dir)

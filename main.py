@@ -519,7 +519,7 @@ if __name__ == '__main__':
         logbook = tools.Logbook()
         # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
         # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
-        logbook.header = ["iteration", "meanRew", "meanEvalRew", "elapsed"]
+        logbook.header = ["iteration", "minRew", "meanRew", "maxRew", "meanEvalRew", "fps", "elapsed"]
 
 #   if cfg.fixed_worlds:
 #       for i in range(1000):
