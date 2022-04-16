@@ -31,7 +31,7 @@ from timeit import default_timer as timer
 from envs import eval_mazes, full_obs_test_mazes
 from evo.evolve import WorldEvolver
 from evo.utils import compute_archive_world_heuristics, save
-from model import CustomConvRNNModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
+from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import RegretCallbacks
 from rl.eval_worlds import evaluate_worlds
@@ -212,6 +212,9 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
                     [4, [3, 3], 1]],
                 # "post_fcnet_hiddens": [32, 32],
             })
+        elif cfg.model == 'feedforward':
+            ModelCatalog.register_custom_model('feedforward', CustomFeedForwardModel)
+            model_config = {'custom_model': 'feedforward'}
         elif cfg.model == 'paired':
             # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
             ModelCatalog.register_custom_model('paired', CustomRNNModel)

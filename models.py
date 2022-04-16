@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List
+from typing import Dict, List, OrderedDict
 
 import cv2
 import gym
@@ -9,6 +9,7 @@ import pygame
 import torch as th
 from pdb import set_trace as TT
 from ray.rllib.models.modelv2 import ModelV2
+from ray.rllib.models.torch.misc import SlimFC
 from ray.rllib.models.torch.recurrent_net import RecurrentNetwork as TorchRNN
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.policy.policy import Policy
@@ -18,9 +19,53 @@ from ray.rllib.utils.typing import ModelConfigDict, ModelWeights
 from torch import TensorType, nn
 
 from envs import ParticleMazeEnv, eval_mazes
+from paired_models.common import RNN, Conv2d_tf, apply_init_, make_fc_layers_with_hidden_sizes, init_
 
 
 th.set_printoptions(profile='full')
+
+
+class CustomFeedForwardModel(TorchModelV2, nn.Module):
+    def __init__(self,
+                 obs_space,
+                 action_space,
+                 num_outputs,
+                 model_config,
+                 name,
+                 conv_filters=64,
+                 fc_size=64,
+                 ):
+        nn.Module.__init__(self)
+        super().__init__(obs_space, action_space, num_outputs, model_config,
+                         name)
+
+        # self.obs_size = get_preprocessor(obs_space)(obs_space).size
+        obs_shape = obs_space.shape
+        self.pre_fc_size = (obs_shape[-2] - 2) * (obs_shape[-3] - 2) * conv_filters
+        self.fc_size = fc_size
+
+        self.conv_1 = nn.Conv2d(obs_space.shape[-1], out_channels=conv_filters, kernel_size=3, stride=1, padding=0)
+
+        self.fc_1 = SlimFC(self.pre_fc_size, self.fc_size)
+        self.action_branch = SlimFC(self.fc_size, num_outputs)
+        self.value_branch = SlimFC(self.fc_size, 1)
+        # Holds the current "base" output (before logits layer).
+        self._features = None
+
+    @override(ModelV2)
+    def value_function(self):
+        assert self._features is not None, "must call forward() first"
+        return th.reshape(self.value_branch(self._features), [-1])
+
+    def forward(self, input_dict, state, seq_lens):
+        input = input_dict["obs"].permute(0, 3, 1, 2)  # Because rllib order tensors the tensorflow way (channel last)
+        x = nn.functional.relu(self.conv_1(input.float()))
+        x = x.reshape(x.size(0), -1)
+        x = nn.functional.relu(self.fc_1(x))
+        self._features = x
+        action_out = self.action_branch(self._features)
+
+        return action_out, []
 
 
 class CustomRNNModel(TorchRNN, nn.Module):
@@ -30,29 +75,61 @@ class CustomRNNModel(TorchRNN, nn.Module):
                  num_outputs,
                  model_config,
                  name,
+                 actor_fc_layers=(256, 256),
+                 value_fc_layers=(128, 64),
                  conv_filters=16,
-                 fc_size=64,
-                 lstm_state_size=256):
+                 conv_kernel_size=3,
+                 recurrent_hidden_size=256):
         nn.Module.__init__(self)
         super().__init__(obs_space, action_space, num_outputs, model_config,
                          name)
 
         # self.obs_size = get_preprocessor(obs_space)(obs_space).size
         obs_shape = obs_space.shape
-        self.pre_fc_size = (obs_shape[-2] - 2) * (obs_shape[-3] - 2) * conv_filters
-        self.fc_size = fc_size
-        self.lstm_state_size = lstm_state_size
+        self.preprocessed_input_size = (obs_shape[-2] - conv_kernel_size + 1) * (obs_shape[-3] - conv_kernel_size + 1) * conv_filters
+        self.recurrent_hidden_size = recurrent_hidden_size
 
-        self.conv = nn.Conv2d(obs_space.shape[-1], out_channels=conv_filters, kernel_size=3, stride=1, padding=0)
+        self.num_actions = action_space.n
 
-        # Build the Module from fc + LSTM + 2xfc (action + value outs).
-        self.fc1 = nn.Linear(self.pre_fc_size, self.fc_size)
+#       self.conv = nn.Conv2d(obs_space.shape[-1], out_channels=conv_filters, kernel_size=3, stride=1, padding=0)
+        self.image_conv = nn.Sequential(OrderedDict([
+            ('conv', Conv2d_tf(3, conv_filters, kernel_size=conv_kernel_size, stride=1, padding='valid')),
+            ('flatten', nn.Flatten()),
+            ('relu', nn.ReLU()),
+        ]))
+
+        # Scalar embedding
+        # TODO:
+
+        # RNN
         self.lstm = nn.LSTM(
-            self.fc_size, self.lstm_state_size, batch_first=True)
-        self.action_branch = nn.Linear(self.lstm_state_size, num_outputs)
-        self.value_branch = nn.Linear(self.lstm_state_size, 1)
+            self.preprocessed_input_size, self.recurrent_hidden_size, batch_first=True)
+#       self.rnn = RNN(
+#           input_size=self.preprocessed_input_size, 
+#           hidden_size=recurrent_hidden_size,
+#           arch="lstm")
+        self.base_output_size = recurrent_hidden_size
+
+        # Policy head
+        self.actor = nn.Sequential(
+            make_fc_layers_with_hidden_sizes(actor_fc_layers, input_size=self.base_output_size),
+            nn.Linear(actor_fc_layers[-1], self.num_actions)
+        )
+
+        # Value head
+        self.critic = nn.Sequential(
+            make_fc_layers_with_hidden_sizes(value_fc_layers, input_size=self.base_output_size),
+            init_(nn.Linear(value_fc_layers[-1], 1))
+        )
+
+        # self.action_branch = nn.Linear(self.lstm_state_size, num_outputs)
+        # self.value_branch = nn.Linear(self.lstm_state_size, 1)
         # Holds the current "base" output (before logits layer).
         self._features = None
+
+        apply_init_(self.modules())
+
+        self.train()
 
     @override(ModelV2)
     def get_initial_state(self):
@@ -60,18 +137,19 @@ class CustomRNNModel(TorchRNN, nn.Module):
         #  View API is supported across all of RLlib.
         # Place hidden states on same device as model.
         h = [
-            self.fc1.weight.new(1, self.lstm_state_size).zero_().squeeze(0),
-            self.fc1.weight.new(1, self.lstm_state_size).zero_().squeeze(0)
+            self.image_conv[0].weight.new(1, self.recurrent_hidden_size).zero_().squeeze(0),
+            self.image_conv[0].weight.new(1, self.recurrent_hidden_size).zero_().squeeze(0)
         ]
         return h
 
     @override(ModelV2)
     def value_function(self):
         assert self._features is not None, "must call forward() first"
-        return th.reshape(self.value_branch(self._features), [-1])
+        return th.reshape(self.critic(self._features), [-1])
 
     def forward(self, input_dict, state, seq_lens):
-        x = nn.functional.relu(self.conv(input_dict["obs"].permute(0, 3, 1, 2)))
+        # x = nn.functional.relu(self.conv(input_dict["obs"].permute(0, 3, 1, 2)))
+        x = self.image_conv(input_dict["obs"].permute(0, 3, 1, 2))
         x = x.reshape(x.size(0), -1)
         return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)
 
@@ -88,12 +166,19 @@ class CustomRNNModel(TorchRNN, nn.Module):
             NN Outputs (B x T x ...) as sequence.
             The state batches as a List of two items (c- and h-states).
         """
-        x = nn.functional.relu(self.fc1(inputs))
         self._features, [h, c] = self.lstm(
-            x, [th.unsqueeze(state[0], 0),
+            inputs, [th.unsqueeze(state[0], 0),
                 th.unsqueeze(state[1], 0)])
-        action_out = self.action_branch(self._features)
+        action_out = self.actor(self._features)
         return action_out, [th.squeeze(h, 0), th.squeeze(c, 0)]
+        # x = nn.functional.relu(self.fc1(inputs))
+#       self._features, [h, c] = self.lstm(
+#           x, [th.unsqueeze(state[0], 0),
+#               th.unsqueeze(state[1], 0)])
+        self._features, rnn_hxs = self.rnn(
+            inputs, state, seq_lens)
+        action_out = self.actor(self._features)
+        return action_out, rnn_hxs
 
 
 class CustomConvRNNModel(TorchRNN, nn.Module):
