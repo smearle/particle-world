@@ -551,7 +551,8 @@ class WorldEvoPPOTrainer(algorithm):
             and - if required - evaluation.
         """
 
-        def auto_duration_fn(unit, num_workers, cfg, num_units_done):
+        def auto_duration_fn(unit, num_workers, cfg, num_units_done, **kwargs):
+            """Evolve worlds until the concurrent player training step is complete."""
             # Training is done and we already ran at least one
             # evaluation -> Nothing left to run.
             if num_units_done > 0 and \
@@ -560,7 +561,15 @@ class WorldEvoPPOTrainer(algorithm):
             # Count by episodes. -> Run n more
             # (n=num eval workers).
             return num_workers * self.config["num_envs_per_worker"]
+            
+        def gen_playable_duration_fn(num_playable_worlds=0, **kwargs):
+            """Evolve worlds until one is playable."""
+            return 0 if num_playable_worlds > 0 else 1
 
+        # Preliminary evolution until we have generated a playable world.
+        # TODO: may need to occupy the GPU with something else if this will take a long time. 
+        # E.g. train on repaired worlds.
+        logbook_archive_stats = self.evo_eval(duration_fn=gen_playable_duration_fn)
         train_start_time = timer()
         if self.net_train_start_time is None:
             self.net_train_start_time = train_start_time
@@ -583,6 +592,7 @@ class WorldEvoPPOTrainer(algorithm):
 #           if len(training_worlds) == 0:
 #               done_play_phase = True
 
+        training_worlds = {k: ind for k, ind in training_worlds.items() if ind.playability_penalty == 0}
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
         replace = True if self.colearn_cfg.fixed_worlds or len(training_worlds) < self.colearn_cfg.world_batch_size\
@@ -658,10 +668,7 @@ class WorldEvoPPOTrainer(algorithm):
                             save_dir=self.colearn_cfg.save_dir)
         self.play_itr += 1
         self.net_itr += 1
-
             
-            # Collect the training results from the future.
-            step_results.update(train_future.result())
 
     def evo_eval(self, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
         """Evaluates current policy under `evaluation_config` settings.
@@ -684,60 +691,58 @@ class WorldEvoPPOTrainer(algorithm):
         # In "auto" mode (only for parallel eval + training): Run as long
         # as training lasts.
         unit = "episodes"
-        evo_eval_cfg = self.config["evo_eval_config"]
+        # evo_eval_cfg = self.config["evo_eval_config"]
         # rollout = evo_eval_cfg["rollout_fragment_length"]
-        num_envs = self.config["num_envs_per_worker"]
-        duration = self.config["num_workers"] * self.config["num_envs_per_worker"]
+        # num_envs = self.config["num_envs_per_worker"]
+        # duration = self.config["num_workers"] * self.config["num_envs_per_worker"]
         num_ts_run = 0
-
-        # Default done-function returns True, whenever num episodes
-        # have been completed.
-        if duration_fn is None:
-
-            def duration_fn(num_units_done):
-                return duration - num_units_done
-
         metrics = {}
 
-        # contested_individuals = []
+        playable_worlds = []
         # How many episodes have we run (across all eval workers)?
         num_units_done = 0
         round_ = 0
         while True:
             evo_start_time = timer()
-            units_left_to_do = duration_fn(num_units_done=num_units_done)
+            units_left_to_do = duration_fn(num_units_done=num_units_done, num_playable_worlds=len(playable_worlds))
             
             if units_left_to_do <= 0:
                 # The player is one update ahead of the worlds, relative the policy the worlds were evolved for.
                 self.world_evolver.increment_ages()
+                break
                 
 #           print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
-            batch = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
+            world_batch = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
+            # unplayable_worlds = [w for w in world_batch if not w.playability_penalty > 0]
+            playable_worlds = {wk: ind for wk, ind in world_batch.items() if ind.playability_penalty == 0}
+            world_qd_stats = {}
 
-            # New variable, otherwise we'll try to serialize `self` in the workerset lambda in the below function.
-            idx_counter = ray.get_actor("idx_counter")
+            if len(playable_worlds) > 0:
+                # New variable, otherwise we'll try to serialize `self` in the workerset lambda in the below function.
+                idx_counter = ray.get_actor("idx_counter")
 
-            set_worlds(batch, self.evo_eval_workers, idx_counter, self.colearn_cfg)
+                set_worlds(playable_worlds, self.evo_eval_workers, idx_counter, self.colearn_cfg)
 
-            round_ += 1
-            batches = ray.get([
-                w.sample.remote() for i, w in enumerate(
-                    self.evo_eval_workers.remote_workers())
-                # This `units_left_to_do` is wrong here. Do we need it? No?
-#               if i * 1 < units_left_to_do
-            ])
-            # n_episodes = np.sum([np.sum(batch.policy_batches["policy_0"]["dones"] == True) for batch in batches])
-            # print(f"Simulated {n_episodes} agent episodes on evo eval.")
-            world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg)
-            logbook_stats = self.world_evolver.tell(batch, world_qd_stats)
-            # 1 episode per returned batch.
-            if unit == "episodes":
-                num_units_done += len(batches)
-            # n timesteps per returned batch.
-            else:
-                ts = sum(len(b) for b in batches)
-                num_ts_run += ts
-                num_units_done += ts
+                round_ += 1
+                batches = ray.get([
+                    w.sample.remote() for i, w in enumerate(
+                        self.evo_eval_workers.remote_workers())
+                    # This `units_left_to_do` is wrong here. Do we need it? No?
+    #               if i * 1 < units_left_to_do
+                ])
+                # n_episodes = np.sum([np.sum(batch.policy_batches["policy_0"]["dones"] == True) for batch in batches])
+                # print(f"Simulated {n_episodes} agent episodes on evo eval.")
+                world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg,
+                    ignore_redundant=self.colearn_cfg.generator_class in ["NCA"])
+                # 1 episode per returned batch.
+                if unit == "episodes":
+                    num_units_done += len(batches)
+                # n timesteps per returned batch.
+                else:
+                    ts = sum(len(b) for b in batches)
+                    num_ts_run += ts
+                    num_units_done += ts
+            logbook_stats = self.world_evolver.tell(world_batch, world_qd_stats)
             logbook_stats.update({"elapsed": timer() - evo_start_time})
             log(self.logbook, logbook_stats, self.net_itr)
             self.gen_itr += 1

@@ -109,7 +109,7 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
             lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
 
 
-def get_world_qd_stats(workers: WorkerSet, cfg: Namespace):
+def get_world_qd_stats(workers: WorkerSet, cfg: Namespace, ignore_redundant=False):
     """Get world stats from workers."""
     world_stats = workers.foreach_worker(
         lambda worker: worker.foreach_env(lambda env: env.get_world_stats(quality_diversity=cfg.quality_diversity)))
@@ -123,7 +123,7 @@ def get_world_qd_stats(workers: WorkerSet, cfg: Namespace):
                 warn_msg = ("Should not have redundant world evaluations inside this function unless training on "\
                             "fixed worlds or doing evaluation/enjoyment.")
                 # assert cfg.fixed_worlds or evaluate_only, warn_msg
-                if not cfg.fixed_worlds and not cfg.evaluate:
+                if not cfg.fixed_worlds and not cfg.evaluate and not ignore_redundant:
                     print(warn_msg)
 
                 # We'll create a list of stats from separate runs.

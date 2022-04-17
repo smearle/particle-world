@@ -61,7 +61,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world_key = None
         self.last_world_key = self.world_key
         self.world = None
-        self.world_gen_sequence = None
+        self.world_gen_sequences = None
         self.world_queue = None
         cfg = env_cfg.get('cfg')
         self.enjoy = cfg.enjoy
@@ -108,7 +108,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 #           self.next_n_pop = next_n_pop
 
         if world_gen_sequences is not None and len(world_gen_sequences) > 0:
-            self.world_gen_sequence = world_gen_sequences[self.world_key]
+            self.world_gen_sequences = {wk: world_gen_sequences[wk] for wk in self.world_key_queue}
 
         self.need_world_reset = True
 
@@ -280,9 +280,10 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # A redundant render at first just to initialize the pygame screen so we can render world-generation on it.
             super().render(enforce_constraints=False, pg_width=pg_width, render_player=render_player)
 
-        if self.world_gen_sequence is not None and not self.has_rendered_world_gen:
+        # Sometimes world_key is not in world_gen_sequences... presumably due to forced reset for world loading?
+        if self.world_gen_sequences is not None and not self.has_rendered_world_gen and self.world_key in self.world_gen_sequences:
             # Render the sequence of worlds that were generated in the generation process.
-            for world in self.world_gen_sequence:
+            for world in self.world_gen_sequences[self.world_key]:
                 # render_landscape(self.screen, -1 * world[1] + 1)
                 sidxs, gidxs = np.argwhere(world == self.start_chan).T, np.argwhere(world == self.goal_chan).T
                 sidxs, gidxs = sidxs.cpu().numpy(), gidxs.cpu().numpy()

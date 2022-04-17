@@ -43,18 +43,10 @@ class WorldEvolver(DEAPQDAlgorithm):
         # The co-learning loop will always start here, with at least a single round of world-generation
 #       idx_counter = ray.get_actor("idx_counter")
 
-#       if self.logbook is None:
-#           self.logbook = deap.tools.Logbook()
+    def tell(self, batch, world_stats):
 
-        if self.start_time == None:
-            self.start_time = timer()
-
-        self.trainer.workers.local_worker().set_policies_to_train([])
-
-        if len(self.init_batch) == 0:
-            raise ValueError("``init_batch`` must not be empty.")
-
-        assert self.mutpb == 1.0
+        # TODO: Refer to a dict mapping fitness functions to their minimum values?
+        update_individuals(batch, world_stats, min_fitness=-10)
 
         # Evaluate the individuals with an invalid fitness
         # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
