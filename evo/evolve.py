@@ -67,7 +67,8 @@ class WorldEvolver(DEAPQDAlgorithm):
         Args:
             batch_size (int): Number of individuals to generate.
         """
-        contested_inds = self._disturb_elites(batch_size)
+        contested_inds = self._disturb_elites(batch_size // 2)
+        # print(f"{len(contested_inds)} contested individuals.")
         offspring = self._generate_offspring(batch_size - len(contested_inds))
         [self.container.discard(ind) for ind in contested_inds]
         batch = contested_inds + offspring

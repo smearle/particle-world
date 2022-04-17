@@ -52,7 +52,7 @@ def main():
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-ev', '--evaluate', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
-    parser.add_argument('-nw', '--n_rllib_workers', type=int, default=10)
+    parser.add_argument('-nw', '--n_rllib_workers', type=int, default=1)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-lo', '--load', action='store_true')
@@ -76,7 +76,7 @@ def main():
 
     for exp_i, exp_set in enumerate(exp_sets):
         exp_name, env_cls, (gen_phase_len, play_phase_len), (n_policies, quality_diversity, objective), \
-            (fully_observable, field_of_view, model) = exp_set
+            (fully_observable, field_of_view, model, rotated) = exp_set
 
         # Just for reference in terms of what's currently explicitly supported/expected:
 #       if objective in ['min_solvable', 'regret', 'max_reward']:
@@ -109,7 +109,7 @@ def main():
             'play_phase_len': play_phase_len,
             'quality_diversity': quality_diversity,
             'render': render,
-            'rotated_observations': True,
+            'rotated_observations': rotated,
             'visualize': args.visualize,
         }
         exp_configs.append(exp_config)
@@ -128,11 +128,11 @@ def main():
         job_mem = 16
     else:
         if n_policies == 1:
-            job_mem = 35
+            job_mem = 16
         elif n_policies == 2:
-            job_mem = 65
+            job_mem = 32
         else:
-            job_mem = 90
+            job_mem = 64
 
     for exp_i, exp_set in enumerate(exp_sets):
         # Because of our parallel evo/train implementation, we need an additional CPU for the remote trainer, and 

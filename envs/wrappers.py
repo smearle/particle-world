@@ -279,6 +279,8 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         # MultiAgentEnv.__init__(self)
 
     def step(self, actions):
+        # print(f"Step env with world key {self.world_key}, step {self.n_step}.")
+        
         # We skip the step() function in WorldEvolutionWrapper and call *it's* parent's step() function instead.
         obs, rews, dones, infos = super(WorldEvolutionWrapper, self).step(actions)
 

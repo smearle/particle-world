@@ -329,7 +329,11 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "evo_eval_num_workers": cfg.n_rllib_workers,
 #       "evo_eval_duration": "auto",
         "evo_eval_config": {
+#           "batch_mode": "complete_episodes",
             "fixed_worlds": cfg.fixed_worlds,
+            # TODO: modify the behavior of `sample()` on the evo_eval worker so that it gets exactly one episode from each environment?
+            "rollout_fragment_length": env.max_episode_steps ,
+            "train_batch_size": env.max_episode_steps * num_envs_per_worker,
         },
 
         # We *almost* run the right number of episodes s.t. we simulate on each map the same number of times. But there
@@ -350,12 +354,12 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # "lr": 0.1,
         # "log_level": "INFO",
         # "record_env": True,
-        "rollout_fragment_length": env.max_episode_steps,
+#       "rollout_fragment_length": env.max_episode_steps,
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
 
         # TODO: try increasing batch size to ~500k, expect a few minutes update time
         # "train_batch_size": env.max_episode_steps * cfg.n_eps_on_train,
-        "train_batch_size": env.max_episode_steps * num_envs_per_worker,
+#       "train_batch_size": env.max_episode_steps * num_envs_per_worker,
         # "sgd_minibatch_size": env.max_episode_steps * cfg.n_rllib_envs if (cfg.enjoy or cfg.evaluate) and cfg.render else 128,
         "logger_config": logger_config if not (cfg.enjoy or cfg.evaluate) else {},
     }
@@ -481,6 +485,9 @@ class WorldEvoPPOTrainer(algorithm):
         cfg["evo_eval_duration"] = "auto"
         cfg["evo_eval_config"] = {
             "fixed_worlds": False,
+            "batch_mode": "complete_episodes",
+            "rollout_fragment_length": cfg["rollout_fragment_length"],
+            "train_batch_size": cfg["train_batch_size"],
         }
 
         return cfg
@@ -496,6 +503,7 @@ class WorldEvoPPOTrainer(algorithm):
         self.gen_itr = gen_itr
         self.play_itr = play_itr
         self.net_train_start_time = None
+        self.last_agent_timesteps_total = 0
 
     def setup(self, config: PartialTrainerConfigDict):
         super().setup(config)
@@ -554,7 +562,7 @@ class WorldEvoPPOTrainer(algorithm):
             return num_workers * self.config["num_envs_per_worker"]
 
         train_start_time = timer()
-        if self.net_itr == 0:
+        if self.net_train_start_time is None:
             self.net_train_start_time = train_start_time
         if self.colearn_cfg.fixed_worlds:
             training_worlds = self.world_archive
@@ -617,8 +625,9 @@ class WorldEvoPPOTrainer(algorithm):
                 f"{k}Rew": step_results[f"episode_reward_{k}"] for k in stat_keys})
             train_end_time = timer()
             logbook_stats.update({
-                "fps": step_results["agent_timesteps_total"] / (train_end_time - self.net_train_start_time),
+                "fps": (step_results["agent_timesteps_total"] - self.last_agent_timesteps_total) / (train_end_time -train_start_time),
             })
+            self.last_agent_timesteps_total = step_results["agent_timesteps_total"]
 
         # Note that we report stats about the worlds in the archive at step t, and the result of training at step t,
         # though each has been evolved/trained on the policy/worlds at step t-1.
@@ -702,6 +711,8 @@ class WorldEvoPPOTrainer(algorithm):
                 # This `units_left_to_do` is wrong here. Do we need it? No?
 #               if i * 1 < units_left_to_do
             ])
+            # n_episodes = np.sum([np.sum(batch.policy_batches["policy_0"]["dones"] == True) for batch in batches])
+            # print(f"Simulated {n_episodes} agent episodes on evo eval.")
             world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg)
             logbook_stats = self.world_evolver.tell(batch, world_qd_stats)
             # 1 episode per returned batch.

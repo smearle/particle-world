@@ -474,7 +474,7 @@ if __name__ == '__main__':
             # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
             # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
             logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + stats.fields + ["meanRew", \
-                "meanEvalRew", "meanPath", "maxPath", "elapsed"]
+                "meanEvalRew", "meanPath", "maxPath", "fps", "elapsed"]
 
     # Perform setup that must occur whether reloading or not, but which will need to occur after reloading if reloading.
     if not cfg.fixed_worlds:
