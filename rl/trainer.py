@@ -280,7 +280,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         # This means we evaluate 1 episode per eval env.
         # evaluation_num_episodes = num_eval_envs
 
-    regret_callbacks = partial(RegretCallbacks, regret_objective=cfg.objective_function=='regret')
+    regret_callbacks = partial(RegretCallbacks, cfg=cfg)
     logger_config = {
             "type": "ray.tune.logger.TBXLogger",
             # Optional: Custom logdir (do not define this here
@@ -620,6 +620,23 @@ class WorldEvoPPOTrainer(algorithm):
             
             # Collect the training results from the future.
             step_results.update(train_future.result())
+            
+            # TODO: Use callbacks for this instead? Or otherwise tackle this routine repeated all over the place in a redundant way...
+            if self.colearn_cfg.fixed_worlds:
+                qd = self.colearn_cfg.quality_diversity
+                # NOTE: This flushes the stats on all these workers' envs.
+                world_stats = self.workers.foreach_worker(
+                    lambda worker: worker.foreach_env(lambda env: env.get_world_stats(quality_diversity=qd)))
+                # Flatten workers
+                world_stats = [s for ws in world_stats for s in ws]
+                pct_wins = []
+                for env_stat_list in world_stats:
+                    for world_stat_dict in env_stat_list:
+                        pct_win = np.mean([world_stat_dict[f"policy_{i}"]["pct_win"] for i in range(self.colearn_cfg.n_policies)])
+                        pct_wins.append(pct_win)
+                logbook_stats.update({
+                    "pctWin": np.mean(pct_wins),
+                })
 
             logbook_stats.update({
                 f"{k}Rew": step_results[f"episode_reward_{k}"] for k in stat_keys})
@@ -687,15 +704,11 @@ class WorldEvoPPOTrainer(algorithm):
         while True:
             evo_start_time = timer()
             units_left_to_do = duration_fn(num_units_done=num_units_done)
+            
             if units_left_to_do <= 0:
                 # The player is one update ahead of the worlds, relative the policy the worlds were evolved for.
                 self.world_evolver.increment_ages()
-
-                # TODO: evaluate and try to add any leftover contested individuals here, to decrease likelihood we leave
-                #   very low-fitness individuals in archive from last round, in case they displaced elites on the basis
-                #   of age alone?
-                # print(f"Abandoning {len(contested_individuals)} leftover contested individuals.")
-                break
+                
 #           print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
             batch = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
 

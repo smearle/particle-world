@@ -12,12 +12,15 @@ from ray.rllib.utils.typing import AgentID, PolicyID
 
 
 class RegretCallbacks(DefaultCallbacks):
-    def __init__(self, *args, regret_objective=False, **kwargs):
+    def __init__(self, cfg, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # print(f"Regret objective: {regret_objective}")
-        self.regret_objective = regret_objective
+        self.regret_objective = cfg.objective_function == "regret"
+        self.n_policies = cfg.n_policies
 
-#   def on_episode_step(
+
+# TODO: get world stats using this callback!
+#   def on_episode_end(
 #       self,
 #       *,
 #       worker: RolloutWorker,
@@ -27,11 +30,6 @@ class RegretCallbacks(DefaultCallbacks):
 #       env_index: int,
 #       **kwargs
 #   ):
-#       pass
-
-#   def on_episode_end(self, *, worker: "RolloutWorker", base_env: BaseEnv,
-#                      policies: Dict[PolicyID, Policy], episode: Episode,
-#                      **kwargs) -> None:
 #       """Runs when an episode is done.
 
 #       Args:
@@ -48,7 +46,23 @@ class RegretCallbacks(DefaultCallbacks):
 #               metrics for the episode.
 #           kwargs: Forward compatibility placeholder.
 #       """
-#       pass
+#       # Check if there are multiple episodes in a batch, i.e.
+#       # "batch_mode": "truncate_episodes".
+#       if worker.policy_config["batch_mode"] == "truncate_episodes":
+#           # Make sure this episode is really done.
+#           assert episode.batch_builder.policy_collectors["policy_0"].batches[
+#               -1
+#           ]["dones"][-1], (
+#               "ERROR: `on_episode_end()` should only be called "
+#               "after episode is done!"
+#           )
+#       pol_batches = [episode.batch_builder.policy_collectors[f"policy_{i}"].batches for i in range(self.n_policies)]
+#       # This may be an empty empisode due to immediate reset for world-loading.
+#       print(dir(episode))
+#       if np.all(pol_batches == 0):
+#           return
+#       envs_world_stats = [env.get_world_stats() for env in base_env.get_sub_environments()]
+#       ep_infos = [agent_batch["infos"] for batch in pol_batches for agent_batch in batch]
 
 #   def on_postprocess_trajectory(
 #           self, *, worker: "RolloutWorker", episode: Episode,
@@ -149,27 +163,4 @@ class RegretCallbacks(DefaultCallbacks):
 
         # For now, just giving it back to environments to be collected later
         worker.foreach_env(lambda env: env.set_regret_loss(pos_val_losses))
-
-#   def on_learn_on_batch(self, *, policy: Policy, train_batch: SampleBatch,
-#                         result: dict, **kwargs) -> None:
-#       """Called at the beginning of Policy.learn_on_batch().
-
-#       Note: This is called before 0-padding via
-#       `pad_batch_to_sequences_of_same_size`.
-
-#       Also note, SampleBatch.INFOS column will not be available on
-#       train_batch within this callback if framework is tf1, due to
-#       the fact that tf1 static graph would mistake it as part of the
-#       input dict if present.
-#       It is available though, for tf2 and torch frameworks.
-
-#       Args:
-#           policy: Reference to the current Policy object.
-#           train_batch: SampleBatch to be trained on. You can
-#               mutate this object to modify the samples generated.
-#           result: A results dict to add custom metrics to.
-#           kwargs: Forward compatibility placeholder.
-#       """
-
-#       pass
 

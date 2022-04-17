@@ -100,7 +100,7 @@ if __name__ == '__main__':
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
     # worker for training simulation so as not to waste CPUs).
-    cfg.n_envs_per_worker = 40
+    cfg.n_envs_per_worker = 10
     cfg.n_rllib_envs = n_workers * cfg.n_envs_per_worker  # Note that this effectively sets n_envs_per_worker to 40.
     # cfg.n_rllib_envs = 400
     cfg.n_eps_on_train = cfg.n_rllib_envs
@@ -519,7 +519,7 @@ if __name__ == '__main__':
         logbook = tools.Logbook()
         # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
         # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
-        logbook.header = ["iteration", "minRew", "meanRew", "maxRew", "meanEvalRew", "fps", "elapsed"]
+        logbook.header = ["iteration", "minRew", "meanRew", "maxRew", "pctWin", "meanEvalRew", "fps", "elapsed"]
 
 #   if cfg.fixed_worlds:
 #       for i in range(1000):
