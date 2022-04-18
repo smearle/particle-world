@@ -543,6 +543,17 @@ class WorldEvoPPOTrainer(algorithm):
 
         # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
 
+    def evaluate(self, episodes_left_fn=None, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
+        eval_start_time = timer()
+        logbook_stats = {}
+        eval_results = super().evaluate(episodes_left_fn=episodes_left_fn, duration_fn=duration_fn)
+        logbook_stats.update({
+            f'{k}EvalRew': eval_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
+        logbook_stats.update({'elapsed': timer() - eval_start_time})
+        log(self.logbook, logbook_stats, self.net_itr)
+
+        return eval_results
+
     def step_attempt(self) -> ResultDict:
         """Attempts a single training step, including player evaluation, if required. Performs evo-eval in parallel.
 
@@ -584,6 +595,8 @@ class WorldEvoPPOTrainer(algorithm):
         else:
             training_worlds = {k: ind for k, ind in enumerate(
                 sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
+            world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
+            training_worlds = {k: training_worlds[k] for k in world_keys}
             # else {k: ind for k, ind in enumerate(self.world_evolver.container)}
 
 #       if self.colearn_cfg.quality_diversity:
@@ -600,64 +613,71 @@ class WorldEvoPPOTrainer(algorithm):
         #   flexible).
         replace = True if self.colearn_cfg.fixed_worlds or len(training_worlds) < self.colearn_cfg.world_batch_size\
              else False
-        world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
-        training_worlds = {k: training_worlds[k] for k in world_keys}
         set_worlds(training_worlds, self.workers, self.idx_counter, self.colearn_cfg, load_now=False)
         step_results = {}
         logbook_stats = {}
 
-        # Kick off evaluation-loop (and parallel train() call,
-        # if requested).
-        # Parallel eval + training.
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            train_future = executor.submit(
-                lambda: self._exec_plan_or_training_iteration_fn())
+        # NOTE: eval is always sequential because meh
+        # Sequential training and evolution.
+        if self.config["num_workers"] == 0:
+            step_results = self._exec_plan_or_training_iteration_fn()
             logbook_archive_stats = {}
 
             if self.play_itr % self.config["evaluation_interval"] == 0:
-                eval_start_time = timer()
                 step_results.update(self.evaluate())
-                logbook_stats.update({
-                    f'{k}EvalRew': step_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
-                logbook_stats.update({'elapsed': timer() - eval_start_time})
-                log(self.logbook, logbook_stats, self.net_itr)
-                logbook_stats = {}
 
             if not self.colearn_cfg.fixed_worlds:
                 # Run evo-eval indefinitely
                 logbook_archive_stats = self.evo_eval(
-                        duration_fn=functools.partial(
-                            auto_duration_fn, unit="episodes", num_workers=self.config[
-                                "num_workers"], cfg=self.config[
-                                    "evo_eval_config"]))
+                        duration_fn=lambda n_units_done, n_playable: n_units_done > 0)
             
-            # Collect the training results from the future.
-            step_results.update(train_future.result())
-            
-            # TODO: Use callbacks for this instead? Or otherwise tackle this routine repeated all over the place in a redundant way...
-            if self.colearn_cfg.fixed_worlds:
-                qd = self.colearn_cfg.quality_diversity
-                # NOTE: This flushes the stats on all these workers' envs.
-                world_stats = self.workers.foreach_worker(
-                    lambda worker: worker.foreach_env(lambda env: env.get_world_stats(quality_diversity=qd)))
-                # Flatten workers
-                world_stats = [s for ws in world_stats for s in ws]
-                pct_wins = []
-                for env_stat_list in world_stats:
-                    for world_stat_dict in env_stat_list:
-                        pct_win = np.mean([world_stat_dict[f"policy_{i}"]["pct_win"] for i in range(self.colearn_cfg.n_policies)])
-                        pct_wins.append(pct_win)
-                logbook_stats.update({
-                    "pctWin": np.mean(pct_wins),
-                })
+        else:
+            # Kick off evaluation-loop (and parallel train() call,
+            # if requested).
+            # Parallel eval + training.
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                train_future = executor.submit(
+                    lambda: self._exec_plan_or_training_iteration_fn())
+                logbook_archive_stats = {}
 
+                if self.play_itr % self.config["evaluation_interval"] == 0:
+                    step_results.update(self.evaluate())
+
+                if not self.colearn_cfg.fixed_worlds:
+                    # Run evo-eval indefinitely
+                    logbook_archive_stats = self.evo_eval(
+                            duration_fn=functools.partial(
+                                auto_duration_fn, unit="episodes", num_workers=self.config[
+                                    "num_workers"], cfg=self.config[
+                                        "evo_eval_config"]))
+                
+                # Collect the training results from the future.
+                step_results.update(train_future.result())
+            
+        # TODO: Use callbacks for this instead? Or otherwise tackle this routine repeated all over the place in a redundant way...
+        if self.colearn_cfg.fixed_worlds:
+            qd = self.colearn_cfg.quality_diversity
+            # NOTE: This flushes the stats on all these workers' envs.
+            world_stats = self.workers.foreach_worker(
+                lambda worker: worker.foreach_env(lambda env: env.get_world_stats(quality_diversity=qd)))
+            # Flatten workers
+            world_stats = [s for ws in world_stats for s in ws]
+            pct_wins = []
+            for env_stat_list in world_stats:
+                for world_stat_dict in env_stat_list:
+                    pct_win = np.mean([world_stat_dict[f"policy_{i}"]["pct_win"] for i in range(self.colearn_cfg.n_policies)])
+                    pct_wins.append(pct_win)
             logbook_stats.update({
-                f"{k}Rew": step_results[f"episode_reward_{k}"] for k in stat_keys})
-            train_end_time = timer()
-            logbook_stats.update({
-                "fps": (step_results["agent_timesteps_total"] - self.last_agent_timesteps_total) / (train_end_time -train_start_time),
+                "pctWin": np.mean(pct_wins),
             })
-            self.last_agent_timesteps_total = step_results["agent_timesteps_total"]
+
+        logbook_stats.update({
+            f"{k}Rew": step_results[f"episode_reward_{k}"] for k in stat_keys})
+        train_end_time = timer()
+        logbook_stats.update({
+            "fps": (step_results["agent_timesteps_total"] - self.last_agent_timesteps_total) / (train_end_time -train_start_time),
+        })
+        self.last_agent_timesteps_total = step_results["agent_timesteps_total"]
 
         # Note that we report stats about the worlds in the archive at step t, and the result of training at step t,
         # though each has been evolved/trained on the policy/worlds at step t-1.

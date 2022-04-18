@@ -64,6 +64,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world_gen_sequences = None
         self.world_queue = None
         cfg = env_cfg.get('cfg')
+        self.fixed_worlds = cfg.fixed_worlds
         self.enjoy = cfg.enjoy
 
         # Target reward world should elicit if using min_solvable objective
@@ -145,7 +146,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
-        print(f'Resetting world {self.world_key} at step {self.n_step}.')
+        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.has_rendered_world_gen = False
         self.last_world_key = self.world_key
 
@@ -163,11 +164,18 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # FIXME: maybe inefficient to call index
             self.world_key = world_keys[(world_keys.index(self.last_world_key) + self.num_eval_envs) % len(self.world_queue)]
             self.set_world(self.world_queue[self.world_key])
+        # Randomly select a world from the training set.
+        elif self.fixed_worlds:
+            self.world_key = np.random.choice(self.world_key_queue)
+            self.set_world(self.world_queue[self.world_key])
+        # Iterate through the worlds queued for evo-evaluation.
         else:
             self.world_key = self.world_key_queue[0] if self.world_key_queue else None
             self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
             if self.world_key:
                 self.set_world(self.world_queue.pop(self.world_key))
+                # self.set_world(self.world_queue[self.world_key])
+            # self.world_idx = (self.world_idx + 1) % len(self.world_key_queue)
 
         # self.next_world = None if not self.enjoy and not self.world_queue else self.world_queue[self.world_key_queue[0]]
         # self.world_queue = self.world_queue[1:] if self.world_queue else []
