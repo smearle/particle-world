@@ -350,6 +350,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
             "render_env": cfg.render,
             "explore": False if cfg.oracle_policy else True,
         },
+        "ignore_worker_failures": True,
 
         # "lr": 0.1,
         # "log_level": "INFO",
@@ -607,8 +608,7 @@ class WorldEvoPPOTrainer(algorithm):
 #           if len(training_worlds) == 0:
 #               done_play_phase = True
 
-        training_worlds = {k: ind for k, ind in training_worlds.items() \
-            if isinstance(ind, np.ndarray) or ind.playability_penalty == 0}
+        training_worlds = {k: ind for k, ind in training_worlds.items() if isinstance(ind, np.ndarray) or ind.playability_penalty == 0}
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
         replace = True if self.colearn_cfg.fixed_worlds or len(training_worlds) < self.colearn_cfg.world_batch_size\
@@ -654,7 +654,7 @@ class WorldEvoPPOTrainer(algorithm):
                 # Collect the training results from the future.
                 step_results.update(train_future.result())
             
-        # TODO: Use callbacks for this instead? Or otherwise tackle this routine repeated all over the place in a redundant way...
+        # FIXME: This gathers and flushes stats before the episode is over. Need to use callbacks instead
         if self.colearn_cfg.fixed_worlds:
             qd = self.colearn_cfg.quality_diversity
             # NOTE: This flushes the stats on all these workers' envs.
@@ -691,6 +691,8 @@ class WorldEvoPPOTrainer(algorithm):
                             save_dir=self.colearn_cfg.save_dir)
         self.play_itr += 1
         self.net_itr += 1
+
+        return step_results
             
 
     def evo_eval(self, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
