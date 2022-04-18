@@ -79,7 +79,7 @@ class IdxCounter:
         return self.hashes_to_idxs
 
 
-def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
+def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace, load_now: bool = False):
     """Assign worlds to environments to be loaded at next reset."""
     idxs = np.random.permutation(list(worlds.keys()))
     world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
@@ -106,7 +106,8 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace):
     # Assign envs to worlds
     workers.foreach_worker(
         lambda worker: worker.foreach_env(
-            lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, world_gen_sequences=world_gen_sequences)))
+            lambda env: env.queue_worlds(worlds=worlds, idx_counter=idx_counter, 
+                world_gen_sequences=world_gen_sequences, load_now=load_now)))
 
 
 def get_world_qd_stats(workers: WorkerSet, cfg: Namespace, ignore_redundant=False):

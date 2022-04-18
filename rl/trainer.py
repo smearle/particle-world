@@ -304,7 +304,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "env_config": env_config,
         "num_gpus": cfg.num_gpus,
 #       "num_workers": num_workers if not (cfg.enjoy or cfg.evaluate) else 0,
-        "num_workers": 1 if not (cfg.enjoy or cfg.evaluate) else 0,
+        "num_workers": 1 if not (cfg.enjoy or cfg.evaluate or cfg.n_rllib_workers == 0) else 0,
         "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
         "render_env": cfg.render if not cfg.enjoy else True,
@@ -332,7 +332,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
 #           "batch_mode": "complete_episodes",
             "fixed_worlds": cfg.fixed_worlds,
             # TODO: modify the behavior of `sample()` on the evo_eval worker so that it gets exactly one episode from each environment?
-            "rollout_fragment_length": env.max_episode_steps ,
+            "rollout_fragment_length": env.max_episode_steps,
             "train_batch_size": env.max_episode_steps * num_envs_per_worker,
         },
 
@@ -470,6 +470,11 @@ def sync_player_policies(play_trainer: Trainer, gen_trainer: Trainer, cfg: Names
 def evo_evaluate(trainer: Trainer, workers: WorkerSet):
     return trainer.evaluate()
 
+            
+def gen_playable_duration_fn(num_playable_worlds=0, **kwargs):
+    """Evolve worlds until one is playable."""
+    return 0 if num_playable_worlds > 0 else 1
+
 
 algorithm = PPOTrainer
 # algorithm = ImpalaTrainer
@@ -561,15 +566,12 @@ class WorldEvoPPOTrainer(algorithm):
             # Count by episodes. -> Run n more
             # (n=num eval workers).
             return num_workers * self.config["num_envs_per_worker"]
-            
-        def gen_playable_duration_fn(num_playable_worlds=0, **kwargs):
-            """Evolve worlds until one is playable."""
-            return 0 if num_playable_worlds > 0 else 1
 
-        # Preliminary evolution until we have generated a playable world.
-        # TODO: may need to occupy the GPU with something else if this will take a long time. 
-        # E.g. train on repaired worlds.
-        logbook_archive_stats = self.evo_eval(duration_fn=gen_playable_duration_fn)
+        if not self.colearn_cfg.fixed_worlds:
+            # Preliminary evolution until we have generated a playable world.
+            # TODO: may need to occupy the GPU with something else if this will take a long time. 
+            # E.g. train on repaired worlds.
+            logbook_archive_stats = self.evo_eval(duration_fn=gen_playable_duration_fn)
         train_start_time = timer()
         if self.net_train_start_time is None:
             self.net_train_start_time = train_start_time
@@ -592,14 +594,15 @@ class WorldEvoPPOTrainer(algorithm):
 #           if len(training_worlds) == 0:
 #               done_play_phase = True
 
-        training_worlds = {k: ind for k, ind in training_worlds.items() if ind.playability_penalty == 0}
+        training_worlds = {k: ind for k, ind in training_worlds.items() \
+            if isinstance(ind, np.ndarray) or ind.playability_penalty == 0}
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
         replace = True if self.colearn_cfg.fixed_worlds or len(training_worlds) < self.colearn_cfg.world_batch_size\
              else False
         world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
         training_worlds = {k: training_worlds[k] for k in world_keys}
-        set_worlds(training_worlds, self.workers, self.idx_counter, self.colearn_cfg)
+        set_worlds(training_worlds, self.workers, self.idx_counter, self.colearn_cfg, load_now=False)
         step_results = {}
         logbook_stats = {}
 

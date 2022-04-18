@@ -80,7 +80,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
 
-    def queue_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
+    def queue_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None, 
+            load_now: bool = False):
         """Assign a ``next_world`` to the environment, which will be loaded after the next step.
         
         We set flag ``need_world_reset`` to True, so that the next step will return done=True, and the environment will
@@ -110,7 +111,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
         if world_gen_sequences is not None and len(world_gen_sequences) > 0:
             self.world_gen_sequences = {wk: world_gen_sequences[wk] for wk in self.world_key_queue}
 
-        self.need_world_reset = True
+        if load_now:
+            self.need_world_reset = True
 
 # TODO: we should be able to do this in a wrapper.
 #   def set_world(self, world):
@@ -143,8 +145,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
+        print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.has_rendered_world_gen = False
-        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.last_world_key = self.world_key
 
         # We are now resetting and loading the next world. So we switch this flag off.
@@ -270,9 +272,9 @@ class WorldEvolutionWrapper(gym.Wrapper):
             if self.evaluate:
                 pass
 
-            # We have cleared stats, which means we need to assign new world and reset (adding a new entry to stats)
-            if not self.evaluate:
-                assert self.need_world_reset
+#           # We have cleared stats, which means we need to assign new world and reset (adding a new entry to stats)
+#           if not self.evaluate:
+#               assert self.need_world_reset
 
     def render(self, mode='human', pg_width=None, render_player=True):
         pg_width = self.pg_width if pg_width is None else pg_width
