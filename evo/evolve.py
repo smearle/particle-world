@@ -9,7 +9,6 @@ import deap
 from timeit import default_timer as timer
 
 from rl.eval_worlds import evaluate_worlds
-from submodules.qdpy.qdpy.containers import OrderedSet
 from utils import update_individuals
 
 
