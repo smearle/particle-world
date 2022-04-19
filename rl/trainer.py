@@ -584,21 +584,31 @@ class WorldEvoPPOTrainer(algorithm):
             # TODO: may need to occupy the GPU with something else if this will take a long time. 
             # E.g. train on repaired worlds.
             logbook_archive_stats = self.evo_eval(duration_fn=gen_playable_duration_fn)
+
         train_start_time = timer()
+
         if self.net_train_start_time is None:
             self.net_train_start_time = train_start_time
+
         if self.colearn_cfg.fixed_worlds:
+            # Just training on the train set, which is stored in the world archive (kinda weird).
             training_worlds = self.world_archive
-        elif self.net_itr == 0:
-            # On the first iteration, we'll just train on some random individuals (the initial batch stored in the 
-            # `world_evolver`).
-            training_worlds = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
+
+#       elif self.net_itr == 0:
+#           # On the first iteration, we'll just train on some random individuals (the initial batch stored in the 
+#           # `world_evolver`).
+#           training_worlds = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
+
         else:
-            training_worlds = {k: ind for k, ind in enumerate(
-                sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
-            world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=replace)
-            training_worlds = {k: training_worlds[k] for k in world_keys}
-            # else {k: ind for k, ind in enumerate(self.world_evolver.container)}
+            # training_worlds = {k: ind for k, ind in enumerate(
+            #     sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
+            training_worlds = {k: ind for k, ind in enumerate(self.world_evolver.container)}
+            # Randomly sample from the training worlds if we don't have enough.
+            if len(training_worlds) < self.colearn_cfg.world_batch_size:
+                world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=True)
+                training_worlds = {k: training_worlds[k] for k in world_keys}
+
+        # else {k: ind for k, ind in enumerate(self.world_evolver.container)}
 
 #       if self.colearn_cfg.quality_diversity:
 #           # Eliminate impossible worlds
@@ -608,11 +618,11 @@ class WorldEvoPPOTrainer(algorithm):
 #           if len(training_worlds) == 0:
 #               done_play_phase = True
 
+        # Filter out unplayable worlds if applicable.
         training_worlds = {k: ind for k, ind in training_worlds.items() if isinstance(ind, np.ndarray) or ind.playability_penalty == 0}
+
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
-        replace = True if self.colearn_cfg.fixed_worlds or len(training_worlds) < self.colearn_cfg.world_batch_size\
-             else False
         set_worlds(training_worlds, self.workers, self.idx_counter, self.colearn_cfg, load_now=False)
         step_results = {}
         logbook_stats = {}

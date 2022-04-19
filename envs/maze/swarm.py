@@ -220,7 +220,7 @@ class MazeSwarm(NeuralSwarm):
         # All players currently on a goal tile will receive reward
         rewards = (scape[goal_idx, ps[:, 0], ps[:, 1]] == 1)
 
-        # Reward decreases expenontially with time taken to reach goal.
+        # Reward decreases linearly with time taken to reach goal.
         rewards = np.where(rewards, 1 - 0.9 * (n_step / max_steps), 0)
 
         return rewards

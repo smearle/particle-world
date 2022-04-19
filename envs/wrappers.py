@@ -122,7 +122,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def step(self, actions):
         """Step a single-agent environment."""
-        print(f'Stepping world {self.world_key}, step {self.n_step}.')
+        # print(f'Stepping world {self.world_key}, step {self.n_step}.')
         obs, rew, done, info = super().step(actions)
         self.log_stats(rew=rew)
         info.update({'world_key': self.world_key})

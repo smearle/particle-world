@@ -2,10 +2,10 @@
     # The names of the experiments. Add a range of integers to allow for multiple trials of experiments with the same 
     # hyperparameters.
     "exp_names": [
-        # "0",
-        "tweak_nn",
-#         "tweak_nn_1worker",
-#         "2",
+#       "0",
+#       "tweak_nn",
+#       "tweak_nn_1worker",
+#       "2",
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.
