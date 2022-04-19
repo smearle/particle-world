@@ -71,7 +71,7 @@ def main():
     batch_config = namedtuple('batch_config', batch_config.keys())(**batch_config)
 
     exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.ngen_nplay, 
-                            batch_config.npol_qd_objectives, batch_config.fullobs_fov_models))
+                            batch_config.npol_qd_objectives, batch_config.fullobs_fov_models_rotated))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
