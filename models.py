@@ -127,7 +127,7 @@ class CustomRNNModel(TorchRNN, nn.Module):
         # Holds the current "base" output (before logits layer).
         self._features = None
 
-        apply_init_(self.modules())
+#       apply_init_(self.modules())
 
         self.train()
 

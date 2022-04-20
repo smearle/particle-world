@@ -20,7 +20,7 @@ def compute_archive_world_heuristics(archive, trainer):
     # TODO: This flood performs fast parallelized BFS. Validate it against BFS and use it instead!
     flood_model = trainer.get_policy('oracle').model
 
-    get_path_length = lambda ind: flood_model.get_solution_length(th.Tensor(discrete_to_onehot(ind.discrete)[None,...]))
+    get_path_length = lambda ind: flood_model.get_solution_length(th.Tensor(discrete_to_onehot(ind.discrete, ind.n_chan)[None,...]))
     # get_path_length_old = lambda ind: get_solution(ind.discrete)
 
     # Compute path-length of each individual where it has not been computed previously, and store this information with 

@@ -31,9 +31,8 @@ def symmetry(x):
     return (1 - symm / (w * h)).item()
 
 
-def discrete_to_onehot(a):
-    n_val = a.max() + 1
-    return np.eye(n_val)[a].transpose(2, 0, 1)
+def discrete_to_onehot(a, n_chan):
+    return np.eye(n_chan)[a].transpose(2, 0, 1)
 
 
 adj_coords_2d = np.array([

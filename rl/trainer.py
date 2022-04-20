@@ -28,7 +28,7 @@ from ray.rllib.utils import merge_dicts
 from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict, TrainerConfigDict, ResultDict
 from timeit import default_timer as timer
 
-from envs import eval_mazes, full_obs_test_mazes
+from envs import eval_mazes, full_obs_test_mazes, partial_obs_test_mazes, partial_obs_test_mazes_2
 from evo.evolve import WorldEvolver
 from evo.utils import compute_archive_world_heuristics, save
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
@@ -334,6 +334,10 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
             # TODO: modify the behavior of `sample()` on the evo_eval worker so that it gets exactly one episode from each environment?
             "rollout_fragment_length": env.max_episode_steps,
 #           "train_batch_size": env.max_episode_steps * num_envs_per_worker,
+            "env_config": {
+                **env_config,
+                "training_world": False,
+            }
         },
 
         # We *almost* run the right number of episodes s.t. we simulate on each map the same number of times. But there
@@ -346,6 +350,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
                 # If enjoying, then we look at generated levels instead of eval levels. (Because we user trainer.evaluate() when enjoying.)
                 "evaluate": True if not cfg.enjoy else cfg.evaluate,
                 "num_eval_envs": num_eval_envs,
+                "training_world": False,
             },
             "render_env": cfg.render,
             "explore": False if cfg.oracle_policy else True,
@@ -404,7 +409,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         assert ray.get(idx_counter.scratch.remote())
         # Assign envs to worlds
         eval_workers.foreach_worker(
-            lambda worker: worker.foreach_env(lambda env: env.queue_worlds(worlds=eval_mazes, idx_counter=idx_counter)))
+            lambda worker: worker.foreach_env(lambda env: env.queue_worlds(worlds=eval_mazes, idx_counter=idx_counter, load_now=True)))
 
     if is_multiagent_env:
         policy_names = [f'policy_{i}' for i in range(n_policies)]
@@ -494,6 +499,7 @@ class WorldEvoPPOTrainer(algorithm):
             "batch_mode": "complete_episodes",
             "rollout_fragment_length": cfg["rollout_fragment_length"],
             "train_batch_size": cfg["train_batch_size"],
+            "env_config": cfg["env_config"],
         }
 
         return cfg
@@ -525,22 +531,29 @@ class WorldEvoPPOTrainer(algorithm):
         evo_eval_config = merge_dicts(self.config, user_evo_eval_config)
 
         if evo_eval_config["fixed_worlds"]:
-            self.world_archive = full_obs_test_mazes
-            return
+            # self.world_archive = full_obs_test_mazes
+            # self.world_archive = partial_obs_test_mazes
+            self.world_archive = partial_obs_test_mazes_2
 
-        # Create a separate evolution evaluation worker set for evo eval.
-        # If num_workers=0, use the evo eval set's local
-        # worker for evaluation, otherwise, use its remote workers
-        # (parallelized evaluation).
-        self.evo_eval_workers: WorkerSet = self._make_workers(
-            env_creator=self.env_creator,
-            validate_env=None,
-            policy_class=self.get_default_policy_class(self.config),
-            config=evo_eval_config,
-            num_workers=self.config["evo_eval_num_workers"],
-            # Don't even create a local worker if num_workers > 0.
-            local_worker=False,
-            )
+        else:
+            # Create a separate evolution evaluation worker set for evo eval.
+            # If num_workers=0, use the evo eval set's local
+            # worker for evaluation, otherwise, use its remote workers
+            # (parallelized evaluation).
+            self.evo_eval_workers: WorkerSet = self._make_workers(
+                env_creator=self.env_creator,
+                validate_env=None,
+                policy_class=self.get_default_policy_class(self.config),
+                config=evo_eval_config,
+                num_workers=self.config["evo_eval_num_workers"],
+                # Don't even create a local worker if num_workers > 0.
+                local_worker=False,
+                )
+            self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", False)))
+
+        # FIXME: This is a hack. Should be able to use configs for this?
+        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
+        self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", False)))
 
         # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
 
@@ -548,10 +561,13 @@ class WorldEvoPPOTrainer(algorithm):
         eval_start_time = timer()
         logbook_stats = {}
         eval_results = super().evaluate(episodes_left_fn=episodes_left_fn, duration_fn=duration_fn)
-        logbook_stats.update({
-            f'{k}EvalRew': eval_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
-        logbook_stats.update({'elapsed': timer() - eval_start_time})
-        log(self.logbook, logbook_stats, self.net_itr)
+        
+        # No logbook when enjoying or doing eval.
+        if hasattr(self, 'logbook'):
+            logbook_stats.update({
+                f'{k}EvalRew': eval_results["evaluation"][f"episode_reward_{k}"] for k in stat_keys})
+            logbook_stats.update({'elapsed': timer() - eval_start_time})
+            log(self.logbook, logbook_stats, self.net_itr)
 
         return eval_results
 
@@ -756,7 +772,7 @@ class WorldEvoPPOTrainer(algorithm):
                 # New variable, otherwise we'll try to serialize `self` in the workerset lambda in the below function.
                 idx_counter = ray.get_actor("idx_counter")
 
-                set_worlds(playable_worlds, self.evo_eval_workers, idx_counter, self.colearn_cfg)
+                set_worlds(playable_worlds, self.evo_eval_workers, idx_counter, self.colearn_cfg, load_now=True)
 
                 round_ += 1
                 batches = ray.get([

@@ -28,7 +28,7 @@ from tqdm import tqdm
 from args import init_parser
 
 from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_mazes, full_obs_test_mazes, \
-    ghost_action_test_maze
+    ghost_action_test_maze, partial_obs_test_mazes
 from envs.wrappers import make_env
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from evo.utils import compute_archive_world_heuristics, save
@@ -172,7 +172,7 @@ if __name__ == '__main__':
                       'pg_width': pg_width, 'evaluate': cfg.evaluate,
                       'fully_observable': cfg.fully_observable, 'field_of_view': cfg.field_of_view, 'num_eval_envs': 1,
                       'target_reward': cfg.target_reward, 'rotated_observations': cfg.rotated_observations,
-                      'translated_observations': cfg.translated_observations}
+                      'translated_observations': cfg.translated_observations, "training_world": True}
 
     elif cfg.environment_class == 'TouchStone':
         env_is_minerl = True
@@ -330,8 +330,7 @@ if __name__ == '__main__':
     # If training on fixed worlds, select the desired training set.
     if cfg.fixed_worlds:
         # train_worlds = {0: generator.landscape}
-        training_worlds = full_obs_test_mazes
-        # training_worlds = ghost_action_test_maze
+        training_worlds = trainer.world_archive
 
     # If doing co-learning, do any setup that is necessary regardless of whether we're reloading or starting anew.
     else:
@@ -392,7 +391,7 @@ if __name__ == '__main__':
             # TODO: support multiple fixed worlds
             # We'll look at each world independently in our single env
             if cfg.fixed_worlds:
-                worlds = list(full_obs_test_mazes.values())
+                worlds = list(training_worlds.values())
 #               evaluate_worlds(trainer=trainer, worlds=training_worlds,
 #                                     fixed_worlds=cfg.fixed_worlds, render=cfg.render)
                 # particle_trainer.evaluation_workers.foreach_worker(
@@ -541,13 +540,15 @@ if __name__ == '__main__':
     print(f"Seed: {seed}")
 
     # The outer co-learning loop
-    if cfg.parallel_gen_play:
-        toggle_train_player(trainer, train_player=True, cfg=cfg)
-        # TODO: remove this function and initialize most of these objects in the trainer setup function.
-        trainer.set_attrs(world_evolver, idx_counter, logbook, cfg, net_itr, gen_itr, play_itr)
-        for _ in range(cfg.total_play_itrs):
-            trainer.train()
-        sys.exit()
+    toggle_train_player(trainer, train_player=True, cfg=cfg)
+    # TODO: remove this function and initialize most of these objects in the trainer setup function.
+    trainer.set_attrs(world_evolver, idx_counter, logbook, cfg, net_itr, gen_itr, play_itr)
+    for _ in range(cfg.total_play_itrs):
+        trainer.train()
+    sys.exit()
+
+
+### DEPRECATED but pretty OUTER LOOP ###
 
     toggle_train_player(trainer, train_player=False, cfg=cfg)
     done = False

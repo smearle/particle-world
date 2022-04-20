@@ -7,6 +7,7 @@ import numpy as np
 import pygame
 import ray
 from ray.rllib import MultiAgentEnv
+import torch as th
 
 # from minerl.herobraine.env_spec import EnvSpec
 # from envs.minecraft.touchstone import TouchStone
@@ -64,7 +65,9 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world_gen_sequences = None
         self.world_queue = None
         cfg = env_cfg.get('cfg')
-        self.fixed_worlds = cfg.fixed_worlds
+
+        # Is this world being used to train learning player agents?
+        self.training_world = env_cfg["training_world"]
         self.enjoy = cfg.enjoy
 
         # Target reward world should elicit if using min_solvable objective
@@ -81,8 +84,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
 
-    def queue_worlds(self, worlds: dict, idx_counter=None, next_n_pop=None, world_gen_sequences=None, 
-            load_now: bool = False):
+    def queue_worlds(self, worlds: dict, load_now: bool, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
         """Assign a ``next_world`` to the environment, which will be loaded after the next step.
         
         We set flag ``need_world_reset`` to True, so that the next step will return done=True, and the environment will
@@ -90,19 +92,13 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
         # Figure out which world to evaluate.
         # self.world_idx = 0
-        if idx_counter:
+        if idx_counter and not self.training_world:
             self.world_key_queue = ray.get(idx_counter.get.remote(hash(self)))
+            self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue} if not self.evaluate else worlds
         else:
-            # Do we ever use this?
-            self.world_key = np.random.choice(list(worlds.keys()))
-
-        # FIXME: hack
-        # self.unwrapped.world_key = self.world_key
-
-        # Assign this world to myself.
-        self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue} if not self.evaluate else worlds
-        # self.set_world(worlds[self.world_key])
-        # self.worlds = self.unwrapped.worlds = worlds
+            # If training (or something else?), shuffle world keys.
+            self.world_key_queue = list(worlds.keys())
+            self.world_queue = worlds
 
 #       # Support changing number of players per policy between episodes (in case we want to evaluate policies 
 #      #  deterministically, for example).   
@@ -165,7 +161,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             self.world_key = world_keys[(world_keys.index(self.last_world_key) + self.num_eval_envs) % len(self.world_queue)]
             self.set_world(self.world_queue[self.world_key])
         # Randomly select a world from the training set.
-        elif self.fixed_worlds:
+        elif self.training_world:
             self.world_key = np.random.choice(self.world_key_queue)
             self.set_world(self.world_queue[self.world_key])
         # Iterate through the worlds queued for evo-evaluation.
@@ -299,10 +295,11 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # Sometimes world_key is not in world_gen_sequences... presumably due to forced reset for world loading?
         if self.world_gen_sequences is not None and not self.has_rendered_world_gen and self.world_key in self.world_gen_sequences:
             # Render the sequence of worlds that were generated in the generation process.
-            for world in self.world_gen_sequences[self.world_key]:
+            for w in self.world_gen_sequences[self.world_key]:
+                world = np.ones((w.shape[0]+2, w.shape[1]+2), dtype=int) * self.wall_chan
+                world[1:-1, 1:-1] = w
                 # render_landscape(self.screen, -1 * world[1] + 1)
-                sidxs, gidxs = np.argwhere(world == self.start_chan).T, np.argwhere(world == self.goal_chan).T
-                sidxs, gidxs = sidxs.cpu().numpy(), gidxs.cpu().numpy()
+                sidxs, gidxs = np.argwhere(world == self.start_chan), np.argwhere(world == self.goal_chan)
                 world = discrete_to_onehot(world, n_chan=self.n_chan)
                 self.render_level(world, sidxs, gidxs, pg_scale=pg_width/self.width, pg_delay=10, 
                                 mode=mode, render_player=False, enforce_constraints=False)

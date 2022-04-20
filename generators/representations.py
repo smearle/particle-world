@@ -195,6 +195,10 @@ class NCAGenerator(NNGenerator):
     def __init__(self, width, n_chan, n_nca_steps, save_gen_sequence=False):
         self.save_gen_sequence = save_gen_sequence
         self.n_chan = n_chan
+
+        # Ad hoc: constrain the number of spawns/goals to be 1 each. Make this more general?
+        self.n_unique_chan = 2
+
         self.n_nca_steps = n_nca_steps
         nca_model = GradlessNCA(n_chan)
         set_nograd(nca_model)
@@ -228,7 +232,10 @@ class NCAGenerator(NNGenerator):
         x = discrete_to_onehot(self.discrete_world[0], self.n_chan)
         for _ in range(self.n_nca_steps):
             x = self._update(th.Tensor(x).unsqueeze(0))
-            self.discrete_world = x.argmax(1)
+            unique_layers = np.zeros((x.shape[0], self.n_unique_chan, x.shape[2], x.shape[3]))
+            TT()
+            self.discrete_world = np.concatenate(x[:, :self.n_unique_chan, ...].argmax(1), )
+            gen_sequence.append(self.discrete_world)
             if self.save_gen_sequence:
                 gen_sequence.append(self.discrete_world)
             if render:

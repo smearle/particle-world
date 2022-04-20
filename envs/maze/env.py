@@ -430,7 +430,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         self.world_flat = next_world
 
         # Queue up the next world, ready for loading.
-        self.next_world = discrete_to_onehot(next_world)
+        self.next_world = discrete_to_onehot(next_world, self.n_chan)
 
     def step(self, actions):
 
