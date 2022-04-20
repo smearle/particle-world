@@ -138,8 +138,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
+        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         if self.evaluate:
-            # print(f'Resetting world {self.world_key} at step {self.n_step}.')
             pass
         self.last_world_key = self.world_key
 
@@ -158,10 +158,11 @@ class WorldEvolutionWrapper(gym.Wrapper):
             self.world_key = world_keys[(world_keys.index(self.last_world_key) + self.num_eval_envs) % len(self.world_queue)]
             self.set_world(self.world_queue[self.world_key])
         else:
-            self.world_key = self.world_key_queue[0] if self.world_key_queue else None
-            self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
-            if self.world_key:
+            if self.world_key_queue:
+                self.world_key = self.world_key_queue[0]
+                self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
                 self.set_world(self.world_queue.pop(self.world_key))
+            # Not changing world_key to None here is a workaround to allow setting regret loss after reset (which is not avoidable while calling batch. sample() ...?)
 
         # self.next_world = None if not self.enjoy and not self.world_queue else self.world_queue[self.world_key_queue[0]]
         # self.world_queue = self.world_queue[1:] if self.world_queue else []
@@ -175,12 +176,16 @@ class WorldEvolutionWrapper(gym.Wrapper):
     def set_regret_loss(self, losses):
         # If this environment is handled by a training worker, then the we care about `last_world_key`. Something about
         # resetting behavior during evaluation vs. training.
-        if self.world_key not in losses:
-            assert self.evaluate, f"No regret loss for world {self.world_key}.Samples should cover all simultaneously "\
+        if self.evaluate:
+            wk = self.last_world_key
+        else:
+            wk = self.world_key
+        if wk not in losses:
+            assert self.evaluate, f"No regret loss for world {wk}.Samples should cover all simultaneously "\
                 "evaluated worlds except during evaluation."
             return
-        loss = losses[self.world_key]
-        self.regret_losses.append((self.world_key, loss))
+        loss = losses[wk]
+        self.regret_losses.append((wk, loss))
 
     def get_world_stats(self, evaluate=False, quality_diversity=False):
         """
@@ -206,9 +211,12 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
             # We will simulate on this world on future steps, so keep this empty stats dict around.
             if stats_dict["n_steps"] == 0:
-                next_stats.append(stats_dict)
+            #     next_stats.append(stats_dict)
+            #     TT()
+
                 continue
 
+            # print(f"self.regret_losses: {self.regret_losses}\nself.stats: {self.stats}")
             world_key = stats_dict['world_key']
             world_key_2, regret_loss = self.regret_losses[i] if len(self.regret_losses) > 0 else (None, None)
             

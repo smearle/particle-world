@@ -329,11 +329,11 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "evo_eval_num_workers": cfg.n_rllib_workers,
 #       "evo_eval_duration": "auto",
         "evo_eval_config": {
-#           "batch_mode": "complete_episodes",
+            "batch_mode": "complete_episodes",
             "fixed_worlds": cfg.fixed_worlds,
             # TODO: modify the behavior of `sample()` on the evo_eval worker so that it gets exactly one episode from each environment?
-            "rollout_fragment_length": env.max_episode_steps ,
-            "train_batch_size": env.max_episode_steps * num_envs_per_worker,
+            "rollout_fragment_length": env.max_episode_steps,
+#           "train_batch_size": env.max_episode_steps * num_envs_per_worker,
         },
 
         # We *almost* run the right number of episodes s.t. we simulate on each map the same number of times. But there
