@@ -157,7 +157,7 @@ def visualize_archive(cfg, env, grid):
         im_grid = np.zeros((world_im_width * n_world_width, world_im_width * n_world_width, 3))
         for gi, g in enumerate(gg):
             i, j = gi // n_world_width, gi % n_world_width
-            env.set_world(g.discrete)
+            env.queue_worlds({0: g.discrete})
             env.reset()
             im = env.render(mode='rgb', pg_width=world_im_width, render_player=True)
             im_grid[j * world_im_width: (j + 1) * world_im_width,

@@ -510,7 +510,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
 #               onehot_world = discrete_to_onehot(w)
 #               self._render_level(onehot_world, start_idx, goal_idx, pg_scale, pg_delay, mode)
 #       else:
-        self._render_level(self.world, self.start_idx, self.goal_idx, pg_scale, pg_delay, mode)
+        return self._render_level(self.world, self.start_idx, self.goal_idx, pg_scale, pg_delay, mode)
 
     def _render_level(self, world, start_idx, goal_idx, pg_scale, pg_delay, mode):
         render_landscape(self.screen, -1 * world[1] + 1)

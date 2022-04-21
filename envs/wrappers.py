@@ -86,8 +86,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
         if idx_counter:
             self.world_key_queue = ray.get(idx_counter.get.remote(hash(self)))
         else:
-            # Do we ever use this?
-            self.world_key = np.random.choice(list(worlds.keys()))
+            # self.world_key_queue = np.random.choice(list(worlds.keys()))
+            self.world_key_queue = list(worlds.keys())
 
         # FIXME: hack
         # self.unwrapped.world_key = self.world_key
