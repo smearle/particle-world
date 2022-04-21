@@ -328,13 +328,13 @@ if __name__ == '__main__':
     # env.set_trainer(particle_trainer)
 
     # If training on fixed worlds, select the desired training set.
-    if cfg.fixed_worlds:
+    # if cfg.fixed_worlds:
         # train_worlds = {0: generator.landscape}
-        training_worlds = full_obs_test_mazes
+        # training_worlds = world_evolver.world_archive
         # training_worlds = ghost_action_test_maze
 
     # If doing co-learning, do any setup that is necessary regardless of whether we're reloading or starting anew.
-    else:
+    if not cfg.fixed_worlds:
         # Default stats to be performed on worlds in the archive.
         stats = tools.Statistics(lambda ind: ind.fitness.values)
         stats.register("avg", np.mean, axis=0)

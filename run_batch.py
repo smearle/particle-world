@@ -87,6 +87,8 @@ def main():
 #           n_policies = 3
 #       else:
 #           raise NotImplementedError
+
+        fixed_worlds = not quality_diversity and not objective
         
         exp_config = {
             'exp_name': exp_name,
@@ -94,7 +96,7 @@ def main():
             'environment_class': env_cls,
             'evaluate': args.evaluate,
             'field_of_view': field_of_view,
-            'fixed_worlds': False,
+            'fixed_worlds': fixed_worlds,
             'fully_observable': fully_observable,
             'gen_adversarial_worlds': args.gen_adversarial_worlds,
             'gen_phase_len': gen_phase_len,

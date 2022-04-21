@@ -3,8 +3,8 @@
     # hyperparameters.
     "exp_names": [
         # "0",
-        # "2",
-        "debug",
+        "2",
+        # "debug",
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.
@@ -26,10 +26,11 @@
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
     "npol_qd_objectives": [
-        [3, true, null],
+        # [3, true, null],
         # [2, false, "contrastive"],
         # [1, false, "regret"],
         # [1, false, "min_solvable"],
+        [1, false, null],  # This is a fixed-world experiment.
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 
@@ -37,8 +38,8 @@
     # also translating the observation (haven't implemented translation=False case yet)). The ``field_of_view`` is the 
     # number of cells the agent can see in each direction (excluding its own position).
     "fullobs_fov_models_rotated": [
-#       [true, -1, "feedforward", false],
-        [false, 2, "paired", false],
-#       [true, -1, "paired", true],
+        [true, -1, "feedforward", false],
+        # [false, 2, "paired", false],
+        # [true, -1, "paired", true],
     ]
 }

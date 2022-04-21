@@ -176,7 +176,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
     def set_regret_loss(self, losses):
         # If this environment is handled by a training worker, then the we care about `last_world_key`. Something about
         # resetting behavior during evaluation vs. training.
-        if self.evaluate:
+        if self.evaluate or self.enjoy:
             wk = self.last_world_key
         else:
             wk = self.world_key
@@ -315,5 +315,6 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
                 self.stats[-1][f'agent_{k}_reward'] += v
             self.stats[-1]['n_steps'] = self.n_step
         else:
-            assert not self.evaluate
+            pass
+            # assert not self.evaluate
             # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1

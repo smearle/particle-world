@@ -519,7 +519,8 @@ class WorldEvoPPOTrainer(algorithm):
         evo_eval_config = merge_dicts(self.config, user_evo_eval_config)
 
         if evo_eval_config["fixed_worlds"]:
-            self.world_archive = full_obs_test_mazes
+            # self.world_archive = full_obs_test_mazes
+            self.world_archive = eval_mazes
             return
 
         # Create a separate evolution evaluation worker set for evo eval.

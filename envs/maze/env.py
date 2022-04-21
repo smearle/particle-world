@@ -322,7 +322,9 @@ class ParticleMazeEnv(ParticleGymRLlib):
         cfg['swarm_cls'] = cfg.get('swarm_cls', MazeSwarm)
         width = cfg['width']
 
+        # TODO: Refactor this. Make it a single env config setting? Move to wrapper?
         self.evaluate = cfg.get('evaluate')
+
         self.fully_observable = cfg.get('fully_observable')
         self.translated_observations = cfg.get('translated_observations')
         if self.evaluate:
