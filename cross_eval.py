@@ -20,6 +20,7 @@ def vis_cross_eval(exp_configs):
     plot_names = set({})
     bar_names = []
     plot_vals = {}
+    last_exp_train_stats = None
     for exp_config in exp_configs:
         args = namedtuple('args', exp_config.keys())(**exp_config)
         # parser = argparse.ArgumentParser()
@@ -31,8 +32,12 @@ def vis_cross_eval(exp_configs):
             print(f'No directory found for experiment {exp_name}. Skipping.')
             continue
         exp_names.append(exp_name)
-        with open(os.path.join(exp_save_dir, 'train_stats.json'), 'r') as f:
-            exp_train_stats = json.load(f)
+        if not os.path.exists(os.path.join(exp_save_dir, 'train_stats.json')):
+            exp_train_stats = {k: 0 for k in last_exp_train_stats}
+        else:
+            with open(os.path.join(exp_save_dir, 'train_stats.json'), 'r') as f:
+                exp_train_stats = json.load(f)
+                last_exp_train_stats = exp_train_stats
         with open(os.path.join(exp_save_dir, 'eval_stats.json'), 'r') as f:
             exp_eval_stats = json.load(f)
 
@@ -65,7 +70,7 @@ def vis_cross_eval(exp_configs):
 
         data_rows.append([exp_stats[k] if k in exp_stats else None for k in col_headers])
 
-    color_keys = ['min_solvable', 'regret', 'contrastive', 'qd']
+    color_keys = ['min_solvable', 'regret', 'contrastive', 'qd', 'fixedWorlds']
     color_names = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
     color_map = {k: color_names[i] for i, k in enumerate(color_keys)}
     colors = []
