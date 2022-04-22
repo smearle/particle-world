@@ -75,9 +75,14 @@ class CustomRNNModel(TorchRNN, nn.Module):
                  num_outputs,
                  model_config,
                  name,
+
                  actor_fc_layers=(256, 256),
-                 value_fc_layers=(128, 64),
+                 value_fc_layers=(256, 256),
                  conv_filters=64,
+                #  actor_fc_layers=(32, 32),
+                #  value_fc_layers=(32, 32),
+                #  conv_filters=16,
+
                  conv_kernel_size=3,
                  recurrent_hidden_size=256):
         nn.Module.__init__(self)

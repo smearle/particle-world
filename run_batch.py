@@ -132,7 +132,12 @@ def main():
 
     # Ad hoc: request RAM based on network size and number.
     if not fully_observable:
-        job_mem = 16
+        if n_policies == 1:
+            job_mem = 16
+        elif n_policies == 2:
+            job_mem = 32
+        else:
+            job_mem = 48
     else:
         if n_policies == 1:
             job_mem = 16
