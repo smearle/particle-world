@@ -32,7 +32,7 @@ def init_parser():
                         help="Number of RLlib workers. Each uses 1 CPU core. When this is 0, we run a single, local, "
                         "process.")
     parser.add_argument('-ntw', '--n_train_workers', type=int, default=4,)    
-    parser.add_argument('-gpus', '--num_gpus', type=int, default=1, help="How many GPUs to use for training.")
+    parser.add_argument('-gpus', '--num_gpus', type=int, default=0, help="How many GPUs to use for training.")
     parser.add_argument('-ev', '--evaluate', action='store_true', help="Whether to evaluate trained agents/worlds and"
                                                                         "collect relevant stats.")
     parser.add_argument('-qd', '--quality_diversity', action='store_true',

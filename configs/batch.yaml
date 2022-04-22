@@ -3,7 +3,8 @@
     # hyperparameters.
     "exp_names": [
         # "4",
-        "debug",
+        "4_gpu",
+        # "debug",
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.
@@ -25,12 +26,12 @@
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
     "npol_qd_objectives": [
-        # [3, true, null],
+        [3, true, null],
         # [1, false, "regret"],
         # [2, false, "paired"],
         # [2, false, "contrastive"],
         # [3, false, "contrastive"],
-        [1, false, "min_solvable"],
+        # [1, false, "min_solvable"],
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 
