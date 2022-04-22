@@ -344,7 +344,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         dones['__all__'] = self.n_step > 0 and self.n_step == self.max_episode_steps or\
              self.need_world_reset
         if not self.evo_eval_world:
-            dones['__all__'] = dones['__all__'] or np.all(dones.values())
+            dones['__all__'] = dones['__all__'] or np.all(list(dones.values()))
         return dones
 
     def log_stats(self, rews):
