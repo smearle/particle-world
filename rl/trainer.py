@@ -24,6 +24,7 @@ from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
 from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import Logger
 from ray.rllib.agents import Trainer
+from ray.rllib.evaluation.metrics import collect_metrics
 from ray.rllib.evaluation.worker_set import WorkerSet
 from ray.rllib.utils import merge_dicts
 from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict, TrainerConfigDict, ResultDict
@@ -34,7 +35,7 @@ from evo.evolve import WorldEvolver
 from evo.utils import compute_archive_world_heuristics, save
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
-from rl.callbacks import RegretCallbacks
+from rl.callbacks import WorldEvoCallbacks
 from rl.utils import IdxCounter, get_world_qd_stats, set_worlds
 from utils import log, get_solution
 
@@ -142,10 +143,10 @@ def init_trainer(env: Env, idx_counter: IdxCounter, env_config: dict, cfg: Names
         elif cfg.model == 'feedforward':
             ModelCatalog.register_custom_model('feedforward', CustomFeedForwardModel)
             model_config = {'custom_model': 'feedforward'}
-        elif cfg.model == 'paired':
-            # ModelCatalog.register_custom_model('paired', MultigridRLlibNetwork)
-            ModelCatalog.register_custom_model('paired', CustomRNNModel)
-            model_config = {'custom_model': 'paired'}
+        elif cfg.model == 'rnn':
+            # ModelCatalog.register_custom_model('rnn', MultigridRLlibNetwork)
+            ModelCatalog.register_custom_model('rnn', CustomRNNModel)
+            model_config = {'custom_model': 'rnn'}
         # TODO: this seems broken
         elif cfg.model == 'flood':
             ModelCatalog.register_custom_model('flood', FloodMemoryModel)
@@ -190,7 +191,7 @@ def init_trainer(env: Env, idx_counter: IdxCounter, env_config: dict, cfg: Names
         # This means we evaluate 1 episode per eval env.
         # evaluation_num_episodes = num_eval_envs
 
-    regret_callbacks = partial(RegretCallbacks, cfg=cfg)
+    regret_callbacks = partial(WorldEvoCallbacks, cfg=cfg)
     logger_config = {
             "type": "ray.tune.logger.TBXLogger",
             # Optional: Custom logdir (do not define this here
@@ -423,6 +424,7 @@ class WorldEvoPPOTrainer(algorithm):
         self.gen_itr = gen_itr
         self.play_itr = play_itr
         self.net_train_start_time = None
+        self._just_loaded = True
         self.last_agent_timesteps_total = 0
 
     def setup(self, config: PartialTrainerConfigDict):
@@ -682,22 +684,59 @@ class WorldEvoPPOTrainer(algorithm):
 
                 set_worlds(playable_worlds, self.evo_eval_workers, idx_counter, self.colearn_cfg, load_now=True)
 
+                # ep_ids = set({})
+                batches = []
                 generations_done += 1
+
                 # Need to take an extra batch of samples because of the way we queue/load worlds (I think). Results in
-                # duplicate evaluations on first iteration.
-                for i in range(self.colearn_cfg.world_batch_size // max(1, self.colearn_cfg.n_evo_workers) + 1):
+                # duplicate evaluations on first iteration. Kind of feels like we're flying by the seat of our pants 
+                # here and trusting sample. Maybe it will win us over.
+                for i in range(self.colearn_cfg.world_batch_size // max(1, self.colearn_cfg.n_evo_workers) + (0 if self._just_loaded else 1)):
+                # while True:
+
                     # print(f"Sample batch {i}")
-                    batches = ray.get([
+                    batch = ray.get([
                         w.sample.remote() for i, w in enumerate(
                             self.evo_eval_workers.remote_workers())
                     ])
-                    # print(self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda env: env.stats)))
-                world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg,
-                    ignore_redundant=self.colearn_cfg.generator_class in ["NCA"] or self.net_itr == 0)
+                    batches.append(batch)
+                    
+                    # This is ugly. Better way to count episodes?
+                    # [ep_ids.update(set(b.policy_batches['policy_0']['eps_id'])) for b in batch]
+                    # if len(ep_ids) >= self.colearn_cfg.world_batch_size * (1 if self._just_loaded else 2):
+                        # break
+
+                metrics = collect_metrics(remote_workers=self.evo_eval_workers.remote_workers())
+                hist_stats = metrics['hist_stats']
+                world_stats = [{k: hist_stats[k][i] for k in hist_stats} for i in range(len(hist_stats['world_key']))]
+
+                assert len(world_stats) == self.colearn_cfg.world_batch_size, f"{len(world_stats)} != {self.colearn_cfg.world_batch_size}"
+
+                # TODO: Assuming we've only evaluated each world once. Not true if episodes can terminate early. 
+                # Should bring back some logic from `get_world_qd_stats` to aggregate over these metrics).
+                world_stats = {w['world_key']: w for w in world_stats}
+
+                # Get regret / positive value loss metrics from the batches.
+                if self.colearn_cfg.objective_function == "regret":
+                    pos_val_losses = [bb.policy_batches['policy_0']['pos_val_loss'] for b in batches for bb in b]
+                    pos_val_losses = {k: v for pv in pos_val_losses for k, v in pv.items()}
+
+                    assert len(pos_val_losses) == len(world_stats)
+
+                    # [ws.update({'pos_val_loss': pos_val_loss}) for ws, pos_val_loss in zip(world_stats, pos_val_losses)]
+                    [world_stats[k].update(
+                        {'qd_stats': ((self.colearn_cfg._obj_fn(pos_val_losses[k]),), world_stats[k]['qd_stats'][1])}
+                        ) for k in world_stats]
+
+                # world_qd_stats = get_world_qd_stats(world_stats, self.colearn_cfg,
+                    # ignore_redundant=self.colearn_cfg.generator_class in ["NCA"] or self._just_loaded)
+                world_qd_stats = {wk: w['qd_stats'] for wk, w in world_stats.items()}
+
                 # print(world_qd_stats.keys())
             logbook_stats = self.world_evolver.tell(world_batch, world_qd_stats)
             logbook_stats.update({"elapsed": timer() - evo_start_time})
             log(self.logbook, logbook_stats, self.net_itr)
+            self._just_loaded = False
             self.gen_itr += 1
             self.net_itr += 1
 

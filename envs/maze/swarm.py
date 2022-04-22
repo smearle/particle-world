@@ -414,49 +414,6 @@ def contrastive_pop(ps, width):
     return fit
 
 
-def contrastive_fitness(fits):
-    fits = [np.array(f) for f in fits]
-    inter_dist_means = [np.abs(fi[None, ...] - fj[:, None, ...]).mean() for i, fi in enumerate(fits) for j, fj in
-                        enumerate(fits) if i != j]
-
-    # If only one agent per population, do not calculate intra-population distance.
-    if fits[0].shape[0] == 1:
-        inter_dist_mean = np.mean(inter_dist_means)
-        return inter_dist_mean
-
-    intra_dist_means = [np.abs(fi[None, ...] - fi[:, None, ...]).sum() / (fi.shape[0] * (fi.shape[0] - 1)) for fi in
-                        fits]
-    fit = np.mean(inter_dist_means) - np.mean(intra_dist_means)
-    return fit
-
-
-# # Deprecated. We would be accepting fitnesses as an argument, in theory.
-# def fit_dist(pops, scape):
-#     '''n-1 distances in mean fitness, determining the ranking of n populations.'''
-#     assert len(pops) == 2
-#     inter_dist = [eval_fit(pi.ps, scape).mean() - eval_fit(pj.ps, scape).mean()
-#                   for j, pj in enumerate(pops) for pi in pops[j + 1:]]
-
-
-def min_solvable_fitness(rews, max_rew, trg_rew=0):
-    """ A fitness function rewarding levels that result in the least non-zero reward.
-    :param rews: a list of lists of rewards achieved by distinct agents from distinct populations (length 1 or greater)
-    :param max_rew: An uppser bound on the maximum reward achievable by a given population. Note this should not 
-        actually be achievable by the agent, or impossible episodes will rank equal to extremely easy ones. Though the
-        former is worse in principle.
-    :return: a fitness value
-    """
-    assert len(rews) >= 1
-    rews = np.array(rews)
-    rews = np.mean(rews, axis=1)  # get mean per-population rewards
-    if np.all(rews == 0):
-        # return 0
-        return - max_rew
-    else:
-        # return max_rew - np.mean(rews)
-        return - np.abs(np.mean(rews) - trg_rew)
-
-
 def toroidal_distance(a, b, width):
     dist = a[None, ...] - b[:, None, ...]
     shift = -np.sign(dist) * width

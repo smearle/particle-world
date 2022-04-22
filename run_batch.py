@@ -52,7 +52,8 @@ def main():
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-ev', '--evaluate', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
-    parser.add_argument('-new', '--n_evo_workers', type=int, default=8)
+    parser.add_argument('-ne', '--n_envs_per_worker', type=int, default=20)
+    parser.add_argument('-new', '--n_evo_workers', type=int, default=4)
     parser.add_argument('-ntw', '--n_train_workers', type=int, default=4)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
@@ -105,6 +106,7 @@ def main():
             'generator_class': "TileFlipIndividual",
             'load': load or args.gen_adversarial_worlds,
             'model': model,
+            'n_envs_per_worker': args.n_envs_per_worker,
             'n_policies': n_policies,
             'n_evo_workers': n_evo_workers,
             'n_train_workers': n_train_workers,

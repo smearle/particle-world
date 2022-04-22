@@ -26,7 +26,8 @@ def init_parser():
                         help="An evolvable representation of the environment (or environment-generator(?))."
                         )
     parser.add_argument('-r', '--render', action='store_true', help="Render the environment (even during training).")
-    parser.add_argument('-new', '--n_evo_workers', type=int, default=8, 
+    parser.add_argument('-ne', '--n_envs_per_worker', type=int, default=40)
+    parser.add_argument('-new', '--n_evo_workers', type=int, default=4, 
                         help="Number of RLlib workers. Each uses 1 CPU core. When this is 0, we run a single, local, "
                         "process.")
     parser.add_argument('-ntw', '--n_train_workers', type=int, default=4,)    
@@ -48,7 +49,7 @@ def init_parser():
                         help="How many generations to evolve worlds (generator). If -1, run until convergence.")
     parser.add_argument('-pp', '--play_phase_len', type=int, default=1, 
                         help="How many iterations to train the player. If -1, run until convergence.")
-    parser.add_argument('-m', '--model', type=str, default='paired')
+    parser.add_argument('-m', '--model', type=str, default='rnn')
     parser.add_argument('-fov', '--field_of_view', type=int, default=2, help='How far agents can see in each direction.')
     parser.add_argument('-tr', '--target_reward', type=int, default=0, 
                         help="Target reward the world should elicit from player if using the min_solvable objective "

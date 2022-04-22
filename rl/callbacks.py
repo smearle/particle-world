@@ -11,88 +11,135 @@ from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.utils.typing import AgentID, PolicyID
 
 
-class RegretCallbacks(DefaultCallbacks):
+class WorldEvoCallbacks(DefaultCallbacks):
     def __init__(self, cfg, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # print(f"Regret objective: {regret_objective}")
         self.regret_objective = cfg.objective_function == "regret"
         self.n_policies = cfg.n_policies
+        self.quality_diversity = cfg.quality_diversity
 
+    def on_episode_start(self, *, worker: RolloutWorker, base_env: BaseEnv,
+                            policies: Dict[str, Policy], episode: Episode,
+                            env_index: int, **kwargs):
+        # Make sure this episode has just been started (only initial obs
+        # logged so far).
+        assert episode.length == 0, \
+            "ERROR: `on_episode_start()` callback should be called right " \
+            "after env reset!"
+        # print("episode {} (env-idx={}) started.".format(
+            # episode.episode_id, env_index))
+        # episode.user_data["pole_angles"] = []
+        # episode.hist_data["pole_angles"] = []
+        # if env_index == 0:
+            # TT()
+        env = base_env.envs[env_index]
+        env.reset_stats()
+
+    def on_episode_step(self, *, worker: RolloutWorker, base_env: BaseEnv,
+                        policies: Dict[str, Policy], episode: Episode,
+                        env_index: int, **kwargs):
+        # Make sure this episode is ongoing.
+        assert episode.length > 0, \
+            "ERROR: `on_episode_step()` callback should not be called right " \
+            "after env reset!"
+        # pole_angle = abs(episode.last_observation_for()[2])
+        # raw_angle = abs(episode.last_raw_obs_for()[2])
+        # assert pole_angle == raw_angle
+        # episode.user_data["pole_angles"].append(pole_angle)
 
 # TODO: get world stats using this callback!
-#   def on_episode_end(
-#       self,
-#       *,
-#       worker: RolloutWorker,
-#       base_env: BaseEnv,
-#       policies: Dict[str, Policy],
-#       episode: Episode,
-#       env_index: int,
-#       **kwargs
-#   ):
-#       """Runs when an episode is done.
+    def on_episode_end(
+        self,
+        *,
+        worker: RolloutWorker,
+        base_env: BaseEnv,
+        policies: Dict[str, Policy],
+        episode: Episode,
+        env_index: int,
+        **kwargs
+    ):
+        """Runs when an episode is done.
 
-#       Args:
-#           worker: Reference to the current rollout worker.
-#           base_env: BaseEnv running the episode. The underlying
-#               sub environment objects can be retrieved by calling
-#               `base_env.get_sub_environments()`.
-#           policies: Mapping of policy id to policy
-#               objects. In single agent mode there will only be a single
-#               "default_policy".
-#           episode: Episode object which contains episode
-#               state. You can use the `episode.user_data` dict to store
-#               temporary data, and `episode.custom_metrics` to store custom
-#               metrics for the episode.
-#           kwargs: Forward compatibility placeholder.
-#       """
-#       # Check if there are multiple episodes in a batch, i.e.
-#       # "batch_mode": "truncate_episodes".
-#       if worker.policy_config["batch_mode"] == "truncate_episodes":
-#           # Make sure this episode is really done.
-#           assert episode.batch_builder.policy_collectors["policy_0"].batches[
-#               -1
-#           ]["dones"][-1], (
-#               "ERROR: `on_episode_end()` should only be called "
-#               "after episode is done!"
-#           )
-#       pol_batches = [episode.batch_builder.policy_collectors[f"policy_{i}"].batches for i in range(self.n_policies)]
-#       # This may be an empty empisode due to immediate reset for world-loading.
-#       print(dir(episode))
-#       if np.all(pol_batches == 0):
+        Args:
+            worker: Reference to the current rollout worker.
+            base_env: BaseEnv running the episode. The underlying
+                sub environment objects can be retrieved by calling
+                `base_env.get_sub_environments()`.
+            policies: Mapping of policy id to policy
+                objects. In single agent mode there will only be a single
+                "default_policy".
+            episode: Episode object which contains episode
+                state. You can use the `episode.user_data` dict to store
+                temporary data, and `episode.custom_metrics` to store custom
+                metrics for the episode.
+            kwargs: Forward compatibility placeholder.
+        """
+        # Check if there are multiple episodes in a batch, i.e.
+        # "batch_mode": "truncate_episodes".
+        if worker.policy_config["batch_mode"] == "truncate_episodes":
+            # Make sure this episode is really done.
+            assert episode.batch_builder.policy_collectors["policy_0"].batches[
+                -1
+            ]["dones"][-1], (
+                "ERROR: `on_episode_end()` should only be called "
+                "after episode is done!"
+            )
+        env = base_env.envs[env_index]
+
+        # Check for invalid episode length before preprocessing.
+        episode_stats = env.stats
+        assert len(episode_stats) == 1
+        episode_stats = episode_stats[0]
+
+        # If you want to add some of these stats, make sure you don't duplicate keys from `world_stats`.
+        # episode.hist_data.update({k: [v] for k, v in episode_stats.items()})
+
+        # Here we assume we have forced the env to reload by queuing worlds, though we should remove this hack 
+        # altogether eventually.
+        if episode_stats['n_steps'] < 1:
+            env.stats = []
+            return
+
+        world_stats = env.get_world_stats(quality_diversity=self.quality_diversity)
+        # TODO: remove flusing behavior from get_world_stats and do it here
+        env.stats = []
+        assert len(world_stats) == 1
+        world_stats = world_stats[0]
+
+        # TODO: flatten QD stats (reshape them outside), so that it will be written to tensorboard automatically.
+        episode.hist_data.update({k: [v] for k, v in world_stats.items()})
+
+    def on_postprocess_trajectory(
+            self, *, worker: "RolloutWorker", episode: Episode,
+            agent_id: AgentID, policy_id: PolicyID,
+            policies: Dict[PolicyID, Policy], postprocessed_batch: SampleBatch,
+            original_batches: Dict[AgentID, SampleBatch], **kwargs) -> None:
+        """Called immediately after a policy's postprocess_fn is called.
+
+        You can use this callback to do additional postprocessing for a policy,
+        including looking at the trajectory data of other agents in multi-agent
+        settings.
+
+        Args:
+            worker: Reference to the current rollout worker.
+            episode: Episode object.
+            agent_id: Id of the current agent.
+            policy_id: Id of the current policy for the agent.
+            policies: Mapping of policy id to policy objects. In single
+                agent mode there will only be a single "default_policy".
+            postprocessed_batch: The postprocessed sample batch
+                for this agent. You can mutate this object to apply your own
+                trajectory postprocessing.
+            original_batches: Mapping of agents to their unpostprocessed
+                trajectory data. You should not mutate this object.
+            kwargs: Forward compatibility placeholder.
+        """
+#       if not self.regret_objective:
 #           return
-#       envs_world_stats = [env.get_world_stats() for env in base_env.get_sub_environments()]
-#       ep_infos = [agent_batch["infos"] for batch in pol_batches for agent_batch in batch]
 
-#   def on_postprocess_trajectory(
-#           self, *, worker: "RolloutWorker", episode: Episode,
-#           agent_id: AgentID, policy_id: PolicyID,
-#           policies: Dict[PolicyID, Policy], postprocessed_batch: SampleBatch,
-#           original_batches: Dict[AgentID, SampleBatch], **kwargs) -> None:
-#       """Called immediately after a policy's postprocess_fn is called.
-
-#       You can use this callback to do additional postprocessing for a policy,
-#       including looking at the trajectory data of other agents in multi-agent
-#       settings.
-
-#       Args:
-#           worker: Reference to the current rollout worker.
-#           episode: Episode object.
-#           agent_id: Id of the current agent.
-#           policy_id: Id of the current policy for the agent.
-#           policies: Mapping of policy id to policy objects. In single
-#               agent mode there will only be a single "default_policy".
-#           postprocessed_batch: The postprocessed sample batch
-#               for this agent. You can mutate this object to apply your own
-#               trajectory postprocessing.
-#           original_batches: Mapping of agents to their unpostprocessed
-#               trajectory data. You should not mutate this object.
-#           kwargs: Forward compatibility placeholder.
-#       """
-#       pass
-
- #      advantages = postprocessed_batch["advantages"]
- #      pos_val_loss = np.mean(np.abs(advantages))
+#       advantages = postprocessed_batch["advantages"]
+#       pos_val_loss = np.mean(np.abs(advantages))
 ##      value_targets = postprocessed_batch["value_targets"]
 ##      vf_preds = postprocessed_batch["vf_preds"]
 ##      vf_preds
@@ -126,6 +173,12 @@ class RegretCallbacks(DefaultCallbacks):
         
         This is achieved by computing positive value loss, as in ACCEL (https://arxiv.org/pdf/2203.01302.pdf) and PLR 
         (https://arxiv.org/pdf/2010.03934.pdf)"""
+
+        # Skipping training and eval worlds. Note also that mutating the samples as at the end of this function seems
+        # to be illegal.
+        if not worker.foreach_env(lambda env: env.evo_eval_world)[0]:
+            return
+
         if not self.regret_objective:
             # print(f"Regret objective is not enabled on worker {worker}.")
             return
@@ -145,7 +198,6 @@ class RegretCallbacks(DefaultCallbacks):
         unique_keys = set(world_keys)
         pos_val_losses = {}
 
-
         for wk in unique_keys:
             idxs = np.argwhere(world_keys == wk)
 #           w_val_trgs, w_vf_preds = value_targets[idxs], vf_preds[idxs]
@@ -154,13 +206,18 @@ class RegretCallbacks(DefaultCallbacks):
 #           pos_val_loss = np.mean(np.clip(w_val_trgs - w_vf_preds, 0, None))
 
             w_advantages = advantages[idxs]
-            pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
+            # pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
+
+            # Wait, no, I think we take the average magnitude of the GAE?
+            pos_val_losses[wk] = np.mean(np.abs(w_advantages))
 
         # print(f"Regret objective is {pos_val_losses}. Passing to worker environments.")
 
         # TODO: should be able to pass this info back more naturally somehow, as below
-        # pol_batch['pos_val_losses'] = pos_val_losses
+        # FIXME: This breaks training batches.
+        pol_batch['pos_val_loss'] = pos_val_losses
 
         # For now, just giving it back to environments to be collected later
-        worker.foreach_env(lambda env: env.set_regret_loss(pos_val_losses))
+        # TT()
+        # worker.foreach_env(lambda env: env.set_regret_loss(pos_val_losses))
 

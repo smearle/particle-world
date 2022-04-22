@@ -11,7 +11,7 @@ import torch as th
 
 # from minerl.herobraine.env_spec import EnvSpec
 # from envs.minecraft.touchstone import TouchStone
-from envs.maze.swarm import min_solvable_fitness, contrastive_fitness, regret_fitness
+from evo.objectives import min_solvable_fitness, contrastive_fitness, regret_fitness, paired_fitness
 from envs.minecraft.wrappers import MineRLWrapper
 from generators.representations import render_landscape
 from utils import discrete_to_onehot
@@ -152,7 +152,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def reset(self):
         """Reset the environment. This will also load the next world."""
-        # print(f'Resetting world {self.world_key} at step {self.n_step}.')
+        # if self.evo_eval_world:
+            # print(f'Resetting world {self.world_key} at step {self.n_step}.')
         self.has_rendered_world_gen = False
         self.last_world_key = self.world_key
 
@@ -186,7 +187,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # self.world_queue = self.world_queue[1:] if self.world_queue else []
 
         obs = super().reset()
-        self.reset_stats()
+        # self.reset_stats()
         self.n_step = 0
 
         return obs
@@ -199,31 +200,23 @@ class WorldEvolutionWrapper(gym.Wrapper):
         else:
             wk = self.world_key
         if wk not in losses:
-            assert self.evaluate, f"No regret loss for world {wk}.Samples should cover all simultaneously "\
-                "evaluated worlds except during evaluation."
+            # print(f"World key: {self.world_key}. Last world key: {self.last_world_key}. Loss keys: {losses.keys()}")
+            # assert self.evaluate, f"No regret loss for world {wk}.Samples should cover all simultaneously "\
+            #     "evaluated worlds except during evaluation."
             return
         loss = losses[wk]
         self.regret_losses.append((wk, loss))
 
-    def get_world_stats(self, evaluate=False, quality_diversity=False):
+    def get_world_stats(self, quality_diversity=False):
         """
         Return the fitness (and behavior characteristics) achieved by the world after an episode of simulation. Note
         that this only returns the fitness of the latest episode.
         """
         # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
         # reset() call occurs on the first step (resulting in max_steps - 1).
-        if not evaluate:
-            # print(f'Get world {self.world_key} stats at step {self.n_step} with max step {self.max_episode_steps}')
-            # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
-            pass
 
         world_stats = []
         next_stats = []
-
-        if not evaluate:
-            # assert len(self.stats) == cfg.n_eps_on_train // cfg.n_eps_per_world 
-            # print(f'stats: {self.stats}')
-            pass
 
         for i, stats_dict in enumerate(self.stats):
 
@@ -236,12 +229,12 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
             # print(f"self.regret_losses: {self.regret_losses}\nself.stats: {self.stats}")
             world_key = stats_dict['world_key']
-            world_key_2, regret_loss = self.regret_losses[i] if len(self.regret_losses) > 0 else (None, None)
+            # world_key_2, regret_loss = self.regret_losses[i] if len(self.regret_losses) > 0 else (None, None)
             
             # FIXME: Mismatched world keys between agent_rewards and regret_losses during evaluation. Ignoring so we can
             #  render all eval mazes. This is fixed yeah?
-            if not self.evaluate and world_key_2:  # i.e. we have a regret loss
-                assert world_key == world_key_2
+            # if not self.evaluate and world_key_2:  # i.e. we have a regret loss
+                # assert world_key == world_key_2
 
             # Convert agent to policy rewards. Get a list of lists, where outer list is per-policy, and inner list is 
             # per-agent reward.
@@ -258,7 +251,11 @@ class WorldEvolutionWrapper(gym.Wrapper):
             else:
                 # Objective and placeholder measures
                 if self.obj_fn_str == 'regret':
-                    obj = self.objective_function(regret_loss)
+                    # obj = self.objective_function(regret_loss)
+
+                    #Placeholder regret objective as we move this logic outside the environment.
+                    obj = None
+
                 # If we have no objective function (i.e. evaluating on fixed worlds), objective is None.
                 elif not self.objective_function:
                     obj = 0
@@ -344,10 +341,10 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
     def get_dones(self, dones):
         assert '__all__' not in dones
-#       if not self.evo_eval_world:
-#           dones['__all__'] = np.all(list(dones.values()))
         dones['__all__'] = self.n_step > 0 and self.n_step == self.max_episode_steps or\
              self.need_world_reset
+        if not self.evo_eval_world:
+            dones['__all__'] = dones['__all__'] or np.all(dones.values())
         return dones
 
     def log_stats(self, rews):

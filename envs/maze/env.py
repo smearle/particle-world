@@ -13,7 +13,7 @@ from ray.rllib import MultiAgentEnv
 # from envs import eval_mazes
 from generators.representations import render_landscape
 from generators.objectives import max_reward_fitness
-from envs.maze.swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop, contrastive_fitness, min_solvable_fitness
+from envs.maze.swarm import MazeSwarm, NeuralSwarm, GreedySwarm, contrastive_pop
 from utils import discrete_to_onehot
 
 player_colors = [
@@ -117,20 +117,20 @@ class ParticleSwarmEnv(object):
         # return arr
         return True
 
-    def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=0):
-        pg_delay = 50
-        self.reset()
-        for i in range(n_steps):
-            self.step_swarms()
-            if render:
-                self.screen = screen
-                self.render(screen, pg_delay)
-        # p1, p2 = self.swarms[0], self.swarms[1]
-        # objs = fit_dist([p1, p2], self.world)
-        ps1, ps2 = self.swarms[0].ps, self.swarms[1].ps
-        objs = contrastive_pop([swarm.ps for swarm in self.swarms], self.width)
-        bcs = ps1.mean(0)
-        return objs, bcs
+    # def simulate(self, n_steps, generator, render=False, screen=None, pg_scale=1, pg_delay=0):
+    #     pg_delay = 50
+    #     self.reset()
+    #     for i in range(n_steps):
+    #         self.step_swarms()
+    #         if render:
+    #             self.screen = screen
+    #             self.render(screen, pg_delay)
+    #     # p1, p2 = self.swarms[0], self.swarms[1]
+    #     # objs = fit_dist([p1, p2], self.world)
+    #     ps1, ps2 = self.swarms[0].ps, self.swarms[1].ps
+    #     objs = contrastive_pop([swarm.ps for swarm in self.swarms], self.width)
+    #     bcs = ps1.mean(0)
+    #     return objs, bcs
 
     def set_landscape(self, landscape):
         assert landscape is not None

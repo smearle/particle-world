@@ -100,7 +100,7 @@ if __name__ == '__main__':
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
     # worker for training simulation so as not to waste CPUs).
-    cfg.n_envs_per_worker = 40
+    # cfg.n_envs_per_worker = 40
     cfg.n_rllib_envs = n_evo_workers * cfg.n_envs_per_worker  # Note that this effectively sets n_envs_per_worker to 40.
     # cfg.n_rllib_envs = 400
     cfg.n_eps_on_train = cfg.n_rllib_envs
@@ -203,12 +203,12 @@ if __name__ == '__main__':
 
     if (cfg.evaluate or cfg.enjoy) and cfg.render:
         cfg.n_rllib_envs = 1
-    # else:
-    #     # cfg.n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
-    #         # else (1 if env_is_minerl else n_envs_per_worker)
+    else:
+        # cfg.n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
+            # else (1 if env_is_minerl else n_envs_per_worker)
 
-    #     # NOTE: this is also the number of episodes we will train players on.
-    #     assert cfg.n_envs_per_worker == cfg.n_rllib_envs // n_evo_workers
+        # NOTE: this is also the number of episodes we will train players on.
+        assert cfg.n_envs_per_worker == cfg.n_rllib_envs // n_evo_workers
 
     register_env('world_evolution_env', make_env)
 
@@ -236,6 +236,9 @@ if __name__ == '__main__':
 
     # Dummy env, to get various parameters defined inside the env, or for debugging.
     env = make_env(env_config)
+
+    # The callable objective function.
+    cfg._obj_fn = env.objective_function
 
     n_sim_steps = env.max_episode_steps
     unique_chans = env.unique_chans
