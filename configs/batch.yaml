@@ -4,7 +4,7 @@
     "exp_names": [
         "4",
         # "4_gpu",
-        # "test",
+        # "debug",
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.
