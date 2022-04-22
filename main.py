@@ -34,8 +34,8 @@ from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D,
 from evo.utils import compute_archive_world_heuristics, save
 from evo.evolve import WorldEvolver
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
-from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, train_players, toggle_exploration
-from rl.eval_worlds import evaluate_worlds
+# from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, train_players, toggle_exploration
+from rl.trainer import init_trainer, toggle_train_player
 from rl.utils import IdxCounter, set_worlds
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, load_config, log
@@ -93,15 +93,15 @@ if __name__ == '__main__':
     pg_width = 500
     pg_scale = pg_width / cfg.width
     cfg.save_interval = 100
-    cfg.archive_size = 1024 if not cfg.quality_diversity else 2500
+    cfg.archive_size = 4000 if not cfg.quality_diversity else 8100
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
-    n_workers = (1 if cfg.n_rllib_workers == 0 else cfg.n_rllib_workers)
+    n_evo_workers = (1 if cfg.n_evo_workers == 0 else cfg.n_evo_workers)
 
     # Number of episodes for player training = n_rllib_envs / n_rllib_workers = n_envs_per_worker (since we use local
     # worker for training simulation so as not to waste CPUs).
-    cfg.n_envs_per_worker = 10
-    cfg.n_rllib_envs = n_workers * cfg.n_envs_per_worker  # Note that this effectively sets n_envs_per_worker to 40.
+    cfg.n_envs_per_worker = 40
+    cfg.n_rllib_envs = n_evo_workers * cfg.n_envs_per_worker  # Note that this effectively sets n_envs_per_worker to 40.
     # cfg.n_rllib_envs = 400
     cfg.n_eps_on_train = cfg.n_rllib_envs
     cfg.world_batch_size = cfg.n_eps_on_train 
@@ -109,17 +109,17 @@ if __name__ == '__main__':
     # Whether to run rounds of player-training and generator-evolution in parallel.
     cfg.parallel_gen_play = True
 
-    # We must have the same number of envs per worker, and want to meet our target number of envs exactly.
-    assert cfg.n_rllib_envs % n_workers == 0, \
-        f"n_rllib_envs ({cfg.n_rllib_envs}) must be divisible by n_workers ({n_workers})"
+    # # We must have the same number of envs per worker, and want to meet our target number of envs exactly.
+    # assert cfg.n_rllib_envs % n_evo_workers == 0, \
+    #     f"n_rllib_envs ({cfg.n_rllib_envs}) must be divisible by n_workers ({n_evo_workers})"
 
-    # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
-    assert cfg.world_batch_size % cfg.n_eps_on_train == 0, \
-        f"world_batch_size ({cfg.world_batch_size}) must be divisible by n_eps_on_train ({cfg.n_eps_on_train})"
+    # # We don't want any wasted episodes when we call rllib_evaluate_worlds() to evaluate worlds.
+    # assert cfg.world_batch_size % cfg.n_eps_on_train == 0, \
+    #     f"world_batch_size ({cfg.world_batch_size}) must be divisible by n_eps_on_train ({cfg.n_eps_on_train})"
 
-    # We don't want any wasted episodes when we call train() to evaluate worlds.
-    assert cfg.n_eps_on_train % cfg.n_rllib_envs == 0, \
-        f"n_eps_on_train ({cfg.n_eps_on_train}) must be divisible by n_rllib_envs ({cfg.n_rllib_envs})"
+    # # We don't want any wasted episodes when we call train() to evaluate worlds.
+    # assert cfg.n_eps_on_train % cfg.n_rllib_envs == 0, \
+    #     f"n_eps_on_train ({cfg.n_eps_on_train}) must be divisible by n_rllib_envs ({cfg.n_rllib_envs})"
 
     # Whether to use rllib trainer to perform evaluations of evolved worlds.
     cfg.rllib_eval = True
@@ -203,12 +203,12 @@ if __name__ == '__main__':
 
     if (cfg.evaluate or cfg.enjoy) and cfg.render:
         cfg.n_rllib_envs = 1
-    else:
-        # cfg.n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
-            # else (1 if env_is_minerl else n_envs_per_worker)
+    # else:
+    #     # cfg.n_rllib_envs = cfg.n_rllib_workers * n_envs_per_worker if cfg.n_rllib_workers > 1 \
+    #         # else (1 if env_is_minerl else n_envs_per_worker)
 
-        # NOTE: this is also the number of episodes we will train players on.
-        assert cfg.n_envs_per_worker == cfg.n_rllib_envs // n_workers
+    #     # NOTE: this is also the number of episodes we will train players on.
+    #     assert cfg.n_envs_per_worker == cfg.n_rllib_envs // n_evo_workers
 
     register_env('world_evolution_env', make_env)
 
@@ -547,92 +547,3 @@ if __name__ == '__main__':
         trainer.train()
     sys.exit()
 
-
-### DEPRECATED but pretty OUTER LOOP ###
-
-    toggle_train_player(trainer, train_player=False, cfg=cfg)
-    done = False
-    while not done:
-
-        # Run environment evolution
-        done_gen_phase = False
-        while not done_gen_phase:
-            logbook_stats = world_evolver.evolve()
-            gen_itr += 1
-            done_gen_phase = get_done_gen_phase(world_evolver, gen_itr, cfg)
-
-            if done_gen_phase:
-                save(archive=archive, gen_itr=gen_itr, net_itr=net_itr, play_itr=play_itr, logbook=logbook,
-                                save_dir=cfg.save_dir)
-                mean_path_length = compute_archive_world_heuristics(archive=archive, trainer=trainer)
-                stat_keys = ['mean', 'min', 'max']  # , 'std]
-                logbook_stats.update({f'{k}Path': mean_path_length[f'{k}_path_length'] for k in stat_keys})
-
-            elif gen_itr % cfg.save_interval == 0:
-                save(archive=archive, play_itr=play_itr, gen_itr=gen_itr, net_itr=net_itr, logbook=logbook, save_dir=cfg.save_dir)
-
-            log(logbook, logbook_stats, net_itr)
-            net_itr += 1
-
-        if cfg.gen_adversarial_worlds:
-            # Then generator evolution has stagnated, so we are done.
-            visualize_archive(cfg, env, archive)
-            print('Done generating adversarial worlds.')
-            sys.exit()
-
-        # Run player training
-        # TODO: account for player staleness/optimality?
-        done_play_phase = False
-        training_worlds = sorted(archive, key=lambda i: i.fitness.values[0], reverse=True)
-
-        if cfg.quality_diversity:
-            # Eliminate impossible worlds
-            training_worlds = [t for t in training_worlds if not t.features == [0, 0]]
-
-            # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
-            if len(training_worlds) == 0:
-                done_play_phase = True
-
-        # Use duplicate worlds if we don't have enough to match the number of rllib environments.
-        training_worlds *= math.ceil(cfg.world_batch_size / len(training_worlds))
-
-        while not done_play_phase:
-            toggle_train_player(trainer, train_player=True, cfg=cfg)
-            logbook_stats = train_players(training_worlds, trainer, cfg, idx_counter)
-            log(logbook, logbook_stats, net_itr)
-            play_itr += 1
-            done_play_phase = get_done_play_phase(play_itr, cfg)
-            done = play_itr >= cfg.total_play_itrs
-            net_itr += 1
-
-#       # Now that we've trained the player, update the generator-trainer before the next round of generator evolution.
-#       sync_player_policies(gen_trainer, play_trainer, cfg)
-
-        # Only doing this in case gen_trainer = play_trainer (i.e. not parallel). Can remove this once parallel evo/train
-        # is implemented in separate loop (presumably).
-        toggle_train_player(trainer, train_player=False, cfg=cfg)
-
-        logbook_stats = world_evolver.reevaluate_elites()
-        log(logbook, logbook_stats, net_itr)
-
-    # Tie off some loose ends once co-learning completes.
-    if world_evolver.final_filename != None and world_evolver.final_filename != "":
-        world_evolver.save(os.path.join(world_evolver.log_base_path, world_evolver.final_filename))
-    total_elapsed = timer() - world_evolver.start_time
-
-    # Print results info
-    print(f"Total elapsed: {world_evolver.total_elapsed}\n")
-    print(archive.summary())
-    # print("Best ever fitness: ", container.best_fitness)
-    # print("Best ever ind: ", container.best)
-    # print("%s filled bins in the grid" % (grid.size_str()))
-    ##print("Solutions found for bins: ", grid.solutions)
-    # print("Performances grid: ", grid.fitness)
-    # print("Features grid: ", grid.features)
-
-    # Create plot of the performance grid
-    plot_path = os.path.join(log_base_path, "performancesGrid.pdf")
-    plotGridSubplots(archive.quality_array[..., 0], plot_path, plt.get_cmap("nipy_spectral_r"), features_domain,
-                     cfg.fitness_domain[0], nbTicks=None)
-    print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
-    print("All results are available in the '%s' pickle file." % world_evolver.final_filename)

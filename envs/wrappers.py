@@ -65,9 +65,10 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world_gen_sequences = None
         self.world_queue = None
         cfg = env_cfg.get('cfg')
+        self.training_world = self.evaluation_world = self.evo_eval_world = False
 
         # Is this world being used to train learning player agents?
-        self.training_world = env_cfg["training_world"]
+        # self.training_world = env_cfg["training_world"]
         self.enjoy = cfg.enjoy
 
         # Target reward world should elicit if using min_solvable objective
@@ -92,13 +93,22 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
         # Figure out which world to evaluate.
         # self.world_idx = 0
-        if idx_counter and not self.training_world:
+        if idx_counter:
             self.world_key_queue = ray.get(idx_counter.get.remote(hash(self)))
             self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue} if not self.evaluate else worlds
         else:
             # If training (or something else?), shuffle world keys.
             self.world_key_queue = list(worlds.keys())
             self.world_queue = worlds
+
+#       if self.training_world:
+#           env_type = "Training"
+#       elif self.evaluation_world:
+#           env_type = "Evaluation"
+#       elif self.evo_eval_world:
+#           env_type = "EvoEval"
+#       print(f"{env_type} env. Current world: {self.world_key}.\nQueued worlds: {self.world_key_queue}")
+#       if self.training_world:
 
 #       # Support changing number of players per policy between episodes (in case we want to evaluate policies 
 #      #  deterministically, for example).   
@@ -150,7 +160,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.need_world_reset = False
 
         # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
-        if self.evaluate:
+        if self.evaluation_world:
             # 0th world key is that assigned by the global idx_counter. This ensures no two eval envs will be 
             # evaluating the same world if it can be avoided. 
             self.last_world_key = self.world_key_queue[0] if self.last_world_key is None else self.last_world_key
@@ -324,13 +334,21 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
         self.validate_stats()
         self.log_stats(rews=rews)
-        dones['__all__'] = dones['__all__'] or self.need_world_reset
 #       if dones['__all__']:
 #           print(f'world {self.world_key} is done.')
         infos.update({agent_k: {'world_key': self.world_key, 'agent_id': agent_k} for agent_k in obs})
+        dones = self.get_dones(dones)
         self.n_step += 1
 
         return obs, rews, dones, infos
+
+    def get_dones(self, dones):
+        assert '__all__' not in dones
+#       if not self.evo_eval_world:
+#           dones['__all__'] = np.all(list(dones.values()))
+        dones['__all__'] = self.n_step > 0 and self.n_step == self.max_episode_steps or\
+             self.need_world_reset
+        return dones
 
     def log_stats(self, rews):
         """Log rewards for each agent on each world.

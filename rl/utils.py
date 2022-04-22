@@ -45,7 +45,7 @@ class IdxCounter:
         self.world_keys = None
 
     def get(self, hsh):
-        world_key_queue = self.hashes_to_idxs[hsh]
+        world_key_queue = self.hashes_to_keys[hsh]
 
         if not world_key_queue:
             raise Exception("No world keys provided.")
@@ -56,32 +56,34 @@ class IdxCounter:
         # For inference
         self.count = i
 
-    def set_idxs(self, idxs):
+    def set_keys(self, keys):
         self.count = 0
-        self.world_keys = idxs
+        self.world_keys = keys
 
     def set_hashes(self, hashes):
         """
         Note that we may assign multiple worlds to a single environment, or a single world to multiple environments.
 
+        We will only assign a single world to multiple environments if duplicate keys were provided to `set_idxs()`.
+
         Args:
             hashes: A list of hashes, one per environment object.
         """
-        hashes_to_idxs = {h: [] for h in hashes}
+        hashes_to_keys = {h: [] for h in hashes}
 
         for i, wk in enumerate(self.world_keys):
             h = hashes[i % len(hashes)]
-            hashes_to_idxs[h].append(wk)
+            hashes_to_keys[h].append(wk)
         
-        self.hashes_to_idxs = hashes_to_idxs
+        self.hashes_to_keys = hashes_to_keys
 
     def scratch(self):
-        return self.hashes_to_idxs
+        return self.hashes_to_keys
 
 
-def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace, load_now: bool = False):
+def set_worlds(worlds: dict, workers: WorkerSet, idx_counter: IdxCounter, cfg: Namespace, load_now: bool = False):
     """Assign worlds to environments to be loaded at next reset."""
-    idxs = np.random.permutation(list(worlds.keys()))
+    keys = np.random.permutation(list(worlds.keys()))
     world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
         if cfg.render else None
 
@@ -95,9 +97,9 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter, cfg: Namespace, lo
     n_envs = len(hashes)
 
     # Pad the list of indices with duplicates in case we have more than enough eval environments
-    idxs = np.repeat(idxs, math.ceil(n_envs / len(idxs)))
+    keys = np.repeat(keys, math.ceil(n_envs / len(keys)))
 
-    idx_counter.set_idxs.remote(idxs)
+    idx_counter.set_keys.remote(keys)
     idx_counter.set_hashes.remote(hashes)
 
     # FIXME: Sometimes hash-to-idx dict is not set by the above call?

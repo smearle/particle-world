@@ -11,6 +11,7 @@ from pdb import set_trace as TT
 import pprint
 import shutil
 from typing import Iterable
+from gym import Env
 
 import numpy as np
 import ray
@@ -34,88 +35,14 @@ from evo.utils import compute_archive_world_heuristics, save
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import RegretCallbacks
-from rl.eval_worlds import evaluate_worlds
-from rl.utils import get_world_qd_stats, set_worlds
+from rl.utils import IdxCounter, get_world_qd_stats, set_worlds
 from utils import log, get_solution
 
 
 stat_keys = ["mean", "min", "max"]  # , 'std]  # Would need to compute std manually
 
 
-def train_players(worlds, trainer, cfg, idx_counter=None):
-    """Train player-agents using the rllib trainer.
-
-    :param net_itr: (int) Counter for net iterations of algorithm (including both player training and world evolution 
-                    steps.) 
-    :param play_phase_len: (int) Number of player training steps (calls to train.train()) to perform.
-    :param worlds: (dict) Dictionary of worlds to train on, ({world_key: world}).
-    :param trainer: (Trainer) RLLib trainer.
-    :param cfg: Object with configuration parameters as attributes.
-    :param idx_counter: (Actor) ray actor accessed by parallel rllib envs to assign them unique world_keys.
-    :param logbook: (Logbook) qdpy logbook to record (evolution and) training stats.
-    """
-#   trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
-    # toggle_exploration(trainer, explore=True, n_policies=n_policies)
-    i = 0
-#   staleness_window = 10
-#   done_training = False
-#   recent_rewards = np.empty(staleness_window)
-#   while not done_training:
-    start_time = timer()
-    # Saving before training, so that we have a checkpoint of the model after the evolution phase, and before model
-    # weights start changing.
-    if i % 10 == 0:
-        save_model(trainer, cfg.save_dir)
-    replace = True if cfg.fixed_worlds else False
-    if isinstance(worlds, dict):
-        world_keys = list(worlds.keys())
-    else:
-        assert isinstance(worlds, Iterable)
-        world_keys = list(range(len(worlds)))
-    world_keys = np.random.choice(world_keys, cfg.world_batch_size, replace=replace)
-    # curr_lands = np.array(landscapes)[world_keys]
-    curr_worlds = [worlds[wk] for wk in world_keys]
-    worlds = {i: l for i, l in enumerate(curr_worlds)}
-
-    # Get world heuristics on first iteration only, since they won't change after this inside training loop
-    # calc_world_heuristics = (i == 0)
-
-    rl_stats, qd_stats, logbook_stats = evaluate_worlds(
-        trainer=trainer, worlds=worlds, cfg=cfg, idx_counter=idx_counter, is_training_player=True,
-        start_time=start_time)
-
-    return logbook_stats
-#   recent_rewards[:-1] = recent_rewards[1:]
-#   recent_rewards[-1] = rl_stats['episode_reward_mean']
-
-#       if i == 0:
-#           mean_path_length = logbook_stats['meanPath']
-#           max_mean_reward = (n_sim_steps - mean_path_length) * n_pop
-
-    # End training if within a certain margin of optimal performance
-#       done_training = recent_rewards[-1] >= 0.9 * max_mean_reward
-#   done_training = False
-
-    # if play_phase_len == -1:
-        # if i >= staleness_window:
-            # running_std = np.std(recent_rewards)
-            # print(f'Running reward std dev: {running_std}')
-            # done_training = running_std < 1.0 or i >= 100
-        # else:
-            # done_training = False
-#   if not cfg.fixed_worlds:
-#       logbook.record(**logbook_stats)
-#       print(logbook.stream)
-#   i += 1
-#   if play_phase_len != -1:
-#       done_training = done_training or i >= play_phase_len
-#   net_itr += 1
-    # toggle_exploration(trainer, explore=False, n_policies=n_policies)
-#   trainer.workers.local_worker().set_policies_to_train([])
-#   return net_itr
-
-
-def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: bool=False, play_only: bool=False):
+def init_trainer(env: Env, idx_counter: IdxCounter, env_config: dict, cfg: Namespace, gen_only: bool=False, play_only: bool=False):
     """Initialize an RLlib trainer object for training neural nets to control (populations of) particles/players in the
     environment.
 
@@ -232,8 +159,9 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
 
 
     # Set the number of environments per worker to result in at least n_rllib_envs-many environments.
-    num_workers = 1 if cfg.n_rllib_workers == 0 or cfg.enjoy else cfg.n_rllib_workers
-    num_envs_per_worker = math.ceil(cfg.n_rllib_envs / num_workers) if not cfg.enjoy else 1
+    n_train_workers = 1 if cfg.n_train_workers == 0 or cfg.enjoy else cfg.n_train_workers
+    # num_envs_per_worker = math.ceil(cfg.n_rllib_envs / n_train_workers) if not cfg.enjoy else 1
+    num_envs_per_worker = cfg.n_envs_per_worker
 
     # Because we only ever use a single worker for all evaluation environments.
     num_eval_envs = num_envs_per_worker
@@ -245,24 +173,6 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         evaluation_interval = 0
     else:
         evaluation_interval = 10 if cfg.fixed_worlds else 1
-        # After how many calls to train do we evaluate?
-        # If we're evolving/training until convergence, just
-        # evaluate every 10 iterations. If we're "enjoying", just need to set this to any number > 0 to ensure we 
-        # initialize the evaluation workers.
-#       if -1 in [cfg.gen_phase_len, cfg.play_phase_len] or cfg.enjoy:
-#           evaluation_interval = 10
-
-        # Otherwise, evaluate policies once after every player-training phase. If the trainer is for player-training and
-        # evolved world evaluation, we count the phases corresponding to each process, and the phase corresponding to 
-        # the re-evaluation of elites. 
-        # TODO: might want multiple rounds of elite-re-evaluation, would need to account for that here.
-#       elif not cfg.parallel_gen_play:
-#       evaluation_interval = (cfg.gen_phase_len + 1 + cfg.play_phase_len) * cfg.world_batch_size // cfg.n_eps_on_train 
-
-#       evaluation_interval = 1
-#       # If we're parallelizing generation and playing, we're evaluating on the player-only trainer.
-#       else:
-#           evaluation_interval = cfg.play_phase_len * cfg.world_batch_size // cfg.n_eps_on_train 
 
     if cfg.enjoy:
         # Technically, we have 2 episodes during each call to eval. Imagine we have just called ``trainer.queue_worlds()``.
@@ -304,17 +214,16 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "env_config": env_config,
         "num_gpus": cfg.num_gpus,
 #       "num_workers": num_workers if not (cfg.enjoy or cfg.evaluate) else 0,
-        "num_workers": 1 if not (cfg.enjoy or cfg.evaluate or cfg.n_rllib_workers == 0) else 0,
+        "num_workers": cfg.n_train_workers if not (cfg.enjoy or cfg.evaluate or cfg.n_train_workers == 0) else 0,
         "num_envs_per_worker": num_envs_per_worker,
         "framework": "torch",
         "render_env": cfg.render if not cfg.enjoy else True,
-        # "custom_eval_function": evo_evaluate,
 
         # If enjoying, evaluation_interval is nonzero only to ensure eval workers get created for playback.
         "evaluation_interval": evaluation_interval,
 
         # We'll only parallelize eval workers when doing evaluation on pre-trained agents.
-        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.n_rllib_workers,
+        "evaluation_num_workers": 0 if not (cfg.evaluate) else cfg.n_evo_workers,
 
         # FIXME: Hack workaround: during evaluation (after training), all but the first call to trainer.evaluate() will 
         # be preceded by calls to env.set_world(), which require an immediate reset to take effect. (And unlike 
@@ -326,13 +235,14 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         "evaluation_parallel_to_training": True,
 
 #       # TODO: provide more options here?  
-        "evo_eval_num_workers": cfg.n_rllib_workers,
+        "evo_eval_num_workers": cfg.n_evo_workers,
 #       "evo_eval_duration": "auto",
         "evo_eval_config": {
             "batch_mode": "complete_episodes",
             "fixed_worlds": cfg.fixed_worlds,
             # TODO: modify the behavior of `sample()` on the evo_eval worker so that it gets exactly one episode from each environment?
-            "rollout_fragment_length": env.max_episode_steps,
+            # "rollout_fragment_length": env.max_episode_steps,
+            "rollout_fragment_length": 1,
 #           "train_batch_size": env.max_episode_steps * num_envs_per_worker,
             "env_config": {
                 **env_config,
@@ -402,7 +312,7 @@ def init_trainer(env, idx_counter, env_config: dict, cfg: Namespace, gen_only: b
         idxs *= math.ceil(n_eval_envs / len(idxs))
         idxs = idxs[:n_eval_envs]
 
-        idx_counter.set_idxs.remote(idxs)
+        idx_counter.set_keys.remote(idxs)
         hashes = [h for wh in hashes for h in wh]
         idx_counter.set_hashes.remote(hashes)
         # FIXME: Sometimes hash-to-idx dict is not set by the above call?
@@ -473,11 +383,7 @@ def sync_player_policies(play_trainer: Trainer, gen_trainer: Trainer, cfg: Names
         gen_trainer.get_policy(f'policy_{i}').set_weights(play_trainer.get_weights()[f'policy_{i}'])
 
 
-def evo_evaluate(trainer: Trainer, workers: WorkerSet):
-    return trainer.evaluate()
-
-            
-def gen_playable_duration_fn(num_playable_worlds=0, **kwargs):
+def gen_playable_duration_fn(generations_done, num_playable_worlds=0, **kwargs):
     """Evolve worlds until one is playable."""
     return 0 if num_playable_worlds > 0 else 1
 
@@ -494,10 +400,12 @@ class WorldEvoPPOTrainer(algorithm):
         cfg = algorithm.get_default_config()
         cfg["evo_eval_num_workers"] = 1
         cfg["evo_eval_duration"] = "auto"
+        cfg["evo_eval_duration_unit"] = "episodes"
         cfg["evo_eval_config"] = {
             "fixed_worlds": False,
             "batch_mode": "complete_episodes",
-            "rollout_fragment_length": cfg["rollout_fragment_length"],
+            "rollout_fragment_length": 1,
+            "evaluation_duration_unit": "episodes",
             "train_batch_size": cfg["train_batch_size"],
             "env_config": cfg["env_config"],
         }
@@ -549,11 +457,11 @@ class WorldEvoPPOTrainer(algorithm):
                 # Don't even create a local worker if num_workers > 0.
                 local_worker=False,
                 )
-            self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", False)))
+            self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evo_eval_world", True)))
 
         # FIXME: This is a hack. Should be able to use configs for this?
         self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
-        self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", False)))
+        self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evaluation_world", True)))
 
         # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
 
@@ -584,19 +492,19 @@ class WorldEvoPPOTrainer(algorithm):
             and - if required - evaluation.
         """
 
-        def auto_duration_fn(unit, num_workers, cfg, num_units_done, **kwargs):
+        def auto_duration_fn(generations_done, num_workers, cfg, **kwargs):
             """Evolve worlds until the concurrent player training step is complete."""
             # Training is done and we already ran at least one
             # evaluation -> Nothing left to run.
-            if num_units_done > 0 and \
+            if generations_done > 0 and \
                     train_future.done():
                 return 0
             # Count by episodes. -> Run n more
             # (n=num eval workers).
             return num_workers * self.config["num_envs_per_worker"]
 
-        if not self.colearn_cfg.fixed_worlds:
-            # Preliminary evolution until we have generated a playable world.
+        # Preliminary evolution until we have generated a playable world.
+        if not self.colearn_cfg.fixed_worlds and self.net_itr == 0:
             # TODO: may need to occupy the GPU with something else if this will take a long time. 
             # E.g. train on repaired worlds.
             logbook_archive_stats = self.evo_eval(duration_fn=gen_playable_duration_fn)
@@ -626,9 +534,10 @@ class WorldEvoPPOTrainer(algorithm):
 
         # else {k: ind for k, ind in enumerate(self.world_evolver.container)}
 
-#       if self.colearn_cfg.quality_diversity:
-#           # Eliminate impossible worlds
-#           training_worlds = {k: ind for k, ind in training_worlds.items() if not ind.features == [0, 0]}
+        if self.colearn_cfg.quality_diversity:
+            # Eliminate impossible worlds
+            learnable_training_worlds = {k: ind for k, ind in training_worlds.items() if not ind.features == [0, 0]}
+            training_worlds = learnable_training_worlds if len(learnable_training_worlds) > 0 else training_worlds
 
 #           # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
 #           if len(training_worlds) == 0:
@@ -751,13 +660,12 @@ class WorldEvoPPOTrainer(algorithm):
 
         playable_worlds = []
         # How many episodes have we run (across all eval workers)?
-        num_units_done = 0
-        round_ = 0
+        generations_done = 0
         while True:
             evo_start_time = timer()
-            units_left_to_do = duration_fn(num_units_done=num_units_done, num_playable_worlds=len(playable_worlds))
+            generations_left_to_do = duration_fn(generations_done=generations_done, num_playable_worlds=len(playable_worlds))
             
-            if units_left_to_do <= 0:
+            if generations_left_to_do <= 0:
                 # The player is one update ahead of the worlds, relative the policy the worlds were evolved for.
                 self.world_evolver.increment_ages()
                 break
@@ -774,25 +682,19 @@ class WorldEvoPPOTrainer(algorithm):
 
                 set_worlds(playable_worlds, self.evo_eval_workers, idx_counter, self.colearn_cfg, load_now=True)
 
-                round_ += 1
-                batches = ray.get([
-                    w.sample.remote() for i, w in enumerate(
-                        self.evo_eval_workers.remote_workers())
-                    # This `units_left_to_do` is wrong here. Do we need it? No?
-    #               if i * 1 < units_left_to_do
-                ])
-                # n_episodes = np.sum([np.sum(batch.policy_batches["policy_0"]["dones"] == True) for batch in batches])
-                # print(f"Simulated {n_episodes} agent episodes on evo eval.")
+                generations_done += 1
+                # Need to take an extra batch of samples because of the way we queue/load worlds (I think). Results in
+                # duplicate evaluations on first iteration.
+                for i in range(self.colearn_cfg.world_batch_size // max(1, self.colearn_cfg.n_evo_workers) + 1):
+                    # print(f"Sample batch {i}")
+                    batches = ray.get([
+                        w.sample.remote() for i, w in enumerate(
+                            self.evo_eval_workers.remote_workers())
+                    ])
+                    # print(self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda env: env.stats)))
                 world_qd_stats = get_world_qd_stats(self.evo_eval_workers, self.colearn_cfg,
-                    ignore_redundant=self.colearn_cfg.generator_class in ["NCA"])
-                # 1 episode per returned batch.
-                if unit == "episodes":
-                    num_units_done += len(batches)
-                # n timesteps per returned batch.
-                else:
-                    ts = sum(len(b) for b in batches)
-                    num_ts_run += ts
-                    num_units_done += ts
+                    ignore_redundant=self.colearn_cfg.generator_class in ["NCA"] or self.net_itr == 0)
+                # print(world_qd_stats.keys())
             logbook_stats = self.world_evolver.tell(world_batch, world_qd_stats)
             logbook_stats.update({"elapsed": timer() - evo_start_time})
             log(self.logbook, logbook_stats, self.net_itr)

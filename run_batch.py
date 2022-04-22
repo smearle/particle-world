@@ -52,7 +52,8 @@ def main():
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-ev', '--evaluate', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
-    parser.add_argument('-nw', '--n_rllib_workers', type=int, default=1)
+    parser.add_argument('-new', '--n_evo_workers', type=int, default=8)
+    parser.add_argument('-ntw', '--n_train_workers', type=int, default=4)
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-lo', '--load', action='store_true')
@@ -60,7 +61,10 @@ def main():
     parser.add_argument('-gaw', '--gen_adversarial_worlds', action='store_true')
     args = parser.parse_args()
     job_time = 48
-    n_rllib_workers = 0 if args.visualize else args.n_rllib_workers
+    if args.visualize:
+        n_train_workers = n_evo_workers = 0
+    else:
+        n_train_workers, n_evo_workers = args.n_train_workers, args.n_evo_workers
     num_gpus = 0 if args.visualize else args.num_gpus
     render = True if args.enjoy else args.render
     load = True if args.visualize or args.enjoy or args.evaluate else args.load
@@ -102,7 +106,8 @@ def main():
             'load': load or args.gen_adversarial_worlds,
             'model': model,
             'n_policies': n_policies,
-            'n_rllib_workers': n_rllib_workers,
+            'n_evo_workers': n_evo_workers,
+            'n_train_workers': n_train_workers,
             'num_gpus': num_gpus,
             'objective_function': objective,
             'overwrite': args.overwrite,
@@ -137,7 +142,7 @@ def main():
     for exp_i, exp_set in enumerate(exp_sets):
         # Because of our parallel evo/train implementation, we need an additional CPU for the remote trainer, and 
         # anoter for the local worker (actually the latter is not true, but... for breathing room).
-        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_rllib_workers+2, job_mem=job_mem,
+        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_evo_workers+n_train_workers, job_mem=job_mem,
             local=args.local)
 
 

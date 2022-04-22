@@ -110,7 +110,8 @@ class DiscreteIndividual(Individual):
 class TileFlipIndividual2D(DiscreteIndividual):
 
     def generate(self):
-        self.discrete = np.random.randint(0, self.n_chan, size=(self.width, self.width))
+        # self.discrete = np.random.randint(0, self.n_chan, size=(self.width, self.width))
+        self.discrete = np.zeros((self.width, self.width), dtype=int)
 
     def mutate(self):
 

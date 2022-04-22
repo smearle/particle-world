@@ -201,22 +201,13 @@ class ParticleGym(ParticleSwarmEnv, MultiAgentEnv):
             for i, swarm in enumerate(self.swarms)]
         obs = self.get_particle_observations()
         # Dones before rewards, in case reward is different e.g. at the last step
-        self.dones = self.get_dones()
         self.rew = self.get_reward()
-        self.dones.update({(i, j): self.rew[(i, j)] > 0 for i, j in self.rew})
+        dones = {(i, j): self.rew[(i, j)] > 0 for i, j in self.rew}
         info = {}
         self.n_step += 1
         assert self.world is not None
 #       print(rew)
-        # print(dones)
-        return obs, self.rew, self.dones, info
-
-    def get_dones(self):
-        dones = {(i, j): False for i, swarm in enumerate(self.swarms)
-                for j in range(swarm.n_pop)}
-        dones.update({'__all__': self.n_step > 0 and self.n_step == self.max_episode_steps})
-
-        return dones
+        return obs, self.rew, dones, info
 
     def get_particle_observations(self):
         obs = {(i, j): swarm.get_observations(scape=self.world, flatten=False)[j] for i, swarm in enumerate(self.swarms)
@@ -278,33 +269,9 @@ class ParticleGymRLlib(ParticleGym):
         # self.worlds = {idx: worlds[idx]}
         # print('set worlds ', worlds.keys())
 
-    def get_dones(self):
-        dones = super().get_dones()
-
-        dones['__all__'] = dones['__all__']  # or self.need_world_reset
-        return dones
-
-#   def set_world_eval(self, world: np.array, idx):
-#       self.world_key = idx
-#       self.set_world(world)
-#       self.set_landscape(self.world)
-
     def reset(self):
         self.world = self.next_world
-        # self.n_pop = self.next_n_pop
-        # self.world = self.next_world
-        # self.need_world_reset = False
-        # print('reset w/ worlds', self.worlds.keys())
-        # world_idx = list(self.worlds.keys())[self.world_idx]
-        # world = self.worlds[world_idx]
-        # self.set_landscape(np.array(world).reshape(self.width, self.width))
-        # self.world_idx = (self.world_idx + 1) % len(self.worlds)
-
         obs = super().reset()
-        # self.stats.append((self.world_key, {agent_id: 0 for agent_id in obs}))  # attempting to move stats to WorldEvolutionWrappep
-
-        # This should be getting flushed out regularly
-        # assert len(self.stats) <= 100
 
         return obs
 
@@ -452,16 +419,11 @@ class ParticleMazeEnv(ParticleGymRLlib):
         [s.update(scape=self.world, obstacles=self.world) for s in self.swarms]
 
     def reset(self):
+        # print(f'reset world {self.world_key} on step {self.n_step}')
         # These are the agents who have won the game, and will not be taking further observations/actions.
         self.dead = set({})
 
         # FIXME: redundant observations are being taken here
-        # print(f'reset world {self.world_key} on step {self.n_step}')
-
-        # Ugly hack to deal with eval envs resetting before end of sample. last_world_key = world_key during training,
-        # since the new world key is set right before reset. During eval, this is actually the last world_key, since
-        # reset happens before the end of the evaluate() batch. <--...wut?
-        # print(f"reset world {self.world_key} on step {self.n_step}")
 
         obs = super().reset()
 

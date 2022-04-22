@@ -8,7 +8,6 @@ import ray
 import deap
 from timeit import default_timer as timer
 
-from rl.eval_worlds import evaluate_worlds
 from utils import update_individuals
 
 
@@ -24,7 +23,7 @@ class WorldEvolver(DEAPQDAlgorithm):
         self.stale_generators = False
         self.time_until_stale = 10
         self.staleness = 0
-        self.curr_itr = 0
+        self.curr_itr = trainer.gen_itr
         self.stale_individuals = []
 
     def reset_staleness(self) -> None:
@@ -131,7 +130,7 @@ class WorldEvolver(DEAPQDAlgorithm):
     def _generate_offspring(self, batch_size: Optional[int] = None) -> dict:
         batch_size = self.batch_size if batch_size is None else batch_size
         # On the first iteration, randomly generate the initial batch if necessary.
-        if self.curr_itr == 0:
+        if len(self.container) == 0:
             assert len(self.init_batch) >= batch_size
             offspring = self.init_batch[:batch_size]
 
@@ -175,11 +174,13 @@ class WorldEvolver(DEAPQDAlgorithm):
         else:
             batch = {i: ind for i, ind in enumerate(self._generate_offspring())}
 
-        rllib_stats, world_stats, logbook_stats = evaluate_worlds(
-            trainer=self.trainer, worlds=batch, cfg=self.cfg, 
-            idx_counter=self.idx_counter,
-            start_time=self.start_time)
-        # assert len(rllib_stats) == 1
+        # FIXME: do we want to revive this using the WorldEvoTrainer?
+        # rllib_stats, world_stats, logbook_stats = evaluate_worlds(
+        #     trainer=self.trainer, worlds=batch, cfg=self.cfg, 
+        #     idx_counter=self.idx_counter,
+        #     start_time=self.start_time)
+        # # assert len(rllib_stats) == 1
+        world_stats = {}
 
         self.tell(batch, world_stats)
 
