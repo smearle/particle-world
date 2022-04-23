@@ -16,7 +16,7 @@ from cross_eval import vis_cross_eval
 from utils import get_experiment_name
 
 
-def launch_job(sbatch_file, exp_i, job_time, job_cpus, job_mem, local):
+def launch_job(sbatch_file, exp_i, job_time, job_cpus, job_gpus, job_mem, local):
     cmd = f'python main.py --load_config {exp_i}'
 
     if local:
@@ -31,6 +31,9 @@ def launch_job(sbatch_file, exp_i, job_time, job_cpus, job_mem, local):
                 # job_name += 'eval_'
             job_name += str(exp_i)
             content = re.sub('prtcl_(eval_)?\d+', job_name, content)
+            ##SBATCH --gres=gpu:1
+            gpu_str = f"#SBATCH --gres=gpu:{job_gpus}" if job_gpus > 0 else f"##SBATCH --gres=gpu:1"
+            content = re.sub('#+SBATCH --gres=gpu:\d+:', gpu_str, content)
             content = re.sub('#SBATCH --time=\d+:', '#SBATCH --time={}:'.format(job_time), content)
             content = re.sub('#SBATCH --cpus-per-task=\d+', '#SBATCH --cpus-per-task={}'.format(job_cpus), content)
             content = re.sub('#SBATCH --mem=\d+GB', '#SBATCH --mem={}GB'.format(job_mem), content)
@@ -149,8 +152,8 @@ def main():
     for exp_i, exp_set in enumerate(exp_sets):
         # Because of our parallel evo/train implementation, we need an additional CPU for the remote trainer, and 
         # anoter for the local worker (actually the latter is not true, but... for breathing room).
-        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_evo_workers+n_train_workers, job_mem=job_mem,
-            local=args.local)
+        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_evo_workers+n_train_workers, \
+            job_gpus=args.num_gpus, job_mem=job_mem, local=args.local)
 
 
 
