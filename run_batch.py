@@ -16,8 +16,8 @@ from cross_eval import vis_cross_eval
 from utils import get_experiment_name
 
 
-def launch_job(sbatch_file, exp_i, job_time, job_cpus, job_gpus, job_mem, local):
-    cmd = f'python main.py --load_config {exp_i}'
+def launch_job(sbatch_file, experiment_name, job_time, job_cpus, job_gpus, job_mem, local):
+    cmd = f'python main.py --load_config {experiment_name}'
 
     if local:
         print(f'Launching command locally:\n{cmd}')
@@ -29,14 +29,14 @@ def launch_job(sbatch_file, exp_i, job_time, job_cpus, job_gpus, job_mem, local)
             job_name = 'prtcl_'
             # if args.evaluate:
                 # job_name += 'eval_'
-            job_name += str(exp_i)
-            content = re.sub('prtcl_(eval_)?\d+', job_name, content)
+            job_name += str(experiment_name)
+            content = re.sub(r'prtcl_(eval_)?.+', job_name, content)
             ##SBATCH --gres=gpu:1
             gpu_str = f"#SBATCH --gres=gpu:{job_gpus}" if job_gpus > 0 else f"##SBATCH --gres=gpu:1"
-            content = re.sub('#+SBATCH --gres=gpu:\d+:', gpu_str, content)
-            content = re.sub('#SBATCH --time=\d+:', '#SBATCH --time={}:'.format(job_time), content)
-            content = re.sub('#SBATCH --cpus-per-task=\d+', '#SBATCH --cpus-per-task={}'.format(job_cpus), content)
-            content = re.sub('#SBATCH --mem=\d+GB', '#SBATCH --mem={}GB'.format(job_mem), content)
+            content = re.sub(r'#+SBATCH --gres=gpu:\d+', gpu_str, content)
+            content = re.sub(r'#SBATCH --time=\d+:', '#SBATCH --time={}:'.format(job_time), content)
+            content = re.sub(r'#SBATCH --cpus-per-task=\d+', '#SBATCH --cpus-per-task={}'.format(job_cpus), content)
+            content = re.sub(r'#SBATCH --mem=\d+GB', '#SBATCH --mem={}GB'.format(job_mem), content)
             cmd = '\n' + cmd
             new_content = re.sub('\n.*python main.py.*', cmd, content)
 
@@ -123,7 +123,9 @@ def main():
             'visualize': args.visualize,
         }
         exp_configs.append(exp_config)
-        with open(os.path.join('configs', 'auto', f'{exp_i}.json'), 'w') as f:
+        exp_cfg_namespace = namedtuple('exp_cfg_namespace', exp_config.keys())(**exp_config)
+        experiment_name = get_experiment_name(exp_cfg_namespace)
+        with open(os.path.join('configs', 'auto', f'{experiment_name}.json'), 'w') as f:
             json.dump(exp_config, f, indent=4)
 
     sbatch_file = os.path.join('slurm', 'run.sh')
@@ -152,7 +154,7 @@ def main():
     for exp_i, exp_set in enumerate(exp_sets):
         # Because of our parallel evo/train implementation, we need an additional CPU for the remote trainer, and 
         # anoter for the local worker (actually the latter is not true, but... for breathing room).
-        launch_job(sbatch_file=sbatch_file, exp_i=exp_i, job_time=job_time, job_cpus=n_evo_workers+n_train_workers, \
+        launch_job(sbatch_file=sbatch_file, experiment_name=experiment_name, job_time=job_time, job_cpus=n_evo_workers+n_train_workers, \
             job_gpus=args.num_gpus, job_mem=job_mem, local=args.local)
 
 

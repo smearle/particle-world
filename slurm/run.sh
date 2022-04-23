@@ -5,10 +5,10 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=48:00:00
 #SBATCH --mem=16GB
-#SBATCH --job-name=prtcl_2
+#SBATCH --job-name=prtcl_min_solvable_1-pol_1-gen_1-play_mdl-rnn_debug
 #SBATCH --mail-type=BEGIN,END
 #SBATCH --mail-user=sam.earle@nyu.edu
-#SBATCH --output=prtcl_2_%j.out
+#SBATCH --output=prtcl_min_solvable_1-pol_1-gen_1-play_mdl-rnn_debug_%j.out
 
 cd /scratch/se2161/particle-world || exit
 
@@ -17,6 +17,6 @@ conda activate particle
 
 export TUNE_RESULT_DIR='./ray_results/'
 
-python main.py --load_config 2
+python main.py --load_config min_solvable_1-pol_1-gen_1-play_mdl-rnn_debug
 
 # leave trailing line
