@@ -265,7 +265,7 @@ class PlayerEvolver(Evolver):
         logbook_stats = {f"play_{k}": v for k, v in logbook_stats.items()}
         return logbook_stats
 
-    def _update_individuals(individuals, objs):
+    def _update_individuals(self, individuals, objs):
         for k, ind in individuals.items():
             ind.fitness.values = (objs[k], )
 

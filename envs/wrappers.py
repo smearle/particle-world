@@ -86,6 +86,12 @@ class WorldEvolutionWrapper(gym.Wrapper):
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
 
+    def set_mode(self, mode: str):
+        modes = ['evo_eval_world', 'training_world', 'evaluation_world', 'evolve_player']
+        assert mode in modes
+        [setattr(self, m, False) for m in modes]
+        setattr(self, mode, True)
+
     def set_player_policies(self, players: dict, idx_counter):
         """Set the player agent for this environment."""
         self.player_key = ray.get(idx_counter.get.remote(hash(self)))
@@ -170,8 +176,17 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # We are now resetting and loading the next world. So we switch this flag off.
         self.need_world_reset = False
 
-        # Incrementing eval worlds to ensure each world is evaluated an equal number of times over training
-        if self.evaluation_world:
+        # Cycle through each world once.
+        if self.evo_eval_world or self.evolve_player:
+            if self.world_key_queue:
+                self.world_key = self.world_key_queue[0]
+                self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
+                print(self.world_key)
+                self.set_world(self.world_queue[self.world_key])
+            # Not changing world_key to None here is a workaround to allow setting regret loss after reset (which is not avoidable while calling batch. sample() ...?)
+
+        # Increment eval worlds to ensure each world is evaluated an equal number of times over training
+        elif self.evaluation_world:
             # 0th world key is that assigned by the global idx_counter. This ensures no two eval envs will be 
             # evaluating the same world if it can be avoided. 
             self.last_world_key = self.world_key_queue[0] if self.last_world_key is None else self.last_world_key
@@ -181,17 +196,14 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # FIXME: maybe inefficient to call index
             self.world_key = world_keys[(world_keys.index(self.last_world_key) + self.num_eval_envs) % len(self.world_queue)]
             self.set_world(self.world_queue[self.world_key])
+
         # Randomly select a world from the training set.
         elif self.training_world:
             self.world_key = np.random.choice(self.world_key_queue)
             self.set_world(self.world_queue[self.world_key])
-        # Iterate through the worlds queued for evo-evaluation.
+        
         else:
-            if self.world_key_queue:
-                self.world_key = self.world_key_queue[0]
-                self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
-                self.set_world(self.world_queue.pop(self.world_key))
-            # Not changing world_key to None here is a workaround to allow setting regret loss after reset (which is not avoidable while calling batch. sample() ...?)
+            raise Exception
 
         # self.next_world = None if not self.enjoy and not self.world_queue else self.world_queue[self.world_key_queue[0]]
         # self.world_queue = self.world_queue[1:] if self.world_queue else []
@@ -381,38 +393,38 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         self.need_world_reset = True
 
     def _preprocess_obs(self, obs):
-        policy_batch_obs = {i: [] for i in range(len(self.players))}
+        policy_batch_obs = {i: th.zeros((self.n_pop, *self.observation_spaces[i].shape)) for i in range(len(self.players))}
         for (i, j) in obs:
-            policy_batch_obs[i].append(obs[(i, j)])
-        policy_batch_obs = {i: np.array(policy_batch_obs[i]) for i in policy_batch_obs}
+            policy_batch_obs[i][j] = th.Tensor(obs[(i, j)])
 
         return policy_batch_obs
 
     def simulate(self):
+        assert self.evolve_player
         ep_rews = None
-
+        # world_rews = {}
+        player_rew = 0
+        
         while self.world_queue:
 
             # Load up a new world and simulate player behavior in it.
             obs = self.reset()
+            # world_rews[self.world_key] = {k: 0 for k in self.player_keys}
             dones = {"__all__": False}
             net_rews = {k: 0 for k in obs}
-            ep_rews = {k: [] for k in obs} if ep_rews is None else ep_rews
 
             while dones["__all__"] == False:
                 obs = self._preprocess_obs(obs)
                 actions = {i: self.players[i].get_actions(obs[i]) for i in range(len(self.players))}
                 actions = {(i, j): actions[i][j] for i in actions for j in range(len(actions[i]))}
                 obs, rews, dones, infos = self.step(actions)
+                player_rew += sum(rews.values())
                 net_rews = {k: net_rews[k] + v for k, v in rews.items()}
-                self.render()
+                if self.player_keys[0] == 0:
+                    self.render()
 
-            ep_rews = {k: ep_rews[k] + [v] for k, v in net_rews.items()}
-
-#       world_rews = [[] for i in range(len(self.world_queue))]
-#       for ep_rew in ep_rews.values():
-#           for i, w_rew in enumerate(ep_rew):
-#               world_rews[i].append(w_rew)
-
-#       return ep_rews
+                # for (i, j) in net_rews:
+                    # world_rews[self.world_key][i] += net_rews[(i, j)]
+        
+        return {self.player_keys[0]: player_rew / self.n_pop}
 

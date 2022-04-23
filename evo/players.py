@@ -1,15 +1,17 @@
 from pdb import set_trace as TT
 
 import numpy as np
+from qdpy.phenotype import Features
 import torch as th
 from torch import nn
 
-from evo.individuals import Individual
+from evo.individuals import Fitness, Individual
 from evo.models import PlayNCA
 
 
 class Player(Individual):
-    def __init__(self, obs_width, obs_n_chan, player_chan=3):
+    def __init__(self, obs_width, obs_n_chan, *args, player_chan=3, **kwargs):
+        Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
         self.model = PlayNCA(n_chan=obs_n_chan, player_chan=player_chan)
 
     def get_actions(self, obs):

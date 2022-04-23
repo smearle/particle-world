@@ -463,9 +463,8 @@ if __name__ == '__main__':
         play_itr = 0
         net_itr = 0
 
-        if not cfg.fixed_worlds or cfg.evolve_players:
-            logbook = tools.Logbook()
-            logbook.header = ["iteration"]
+        logbook = tools.Logbook()
+        logbook.header = ["iteration"]
         
         # If not loading, do some initial setup for world evolution if applicable.
         if not cfg.fixed_worlds:
@@ -476,6 +475,12 @@ if __name__ == '__main__':
             # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
             # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
             logbook.header += ["containerSize", "evals", "nbUpdated"] + stats.fields + ["meanPath", "maxPath"]
+        
+        else:
+            world_evolver = None
+            # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
+            # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
+            logbook.header += ["minRew", "meanRew", "maxRew", "pctWin", "meanEvalRew"]
         
         if cfg.evolve_players:
             player_archive = containers.Grid(shape=nb_bins_play, max_items_per_bin=max_items_per_bin_play, fitness_domain=fitness_domain_play,
@@ -525,13 +530,6 @@ if __name__ == '__main__':
                             trainer=trainer, idx_counter=world_idx_counter, cfg=cfg, 
                             )
         world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
-
-    else:
-        world_evolver = None
-        logbook = tools.Logbook()
-        # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
-        # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
-        logbook.header = ["iteration", "minRew", "meanRew", "maxRew", "pctWin", "meanEvalRew", "fps", "elapsed"]
 
     if cfg.evolve_players:
         # Evolutionary algorithm parameters for players.

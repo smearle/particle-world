@@ -72,8 +72,9 @@ class PlayNCA(NCA):
 
             # 3x3 boxes around the players
             # boo hoo @ this for loop
-            for i, pl_x in enumerate(x):
-                neighb[i, 0, :, :] = pl_x[0, player_pos[1][i] - 1: player_pos[1][i] + 2, player_pos[2][i] - 1: player_pos[2][i] + 2]
+            for i, pl_i, in enumerate(player_pos[0]):
+                pl_x = x[pl_i]
+                neighb[pl_i, 0, :, :] = pl_x[0, player_pos[1][i] - 1: player_pos[1][i] + 2, player_pos[2][i] - 1: player_pos[2][i] + 2]
 
             adj_cross = th.Tensor([[0, 1, 0],
                                 [1, 1, 1],

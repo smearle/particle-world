@@ -467,19 +467,14 @@ class WorldEvoPPOTrainer(algorithm):
                 # Don't even create a local worker if num_workers > 0.
                 local_worker=False,
                 )
-            self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evo_eval_world", True)))
-
-        # FIXME: This is a hack. Should be able to use configs for this?
-        self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evaluation_world", True)))
-        if config["evolve_players"]:
-            self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evolve_player", True)))
-        else:
-            self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
-        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
+            self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_mode("evo_eval_world")))
 
         # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
 
     def evaluate(self, episodes_left_fn=None, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
+        # FIXME: This is a hack. Should be able to use configs for this?
+        self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_mode("evaluation_world")))
+
         eval_start_time = timer()
         logbook_stats = {}
         eval_results = super().evaluate(episodes_left_fn=episodes_left_fn, duration_fn=duration_fn)
@@ -571,6 +566,12 @@ class WorldEvoPPOTrainer(algorithm):
         set_worlds(training_worlds, self.workers, self.idx_counter, self.colearn_cfg, load_now=False)
         step_results = {}
         logbook_stats = {}
+
+        if self.config["evolve_players"]:
+            # FIXME: certain envs are both `evolve_player` and `evaluation_world` ???
+            self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_mode("evolve_player")))
+        else:
+            self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_mode("training_world")))
 
         # NOTE: eval is always sequential because meh
         # Sequential training and evolution.
@@ -787,7 +788,14 @@ class WorldEvoPPOTrainer(algorithm):
         # Simulate using a batch of player policies on environments, each with the same set of worlds.
         self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_player_policies(player_batch, idx_counter)))
         rews = self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.simulate()))
+        player_rews = {}
+        [player_rews.update(r) for worker_rews in rews for r in worker_rews]
 
-        self.player_evolver.tell(player_batch, rews)
+        self.player_evolver.tell(player_batch, player_rews)
+
+        step_results = {f'episode_reward_{s}': getattr(np, s)(list(player_rews.values())) for s in ['mean', 'min', 'max']}
+        step_results.update({'agent_timesteps_total': 0})
+
+        return step_results
 
         
