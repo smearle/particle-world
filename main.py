@@ -247,7 +247,8 @@ if __name__ == '__main__':
     multi_proc = cfg.parallelismType != 'None'
     rllib_save_interval = 10
 
-    idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
+    world_idx_counter = IdxCounter.options(name='idx_counter', max_concurrency=1).remote()
+    player_idx_counter = IdxCounter.options(name='play_idx_counter', max_concurrency=1).remote()
 
     #   ### DEBUGGING THE ENVIRONMENT ###
     #   if environment_class == ParticleMazeEnv:
@@ -320,7 +321,7 @@ if __name__ == '__main__':
     #   workers for evo-eval, or creating a separate WorkerSet for this purpose.
 #   if not cfg.parallel_gen_play:
     trainer = None if cfg.load and cfg.visualize else \
-        init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg)
+        init_trainer(env, idx_counter=world_idx_counter, env_config=env_config, cfg=cfg)
 #   else:
 #       gen_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, gen_only=True)
 #       play_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, play_only=True)
@@ -409,7 +410,7 @@ if __name__ == '__main__':
 
             for i, elite in enumerate(worlds):
                 print(f"Evaluating world {i}")
-                set_worlds({i: elite}, trainer.evaluation_workers, idx_counter, cfg)
+                set_worlds({i: elite}, trainer.evaluation_workers, world_idx_counter, cfg)
                 trainer.evaluate()
 #               ret = evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
 #                                           evaluate_only=True, cfg=cfg)
@@ -512,7 +513,7 @@ if __name__ == '__main__':
                             verbose=verbose, show_warnings=show_warnings,
                             results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                             iteration_filename=f'{experiment_name}' + '/latest-{}.p',
-                            trainer=trainer, idx_counter=idx_counter, cfg=cfg, 
+                            trainer=trainer, idx_counter=world_idx_counter, cfg=cfg, 
                             )
         world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
 
@@ -545,7 +546,7 @@ if __name__ == '__main__':
     # The outer co-learning loop
     toggle_train_player(trainer, train_player=True, cfg=cfg)
     # TODO: remove this function and initialize most of these objects in the trainer setup function.
-    trainer.set_attrs(world_evolver, idx_counter, logbook, cfg, net_itr, gen_itr, play_itr)
+    trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr)
     for _ in range(cfg.total_play_itrs):
         trainer.train()
     sys.exit()

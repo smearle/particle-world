@@ -42,7 +42,7 @@ class IdxCounter:
 
     def __init__(self):
         self.count = 0
-        self.world_keys = None
+        self.keys = None
 
     def get(self, hsh):
         world_key_queue = self.hashes_to_keys[hsh]
@@ -58,7 +58,7 @@ class IdxCounter:
 
     def set_keys(self, keys):
         self.count = 0
-        self.world_keys = keys
+        self.keys = keys
 
     def set_hashes(self, hashes):
         """
@@ -71,7 +71,7 @@ class IdxCounter:
         """
         hashes_to_keys = {h: [] for h in hashes}
 
-        for i, wk in enumerate(self.world_keys):
+        for i, wk in enumerate(self.keys):
             h = hashes[i % len(hashes)]
             hashes_to_keys[h].append(wk)
         

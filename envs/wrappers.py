@@ -65,7 +65,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world_gen_sequences = None
         self.world_queue = None
         cfg = env_cfg.get('cfg')
-        self.training_world = self.evaluation_world = self.evo_eval_world = False
+
+        self.evolve_player = self.training_world = self.evaluation_world = self.evo_eval_world = False
 
         # Is this world being used to train learning player agents?
         # self.training_world = env_cfg["training_world"]
@@ -85,6 +86,12 @@ class WorldEvolutionWrapper(gym.Wrapper):
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
 
+    def set_player(self, players: dict, idx_counter):
+        """Set the player agent for this environment."""
+        self.player_key = ray.get(idx_counter.get.remote(hash(self)))
+        self.player = players[self.player_key]
+        self.need_world_reset = True
+
     def queue_worlds(self, worlds: dict, load_now: bool, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
         """Assign a ``next_world`` to the environment, which will be loaded after the next step.
         
@@ -93,7 +100,10 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
         # Figure out which world to evaluate.
         # self.world_idx = 0
-        if idx_counter:
+        if self.evolve_player:
+            self.world_key_queue = list(worlds.keys())
+            self.world_queue = worlds
+        elif idx_counter:
             self.world_key_queue = ray.get(idx_counter.get.remote(hash(self)))
             self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue} if not self.evaluate else worlds
         else:

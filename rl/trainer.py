@@ -462,8 +462,12 @@ class WorldEvoPPOTrainer(algorithm):
             self.evo_eval_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evo_eval_world", True)))
 
         # FIXME: This is a hack. Should be able to use configs for this?
-        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
         self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evaluation_world", True)))
+        if self.colearn_cfg.evolve_player:
+            self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evolve_player", True)))
+        else:
+            self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
+        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
 
         # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
 
@@ -547,6 +551,12 @@ class WorldEvoPPOTrainer(algorithm):
 
         # Filter out unplayable worlds if applicable.
         training_worlds = {k: ind for k, ind in training_worlds.items() if isinstance(ind, np.ndarray) or ind.playability_penalty == 0}
+
+        # If evolving a player, take a smaller set of the best worlds for evaluating player agents.
+        if self.colearn_cfg.evolve_player:
+            sorted([ind for ind in training_worlds.values()], key=lambda i: i.fitness.values[0], reverse=True)
+            training_worlds[:self.colearn_cfg.world_batch_size]
+            training_worlds = {k: ind for k, ind in enumerate(training_worlds)}
 
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
@@ -753,3 +763,23 @@ class WorldEvoPPOTrainer(algorithm):
         metrics["timesteps_this_iter"] = num_ts_run
 
         return logbook_stats
+
+    def _exec_plan_or_training_iteration_fn(self):
+        """Evaluate evolved player policies and update the player archive."""
+        if not self.colearn_cfg.evolve_player:
+            return super()._exec_plan_or_training_iteration_fn()
+
+        idx_counter = ray.get_actor("play_idx_counter")
+        player_batch = self.player_evolver.ask(self.colearn_cfg.player_batch_size)
+        idx_counter.set_idxs(player_batch.keys())
+        hashes = self.workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
+        hashes = [h for wh in hashes for h in wh]
+        idx_counter.set_hashes(hashes)
+
+        # Simulate using a batch of player policies on environments, each with the same set of worlds.
+        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_policy(player_batch)))
+        rews = self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.simulate()))
+
+        self.player_evolver.tell(player_batch, rews)
+
+        

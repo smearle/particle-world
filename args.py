@@ -19,6 +19,7 @@ def init_parser():
     parser.add_argument('-o', '--outputDir', type=str, default='./runs', help="Path of the output log files")
     # parser.add_argument('-li', '--loadIteration', default=-1, type=int)
     parser.add_argument('-a', '--algo', default='me')
+    parser.add_argument('-ep', '--evolve_players', action='store_true')
     parser.add_argument('-exp', '--exp_name', default='test')
     parser.add_argument('-fw', '--fixed_worlds', action="store_true", help="When true, train players on fixed worlds, "
                                                                             "skipping the world-generation phase.")

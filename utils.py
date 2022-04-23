@@ -81,27 +81,6 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
 # print(timer() - start_time)
 
 
-def update_individuals(individuals, qd_stats, min_fitness=-10):
-    """Update worlds with stats resulting from simulation.
-    
-    If worlds are unplayable, then we don't need to have simulated on them, and we penalize them so that they will be
-    dominated by any playable world."""
-    playable_individuals = {wk: ind for wk, ind in individuals.items() if ind.playability_penalty == 0}
-    assert len(playable_individuals) == len(qd_stats), f"Number of individuals, {len(playable_individuals)}, != {len(qd_stats)},"\
-        " number of qd_stats."
-    
-    for k in individuals:
-        ind = individuals[k]
-        if ind.playability_penalty > 0:
-            # This is totally ad hoc, let's just exclude the individual entirely.
-            ind.fitness.values = (min_fitness - ind.playability_penalty, )
-            ind.features = [0, 0]
-            continue
-        assert k in qd_stats, f"Individual {k} not in qd_stats."
-        ind.fitness.values = qd_stats[k][0]
-        ind.features = qd_stats[k][1]
-
-
 def get_experiment_name(cfg):
     if cfg.fixed_worlds:
         exp_name = f'fixedWorlds_{cfg.n_policies}-pol'

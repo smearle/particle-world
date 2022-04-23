@@ -8,13 +8,16 @@ import ray
 import deap
 from timeit import default_timer as timer
 
-from utils import update_individuals
+from utils import update_world_individuals
 
 
-class WorldEvolver(DEAPQDAlgorithm):
+class Evolver(DEAPQDAlgorithm):
     def __init__(self, trainer, idx_counter, cfg, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        # FIXME: This is circular, lose this reference!
         self.trainer = trainer
+
         self.cfg = cfg
         self.idx_counter = idx_counter
         self.logbook = None
@@ -44,7 +47,7 @@ class WorldEvolver(DEAPQDAlgorithm):
     def tell(self, batch, world_stats):
 
         # TODO: Refer to a dict mapping fitness functions to their minimum values?
-        update_individuals(batch, world_stats, min_fitness=-10)
+        self._update_individuals(batch, world_stats, min_fitness=-10)
 
         # Evaluate the individuals with an invalid fitness
         # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
@@ -186,7 +189,7 @@ class WorldEvolver(DEAPQDAlgorithm):
 
     def tell(self, batch, world_stats):
 
-        update_individuals(batch, world_stats)
+        self._update_individuals(batch, world_stats)
 
         if len(batch) == 0:
             raise ValueError("No valid individual found !")
@@ -233,3 +236,42 @@ class WorldEvolver(DEAPQDAlgorithm):
     def reset_ages(self, individuals):
         for ind in individuals:
             ind.fitness.age = 0
+
+    def _update_individuals(self, batch, world_stats):
+        raise NotImplementedError
+
+class WorldEvolver(Evolver):
+    def _update_individuals(individuals, qd_stats, min_fitness=-10):
+        """Update worlds with stats resulting from simulation.
+        
+        If worlds are unplayable, then we don't need to have simulated on them, and we penalize them so that they will be
+        dominated by any playable world."""
+        playable_individuals = {wk: ind for wk, ind in individuals.items() if ind.playability_penalty == 0}
+        assert len(playable_individuals) == len(qd_stats), f"Number of individuals, {len(playable_individuals)}, != {len(qd_stats)},"\
+            " number of qd_stats."
+        
+        for k in individuals:
+            ind = individuals[k]
+            if ind.playability_penalty > 0:
+                # This is totally ad hoc, let's just exclude the individual entirely.
+                ind.fitness.values = (min_fitness - ind.playability_penalty, )
+                ind.features = [0, 0]
+                continue
+            assert k in qd_stats, f"Individual {k} not in qd_stats."
+            ind.fitness.values = qd_stats[k][0]
+            ind.features = qd_stats[k][1]
+
+
+class PlayerEvolver(Evolver):
+    def tell(self, batch, world_stats):
+        logbook_stats = super().tell(batch, world_stats)
+        logbook_stats = {f"play_{k}": v for k, v in logbook_stats.items()}
+        return logbook_stats
+
+    def _update_individuals(individuals, objs):
+        for k, ind in individuals.items():
+            ind.fitness.values = (objs[k], )
+            ind.features = [0, 0]
+
+
+

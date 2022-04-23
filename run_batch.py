@@ -51,6 +51,7 @@ def main():
     parser.add_argument('-gpus', '--num_gpus', type=int, default=1)
     parser.add_argument('-en', '--enjoy', action='store_true')
     parser.add_argument('-ev', '--evaluate', action='store_true')
+    parser.add_argument('-ep', '--evolve_players', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
     parser.add_argument('-ne', '--n_envs_per_worker', type=int, default=20)
     parser.add_argument('-new', '--n_evo_workers', type=int, default=4)
@@ -98,6 +99,7 @@ def main():
             'enjoy': args.enjoy,
             'environment_class': env_cls,
             'evaluate': args.evaluate,
+            'evolve_players': args.evolve_players,
             'field_of_view': field_of_view,
             'fixed_worlds': False,
             'fully_observable': fully_observable,
