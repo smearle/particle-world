@@ -31,7 +31,7 @@ from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict,
 from timeit import default_timer as timer
 
 from envs import eval_mazes, full_obs_test_mazes, partial_obs_test_mazes, partial_obs_test_mazes_2
-from evo.evolve import WorldEvolver
+from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.utils import compute_archive_world_heuristics, save
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
@@ -235,6 +235,9 @@ def init_trainer(env: Env, idx_counter: IdxCounter, env_config: dict, cfg: Names
         "evaluation_duration_unit": "episodes",
         "evaluation_parallel_to_training": True,
 
+        # Evolving players (instead of training them with RLlib)
+        "evolve_players": cfg.evolve_players,
+
 #       # TODO: provide more options here?  
         "evo_eval_num_workers": cfg.n_evo_workers,
 #       "evo_eval_duration": "auto",
@@ -399,6 +402,7 @@ class WorldEvoPPOTrainer(algorithm):
     @classmethod
     def get_default_config(cls) -> TrainerConfigDict:
         cfg = algorithm.get_default_config()
+        cfg["evolve_players"] = False
         cfg["evo_eval_num_workers"] = 1
         cfg["evo_eval_duration"] = "auto"
         cfg["evo_eval_duration_unit"] = "episodes"
@@ -413,10 +417,14 @@ class WorldEvoPPOTrainer(algorithm):
 
         return cfg
 
-    def set_attrs(self, world_evolver: WorldEvolver, idx_counter, logbook, colearning_config, net_itr, gen_itr, play_itr):
+    def set_attrs(self, world_evolver: WorldEvolver, idx_counter, logbook, colearning_config, net_itr, gen_itr, \
+            play_itr, player_evolver: Optional[PlayerEvolver] = None):
         if world_evolver:
             self.world_evolver = world_evolver
             self.world_archive = world_evolver.container
+        if colearning_config.evolve_players:
+            assert player_evolver is not None
+        self.player_evolver = player_evolver
         self.idx_counter = idx_counter
         self.logbook = logbook
         self.colearn_cfg = colearning_config
@@ -463,7 +471,7 @@ class WorldEvoPPOTrainer(algorithm):
 
         # FIXME: This is a hack. Should be able to use configs for this?
         self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evaluation_world", True)))
-        if self.colearn_cfg.evolve_player:
+        if config["evolve_players"]:
             self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "evolve_player", True)))
         else:
             self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: setattr(e, "training_world", True)))
@@ -553,7 +561,7 @@ class WorldEvoPPOTrainer(algorithm):
         training_worlds = {k: ind for k, ind in training_worlds.items() if isinstance(ind, np.ndarray) or ind.playability_penalty == 0}
 
         # If evolving a player, take a smaller set of the best worlds for evaluating player agents.
-        if self.colearn_cfg.evolve_player:
+        if self.colearn_cfg.evolve_players and not self.colearn_cfg.evolve_players:
             sorted([ind for ind in training_worlds.values()], key=lambda i: i.fitness.values[0], reverse=True)
             training_worlds[:self.colearn_cfg.world_batch_size]
             training_worlds = {k: ind for k, ind in enumerate(training_worlds)}
@@ -601,22 +609,22 @@ class WorldEvoPPOTrainer(algorithm):
                 # Collect the training results from the future.
                 step_results.update(train_future.result())
             
-        # FIXME: This gathers and flushes stats before the episode is over. Need to use callbacks instead
-        if self.colearn_cfg.fixed_worlds:
-            qd = self.colearn_cfg.quality_diversity
-            # NOTE: This flushes the stats on all these workers' envs.
-            world_stats = self.workers.foreach_worker(
-                lambda worker: worker.foreach_env(lambda env: env.get_world_stats(quality_diversity=qd)))
-            # Flatten workers
-            world_stats = [s for ws in world_stats for s in ws]
-            pct_wins = []
-            for env_stat_list in world_stats:
-                for world_stat_dict in env_stat_list:
-                    pct_win = np.mean([world_stat_dict[f"policy_{i}"]["pct_win"] for i in range(self.colearn_cfg.n_policies)])
-                    pct_wins.append(pct_win)
-            logbook_stats.update({
-                "pctWin": np.mean(pct_wins),
-            })
+#       # FIXME: This gathers and flushes stats before the episode is over. Need to use callbacks instead
+#       if self.colearn_cfg.fixed_worlds:
+#           qd = self.colearn_cfg.quality_diversity
+#           # NOTE: This flushes the stats on all these workers' envs.
+#           world_stats = self.workers.foreach_worker(
+#               lambda worker: worker.foreach_env(lambda env: env.get_world_stats(quality_diversity=qd)))
+#           # Flatten workers
+#           world_stats = [s for ws in world_stats for s in ws]
+#           pct_wins = []
+#           for env_stat_list in world_stats:
+#               for world_stat_dict in env_stat_list:
+#                   pct_win = np.mean([world_stat_dict[f"policy_{i}"]["pct_win"] for i in range(self.colearn_cfg.n_policies)])
+#                   pct_wins.append(pct_win)
+#           logbook_stats.update({
+#               "pctWin": np.mean(pct_wins),
+#           })
 
         logbook_stats.update({
             f"{k}Rew": step_results[f"episode_reward_{k}"] for k in stat_keys})
@@ -633,9 +641,8 @@ class WorldEvoPPOTrainer(algorithm):
         log(self.logbook, logbook_stats, self.net_itr)
         if not self.colearn_cfg.fixed_worlds or self.play_itr % 10 == 0:
             save_model(self, self.colearn_cfg.save_dir)
-            save(archive=self.world_archive, gen_itr=self.gen_itr, net_itr=self.net_itr, play_itr=self.play_itr, \
-                logbook=self.logbook,
-                            save_dir=self.colearn_cfg.save_dir)
+            save(world_archive=self.world_archive, player_archive=self.player_archive, gen_itr=self.gen_itr, 
+                net_itr=self.net_itr, play_itr=self.play_itr, logbook=self.logbook, save_dir=self.colearn_cfg.save_dir)
         self.play_itr += 1
         self.net_itr += 1
 
@@ -683,7 +690,7 @@ class WorldEvoPPOTrainer(algorithm):
                 break
                 
 #           print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
-            world_batch = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
+            world_batch = self.world_evolver.ask(self.colearn_cfg.world_batch_size)
             # unplayable_worlds = [w for w in world_batch if not w.playability_penalty > 0]
             playable_worlds = {wk: ind for wk, ind in world_batch.items() if ind.playability_penalty == 0}
             world_qd_stats = {}
@@ -728,6 +735,7 @@ class WorldEvoPPOTrainer(algorithm):
 
                 # Get regret / positive value loss metrics from the batches.
                 if self.colearn_cfg.objective_function == "regret":
+                    assert not self.colearn_cfg.evolve_players
                     pos_val_losses = [bb.policy_batches['policy_0']['pos_val_loss'] for b in batches for bb in b]
                     pos_val_losses = {k: v for pv in pos_val_losses for k, v in pv.items()}
 
@@ -765,19 +773,19 @@ class WorldEvoPPOTrainer(algorithm):
         return logbook_stats
 
     def _exec_plan_or_training_iteration_fn(self):
-        """Evaluate evolved player policies and update the player archive."""
-        if not self.colearn_cfg.evolve_player:
+        """Evaluate evolved player policies on a fixed set of worlds and update the player archive."""
+        if not self.colearn_cfg.evolve_players:
             return super()._exec_plan_or_training_iteration_fn()
 
         idx_counter = ray.get_actor("play_idx_counter")
-        player_batch = self.player_evolver.ask(self.colearn_cfg.player_batch_size)
-        idx_counter.set_idxs(player_batch.keys())
+        player_batch = self.player_evolver.ask(self.colearn_cfg.world_batch_size)
+        idx_counter.set_keys.remote(player_batch.keys())
         hashes = self.workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
         hashes = [h for wh in hashes for h in wh]
-        idx_counter.set_hashes(hashes)
+        idx_counter.set_hashes.remote(hashes)
 
         # Simulate using a batch of player policies on environments, each with the same set of worlds.
-        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_policy(player_batch)))
+        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_player_policies(player_batch, idx_counter)))
         rews = self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.simulate()))
 
         self.player_evolver.tell(player_batch, rews)

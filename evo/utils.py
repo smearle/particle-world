@@ -45,12 +45,13 @@ def compute_archive_world_heuristics(archive, trainer):
     }
 
 
-def save(archive, play_itr, gen_itr, net_itr, logbook, save_dir, adversarial_archive=False):
+def save(world_archive, player_archive, play_itr, gen_itr, net_itr, logbook, save_dir, adversarial_archive=False):
     arch_name = 'latest-0.p' if not adversarial_archive else 'adversarial_worlds.p'
     with open(os.path.join(save_dir, arch_name), 'wb') as f:
         pickle.dump(
             {
-                'archive': archive,
+                'world_archive': world_archive,
+                'player_archive': player_archive,
                 'net_itr': net_itr,
                 'gen_itr': gen_itr,
                 'play_itr': play_itr,

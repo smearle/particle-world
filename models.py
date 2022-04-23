@@ -269,8 +269,6 @@ class CustomConvRNNModel(TorchRNN, nn.Module):
         return action_out, [th.squeeze(h, 0), th.squeeze(c, 0)]
 
 
-
-# indices of weights capturing adjacency in 3x3 kernel (left to right, top to bottom)
 adjs = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
 
 adjs_to_acts = {adj: i for i, adj in enumerate(adjs)}
@@ -376,6 +374,8 @@ class FloodSqueeze(nn.Module):
 
 
 class FloodFill(nn.Module):
+    """Source is the goal. Activation flows from goal toward player. When the flow reaches the player, it moves in that
+    direction."""
     def __init__(self, empty_chan=0, wall_chan=1, src_chan=2, trg_chan=3):
         super(FloodFill, self).__init__()
         self.src_chan = src_chan

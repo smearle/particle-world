@@ -30,9 +30,10 @@ from args import init_parser
 from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_mazes, full_obs_test_mazes, \
     ghost_action_test_maze, partial_obs_test_mazes
 from envs.wrappers import make_env
+from evo.players import Player
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from evo.utils import compute_archive_world_heuristics, save
-from evo.evolve import WorldEvolver
+from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
 # from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, train_players, toggle_exploration
 from rl.trainer import init_trainer, toggle_train_player
@@ -83,8 +84,7 @@ if __name__ == '__main__':
     if cfg.model == 'flood':
         cfg.rotated_observations = False
         cfg.translated_observations = False
-    else:
-        cfg.translated_observations = True
+
     cfg.fitness_domain = [(-np.inf, np.inf)]
     cfg.width = 15
     pg_delay = 50  # Delay for rendering in pygame (ms?). Probably not needed!
@@ -317,27 +317,23 @@ if __name__ == '__main__':
         # and all the individuals in the archive are in this bin.
         max_items_per_bin = 1 if max_total_bins != 1 else cfg.archive_size  # The number of items in each bin of the grid
 
-    # TODO: serializing these trainers doesn't work, so we need to use a single trainer, either by co-opting some eval
-    #   workers for evo-eval, or creating a separate WorkerSet for this purpose.
-#   if not cfg.parallel_gen_play:
+    if cfg.evolve_players:
+        nb_bins_play = (1, 1)
+        fitness_domain_play = [(env.min_reward, env.max_reward)]
+        features_domain_play = [(-1, 1), (-1, 1)]  # placeholder
+        max_items_per_bin_play = 100
+        fitness_weight_play = 1
+
     trainer = None if cfg.load and cfg.visualize else \
         init_trainer(env, idx_counter=world_idx_counter, env_config=env_config, cfg=cfg)
-#   else:
-#       gen_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, gen_only=True)
-#       play_trainer = init_trainer(env, idx_counter=idx_counter, env_config=env_config, cfg=cfg, play_only=True)
-#       # For enjoy/eval.
-#       trainer = gen_trainer
-
-    # env.set_policies([particle_trainer.get_policy(f'policy_{i}') for i in range(n_policies)], particle_trainer.config)
-    # env.set_trainer(particle_trainer)
 
     # If training on fixed worlds, select the desired training set.
     if cfg.fixed_worlds:
         # train_worlds = {0: generator.landscape}
         training_worlds = trainer.world_archive
 
-    # If doing co-learning, do any setup that is necessary regardless of whether we're reloading or starting anew.
-    else:
+    # If doing world/player, do any setup that is necessary regardless of whether we're reloading or starting anew.
+    if not cfg.fixed_worlds or cfg.evolve_players:
         # Default stats to be performed on worlds in the archive.
         stats = tools.Statistics(lambda ind: ind.fitness.values)
         stats.register("avg", np.mean, axis=0)
@@ -357,7 +353,8 @@ if __name__ == '__main__':
         with open(os.path.join(loadfile_name), "rb") as f:
             data = pickle.load(f)
 
-        archive = data['archive']
+        world_archive = data['world_archive']
+        player_archive = data['player_archive']
         gen_itr = data['gen_itr']
         play_itr = data['play_itr']
         net_itr = data['net_itr']
@@ -370,11 +367,11 @@ if __name__ == '__main__':
                 visualize_train_stats(cfg.save_dir, logbook, quality_diversity=cfg.quality_diversity)
                 compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr,
                                     quality_diversity=cfg.quality_diversity)
-                visualize_archive(cfg, env, archive)
+                visualize_archive(cfg, env, world_archive)
                 if cfg.quality_diversity:
                                 # save fitness qd grid
                     plot_path = os.path.join(cfg.save_dir, "performancesGrid.png")
-                    plotGridSubplots(archive.quality_array[..., 0], plot_path, plt.get_cmap("magma"), features_domain,
+                    plotGridSubplots(world_archive.quality_array[..., 0], plot_path, plt.get_cmap("magma"), features_domain,
                                                 cfg.fitness_domain[0], nbTicks=None)
                     print("\nA plot of the performance grid was saved in '%s'." % os.path.abspath(plot_path))
                 print('Done visualizing, goodbye!')
@@ -403,7 +400,7 @@ if __name__ == '__main__':
                 # particle_trainer.evaluate()
 
             else:
-                elites = sorted(archive, key=lambda ind: ind.fitness, reverse=True)
+                elites = sorted(world_archive, key=lambda ind: ind.fitness, reverse=True)
                 worlds = [i for i in elites]
                 # FIXME: Hack: avoid skipping world 0. Something about the way eval calls reset at step 0 of episode 0?
                 worlds = [worlds[0]] + worlds
@@ -459,32 +456,44 @@ if __name__ == '__main__':
             print(f"\nEvaluation stats saved to '{eval_stats_fname}'. Exiting.")
             sys.exit()
 
-    # If not loading, set up world-evolution stuff.
+    # If not loading, set up world/player-evolution stuff.
     else:
         # Initialize these counters if not reloading.
         gen_itr = 0
         play_itr = 0
         net_itr = 0
+
+        if not cfg.fixed_worlds or cfg.evolve_players:
+            logbook = tools.Logbook()
+            logbook.header = ["iteration"]
         
         # If not loading, do some initial setup for world evolution if applicable.
         if not cfg.fixed_worlds:
             # Create empty container.
-            archive = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=cfg.fitness_domain,
+            world_archive = containers.Grid(shape=nb_bins, max_items_per_bin=max_items_per_bin, fitness_domain=cfg.fitness_domain,
                                    fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
 
-            # TODO: use this when ``fixed_worlds``...?
-            logbook = tools.Logbook()
             # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
             # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
-            logbook.header = ["iteration", "containerSize", "evals", "nbUpdated"] + stats.fields + ["meanRew", \
-                "meanEvalRew", "meanPath", "maxPath", "fps", "elapsed"]
+            logbook.header += ["containerSize", "evals", "nbUpdated"] + stats.fields + ["meanPath", "maxPath"]
+        
+        if cfg.evolve_players:
+            player_archive = containers.Grid(shape=nb_bins_play, max_items_per_bin=max_items_per_bin_play, fitness_domain=fitness_domain_play,
+                                   fitness_weight=fitness_weight_play, features_domain=features_domain_play, storage_type=list)
+            logbook.header += ["containerSizePlay", "evalsPlay", "nbUpdatedPlay"]
+
+        else:
+            logbook.header += ["meanRew", "meanEvalRew"]
+
+        logbook.header += ["fps", "elapsed"]
+
+    # This is a placeholder when passed to Evolvers --> DeapQD algorithms.
+    nb_iterations = cfg.total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
     # Perform setup that must occur whether reloading or not, but which will need to occur after reloading if reloading.
     if not cfg.fixed_worlds:
         # Evolutionary algorithm parameters
         assert (nb_features >= 1)
-
-        nb_iterations = cfg.total_play_itrs - play_itr  # The number of iterations (i.e. times where a new batch is evaluated)
 
         eta = 20.0  # The ETA parameter of the polynomial mutation (as defined in the origin NSGA-II paper by Deb.). It corresponds to the crowding degree of the mutation. A high ETA will produce mutants close to its parent, a small ETA will produce offspring with more changes.
         ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
@@ -508,7 +517,7 @@ if __name__ == '__main__':
                         'batch_size': cfg.world_batch_size, 'eta': eta}
 
         # Create a QD algorithm
-        world_evolver = WorldEvolver(toolbox=toolbox, container=archive, init_batch_siz=cfg.world_batch_size,
+        world_evolver = WorldEvolver(toolbox=toolbox, container=world_archive, init_batch_siz=cfg.world_batch_size,
                             batch_size=cfg.world_batch_size, niter=nb_iterations, stats=stats,
                             verbose=verbose, show_warnings=show_warnings,
                             results_infos=results_infos, log_base_path=log_base_path, save_period=None,
@@ -524,6 +533,42 @@ if __name__ == '__main__':
         # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
         logbook.header = ["iteration", "minRew", "meanRew", "maxRew", "pctWin", "meanEvalRew", "fps", "elapsed"]
 
+    if cfg.evolve_players:
+        # Evolutionary algorithm parameters for players.
+        nb_features = 2
+        ind_domain = (0, env.n_chan)  # The domain (min/max values) of the individual genomes
+        verbose = True
+        show_warnings = False  # Display warning and error messages. Set to True if you want to check if some individuals were out-of-bounds
+        log_base_path = cfg.outputDir if cfg.outputDir is not None else "."
+        # Create Toolbox
+        toolbox = base.Toolbox()
+        player_class = Player
+        toolbox.register("individual", player_class, obs_width=env.width - 2, obs_n_chan=env.n_chan)
+        toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+        toolbox.register("clone", clone)
+        toolbox.register("mutate", lambda individual: individual.mutate())
+        toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
+        # toolbox.register("select", tools.selBest) # But you can also use all DEAP selection functions instead to create your own QD-algorithm
+
+        # Create a dict storing all relevant infos
+        results_infos = {'ind_domain': ind_domain, 'features_domain': features_domain_play, 'fitness_domain': cfg.fitness_domain,
+                        'nb_bins': nb_bins_play, 'init_batch_size': cfg.world_batch_size,
+                        'batch_size': cfg.world_batch_size}
+
+        # Create a QD algorithm
+        player_evolver = PlayerEvolver(toolbox=toolbox, container=player_archive, init_batch_size=cfg.world_batch_size,
+                            batch_size=cfg.world_batch_size, niter=nb_iterations, stats=stats,
+                            verbose=verbose, show_warnings=show_warnings,
+                            results_infos=results_infos, log_base_path=log_base_path, save_period=None,
+                            iteration_filename=f'{experiment_name}' + '/latest-players-{}.p',
+                            trainer=trainer, idx_counter=world_idx_counter, cfg=cfg, 
+                            )
+        player_evolver.run_setup(init_batch_size=cfg.world_batch_size)
+
+    else:
+        player_evolver=None
+
+
 #   if cfg.fixed_worlds:
 #       for i in range(1000):
 #           logbook_stats = train_players(trainer=trainer, worlds=training_worlds,
@@ -536,7 +581,7 @@ if __name__ == '__main__':
         cfg.gen_phase_len = -1
         new_grid = containers.Grid(shape=(1, 1), max_items_per_bin=100, fitness_domain=cfg.fitness_domain,
                                    fitness_weight=fitness_weight, features_domain=features_domain, storage_type=list)
-        archive = new_grid
+        world_archive = new_grid
 
     # Update and print seed
     np.random.seed(seed)
@@ -546,7 +591,7 @@ if __name__ == '__main__':
     # The outer co-learning loop
     toggle_train_player(trainer, train_player=True, cfg=cfg)
     # TODO: remove this function and initialize most of these objects in the trainer setup function.
-    trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr)
+    trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr, player_evolver)
     for _ in range(cfg.total_play_itrs):
         trainer.train()
     sys.exit()

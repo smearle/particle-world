@@ -104,7 +104,7 @@ def main():
             'evaluate': args.evaluate,
             'evolve_players': args.evolve_players,
             'field_of_view': field_of_view,
-            'fixed_worlds': False,
+            'fixed_worlds': not quality_diversity and not objective,
             'fully_observable': fully_observable,
             'gen_adversarial_worlds': args.gen_adversarial_worlds,
             'gen_phase_len': gen_phase_len,
@@ -122,6 +122,7 @@ def main():
             'quality_diversity': quality_diversity,
             'render': render,
             'rotated_observations': rotated,
+            'translated_observations': False if args.evolve_players else True,
             'visualize': args.visualize,
         }
         exp_configs.append(exp_config)

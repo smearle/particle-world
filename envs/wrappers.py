@@ -86,7 +86,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
 
-    def set_player(self, players: dict, idx_counter):
+    def set_player_policies(self, players: dict, idx_counter):
         """Set the player agent for this environment."""
         self.player_key = ray.get(idx_counter.get.remote(hash(self)))
         self.player = players[self.player_key]
@@ -331,6 +331,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
     def __init__(self, env, env_config):
         WorldEvolutionWrapper.__init__(self, env, env_config)
         self.env = env
+        self.evolve_player = env_config['cfg'].evolve_players
         # MultiAgentEnv.__init__(self)
 
     def step(self, actions):
@@ -372,3 +373,46 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         else:
             assert not self.evaluate
             # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
+
+    def set_player_policies(self, players: dict, idx_counter):
+        """Set the player agent for this environment."""
+        self.player_keys = ray.get(idx_counter.get.remote(hash(self)))
+        self.players = [players[k] for k in self.player_keys]
+        self.need_world_reset = True
+
+    def _preprocess_obs(self, obs):
+        policy_batch_obs = {i: [] for i in range(len(self.players))}
+        for (i, j) in obs:
+            policy_batch_obs[i].append(obs[(i, j)])
+        policy_batch_obs = {i: np.array(policy_batch_obs[i]) for i in policy_batch_obs}
+
+        return policy_batch_obs
+
+    def simulate(self):
+        ep_rews = None
+
+        while self.world_queue:
+
+            # Load up a new world and simulate player behavior in it.
+            obs = self.reset()
+            dones = {"__all__": False}
+            net_rews = {k: 0 for k in obs}
+            ep_rews = {k: [] for k in obs} if ep_rews is None else ep_rews
+
+            while dones["__all__"] == False:
+                obs = self._preprocess_obs(obs)
+                actions = {i: self.players[i].get_actions(obs[i]) for i in range(len(self.players))}
+                actions = {(i, j): actions[i][j] for i in actions for j in range(len(actions[i]))}
+                obs, rews, dones, infos = self.step(actions)
+                net_rews = {k: net_rews[k] + v for k, v in rews.items()}
+                self.render()
+
+            ep_rews = {k: ep_rews[k] + [v] for k, v in net_rews.items()}
+
+#       world_rews = [[] for i in range(len(self.world_queue))]
+#       for ep_rew in ep_rews.values():
+#           for i, w_rew in enumerate(ep_rew):
+#               world_rews[i].append(w_rew)
+
+#       return ep_rews
+

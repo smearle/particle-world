@@ -8,9 +8,6 @@ import ray
 import deap
 from timeit import default_timer as timer
 
-from utils import update_world_individuals
-
-
 class Evolver(DEAPQDAlgorithm):
     def __init__(self, trainer, idx_counter, cfg, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -52,7 +49,7 @@ class Evolver(DEAPQDAlgorithm):
         # Evaluate the individuals with an invalid fitness
         # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
 
-    def generate_batch(self, batch_size: int) -> list:
+    def ask(self, batch_size: int) -> list:
         """Generate a batch of individuals to evaluate.
 
         Where possible, we return an even mix of new mutants and "stale" elites.
@@ -271,6 +268,8 @@ class PlayerEvolver(Evolver):
     def _update_individuals(individuals, objs):
         for k, ind in individuals.items():
             ind.fitness.values = (objs[k], )
+
+            # TODO: Add diversity measures.
             ind.features = [0, 0]
 
 

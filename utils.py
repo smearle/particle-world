@@ -82,13 +82,14 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
 
 
 def get_experiment_name(cfg):
+    exp_name = ''
+    if cfg.evolve_players:
+        exp_name += 'evolvePlay_'
     if cfg.fixed_worlds:
-        exp_name = f'fixedWorlds_{cfg.n_policies}-pol'
+        exp_name += f'fixedWorlds_{cfg.n_policies}-pol'
     else:
         if cfg.generator_class != "TileFlipIndividual":
-            exp_name = f'{cfg.generator_class}_'
-        else:
-            exp_name = ''
+            exp_name += f'{cfg.generator_class}_'
         if cfg.quality_diversity:
             exp_name += 'qd'
         else:

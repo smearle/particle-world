@@ -9,6 +9,7 @@ import pytorch_neat
 from pytorch_neat.cppn import create_cppn, Leaf
 from torch import nn
 
+from evo.models import NCA, init_weights
 from utils import discrete_to_onehot
 
 
@@ -121,31 +122,6 @@ class NNGenerator(Generator):
         return set_weights(self.nn_model, weights)
 
 
-class GradlessNCA(nn.Module):
-    def __init__(self, n_chan):
-        super(GradlessNCA, self).__init__()
-        self.n_aux = 16
-        self.n_chan = n_chan
-        self.ls1 = nn.Conv2d(n_chan + self.n_aux, 32, 3, 1, 1)  # , padding_mode='circular')
-        self.ls2 = nn.Conv2d(32, 64, 1, 1, 0)
-        self.ls3 = nn.Conv2d(64, n_chan + self.n_aux, 1, 1, 0)
-        self.layers = [self.ls3, self.ls2, self.ls1]
-        self.apply(init_weights)
-
-    def forward(self, x):
-        with th.no_grad():
-            if self.last_aux is None:
-                self.last_aux = th.zeros(x.shape[0], self.n_aux, *x.shape[2:])
-            x = th.cat([x, self.last_aux], dim=1)
-            x = th.sigmoid(self.ls3(th.relu(self.ls2(th.relu(self.ls1(x))))))
-            # x = th.sin(self.ls3(th.sin(self.ls2(th.sin(self.ls1(x))))))
-            self.last_aux = x[:, self.n_chan:, ...]
-            return x[:, :self.n_chan, ...]
-
-    def reset(self):
-        self.last_aux = None
-
-
 class SinCPPN(nn.Module):
     def __init__(self, n_hid):
         super(SinCPPN, self).__init__()
@@ -200,7 +176,7 @@ class NCAGenerator(NNGenerator):
         self.n_unique_chan = 2
 
         self.n_nca_steps = n_nca_steps
-        nca_model = GradlessNCA(n_chan)
+        nca_model = NCA(n_chan)
         set_nograd(nca_model)
         super(NCAGenerator, self).__init__(width, n_chan, nca_model)
         self.world = None
@@ -309,11 +285,6 @@ def set_nograd(nn):
     for param in nn.parameters():
         param.requires_grad = False
 
-
-def init_weights(l):
-    if type(l) == th.nn.Conv2d:
-        th.nn.init.orthogonal_(l.weight)
-#   th.nn.init.normal_(l.weight)
 
 
 def get_init_weights(nn):
