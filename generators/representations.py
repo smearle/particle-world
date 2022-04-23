@@ -221,25 +221,6 @@ class NCAGenerator(NNGenerator):
         return gen_sequence
 
 
-def set_weights(nn, weights):
-    with th.no_grad():
-        n_el = 0
-        for layer in nn.layers:
-            l_weights = weights[n_el: n_el + layer.weight.numel()]
-            n_el += layer.weight.numel()
-            l_weights = l_weights.reshape(layer.weight.shape)
-            layer.weight = th.nn.Parameter(th.Tensor(l_weights))
-            layer.weight.requires_grad = False
-            if layer.bias is not None:
-                n_bias = layer.bias.numel()
-                b_weights = weights[n_el: n_el + n_bias]
-                n_el += n_bias
-                b_weights = b_weights.reshape(layer.bias.shape)
-                layer.bias = th.nn.Parameter(th.Tensor(b_weights))
-                layer.bias.requires_grad = False
-    return nn
-
-
 class CPPN(Generator):
     def __init__(self, width):
         super().__init__(width)
@@ -284,15 +265,6 @@ class CPPN(Generator):
 def set_nograd(nn):
     for param in nn.parameters():
         param.requires_grad = False
-
-
-
-def get_init_weights(nn):
-    init_params = []
-    for name, param in nn.named_parameters():
-        init_params.append(param.view(-1).numpy())
-    init_params = np.hstack(init_params)
-    return init_params
 
 
 def rastrigin(ps):

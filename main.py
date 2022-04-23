@@ -93,7 +93,10 @@ if __name__ == '__main__':
     pg_width = 500
     pg_scale = pg_width / cfg.width
     cfg.save_interval = 100
-    cfg.archive_size = 4000 if not cfg.quality_diversity else 8100
+    if cfg.evolve_players:
+        cfg.archive_size = 100 if not cfg.quality_diversity else 256
+    else:
+        cfg.archive_size = 4000 if not cfg.quality_diversity else 8100
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     n_evo_workers = (1 if cfg.n_evo_workers == 0 else cfg.n_evo_workers)
@@ -319,7 +322,7 @@ if __name__ == '__main__':
 
     if cfg.evolve_players:
         nb_bins_play = (1, 1)
-        fitness_domain_play = [(env.min_reward, env.max_reward)]
+        fitness_domain_play = [(env.min_reward, env.max_reward * 100)]
         features_domain_play = [(-1, 1), (-1, 1)]  # placeholder
         max_items_per_bin_play = 100
         fitness_weight_play = 1
@@ -477,7 +480,6 @@ if __name__ == '__main__':
             logbook.header += ["containerSize", "evals", "nbUpdated"] + stats.fields + ["meanPath", "maxPath"]
         
         else:
-            world_evolver = None
             # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
             # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
             logbook.header += ["minRew", "meanRew", "maxRew", "pctWin", "meanEvalRew"]
@@ -485,9 +487,10 @@ if __name__ == '__main__':
         if cfg.evolve_players:
             player_archive = containers.Grid(shape=nb_bins_play, max_items_per_bin=max_items_per_bin_play, fitness_domain=fitness_domain_play,
                                    fitness_weight=fitness_weight_play, features_domain=features_domain_play, storage_type=list)
-            logbook.header += ["containerSizePlay", "evalsPlay", "nbUpdatedPlay"]
+            logbook.header += ["containerSizePlay", "evalsPlay", "nbUpdatedPlay"] + [f"{sf}Play" for sf in stats.fields]
 
         else:
+            player_archive = None
             logbook.header += ["meanRew", "meanEvalRew"]
 
         logbook.header += ["fps", "elapsed"]
@@ -530,6 +533,9 @@ if __name__ == '__main__':
                             trainer=trainer, idx_counter=world_idx_counter, cfg=cfg, 
                             )
         world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
+
+    else:
+        world_evolver = None
 
     if cfg.evolve_players:
         # Evolutionary algorithm parameters for players.

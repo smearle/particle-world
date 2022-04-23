@@ -17,9 +17,10 @@ class NCA(nn.Module):
         self.last_aux = None
         self.n_aux = 16
         self.n_chan = n_chan
-        self.ls1 = nn.Conv2d(n_chan + self.n_aux, 32, 3, 1, 1)  # , padding_mode='circular')
-        self.ls2 = nn.Conv2d(32, 64, 1, 1, 0)
-        self.ls3 = nn.Conv2d(64, n_chan + self.n_aux, 1, 1, 0)
+        with th.no_grad():
+            self.ls1 = nn.Conv2d(n_chan + self.n_aux, 32, 3, 1, 1)  # , padding_mode='circular')
+            self.ls2 = nn.Conv2d(32, 64, 1, 1, 0)
+            self.ls3 = nn.Conv2d(64, n_chan + self.n_aux, 1, 1, 0)
         self.layers = [self.ls3, self.ls2, self.ls1]
         self.apply(init_weights)
 
@@ -39,12 +40,42 @@ class NCA(nn.Module):
         self.last_aux = None
 
 
-class PlayNCA(NCA):
-    def __init__(self, n_chan, player_chan):
+class FullObsPlayNCA(NCA):
+    def __init__(self, n_chan, player_chan, obs_width, **kwargs):
         super().__init__(n_chan=n_chan)
         self.player_chan = player_chan
-        self.neighb_out = nn.Linear(3 * 3, len(adjs))
+        with th.no_grad():
+            # self.fc = nn.Linear(obs_width ** 2 * (self.n_chan + 1), len(adjs))
+            self.fc = nn.Linear(900, len(adjs))
+        set_nograd(self)
         
+    def mutate(self, *args, **kwargs):
+        w = get_init_weights(self)
+        set_weights(self, w + th.randn_like(w) * 0.1)
+
+
+    def forward(self, x):
+        with th.no_grad():
+            n_batches = x.shape[0]
+            x = super().forward(x)        
+            x = x.view(n_batches, -1)
+            x = self.fc(x)
+
+            return x
+
+class PlayNCA(NCA):
+    def __init__(self, n_chan, player_chan, **kwargs):
+        super().__init__(n_chan=n_chan)
+        self.player_chan = player_chan
+        with th.no_grad():
+            self.neighb_out = nn.Linear(3 * 3, len(adjs))
+        set_nograd(self)
+        
+    def mutate(self, *args, **kwargs):
+        w = get_init_weights(self)
+        set_weights(self, w + th.randn_like(w) * 0.1)
+
+
     def forward(self, x):
         with th.no_grad():
             # The coordinates of the player's position
@@ -81,12 +112,12 @@ class PlayNCA(NCA):
                                 [0, 1, 0]])
             neighb *= adj_cross
 
+            # For now we just pass this neighborhood through a little dense layer.
             return self.neighb_out(neighb.view(n_batches, -1))
 
-
+            # TODO: Could do this more deterministically, selecting max in a given direction, as attempted below.
     #       # neighb += th.finfo(neighb.dtype).min * (-1 * adj_cross + 1)
 
-    #       # TODO: sample next positions randomly?
     #       next_pos = neighb.reshape(n_batches, -1).argmax(dim=1)
     #       next_pos = th.cat(((next_pos % neighb.shape[1]).view(n_batches, -1), (next_pos // neighb.shape[2]).view(n_batches, -1)), dim=1)
     #       next_pos = next_pos.cpu().numpy()
@@ -108,6 +139,34 @@ def init_weights(l):
 #   th.nn.init.normal_(l.weight)
 
 
+def set_nograd(nn):
+    for param in nn.parameters():
+        param.requires_grad = False
+
+
+def get_init_weights(nn):
+    init_params = []
+    for name, param in nn.named_parameters():
+        init_params.append(param.view(-1))
+    init_params = th.hstack(init_params)
+    return init_params
+
+
+def set_weights(nn, weights):
+    with th.no_grad():
+        n_el = 0
+        # for layer in nn.layers:
+        for name, param in nn.named_parameters():
+            l_param = weights[n_el: n_el + param.numel()]
+            n_el += param.numel()
+            l_param = l_param.reshape(param.shape)
+            param = th.nn.Parameter(th.Tensor(l_param), requires_grad=False)
+            # param.weight.requires_grad = False
+    return nn
+
+
+
+### Hand-weighted path-finding NCA for reference only! ###
 
 RENDER = True
 

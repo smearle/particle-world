@@ -425,6 +425,7 @@ class WorldEvoPPOTrainer(algorithm):
         if colearning_config.evolve_players:
             assert player_evolver is not None
         self.player_evolver = player_evolver
+        self.player_archive = player_evolver.container if player_evolver else None
         self.idx_counter = idx_counter
         self.logbook = logbook
         self.colearn_cfg = colearning_config
@@ -450,8 +451,8 @@ class WorldEvoPPOTrainer(algorithm):
 
         if evo_eval_config["fixed_worlds"]:
             # self.world_archive = full_obs_test_mazes
-            # self.world_archive = partial_obs_test_mazes
-            self.world_archive = partial_obs_test_mazes_2
+            self.world_archive = partial_obs_test_mazes
+            # self.world_archive = partial_obs_test_mazes_2
 
         else:
             # Create a separate evolution evaluation worker set for evo eval.
@@ -472,6 +473,7 @@ class WorldEvoPPOTrainer(algorithm):
         # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
 
     def evaluate(self, episodes_left_fn=None, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
+        return {}
         # FIXME: This is a hack. Should be able to use configs for this?
         self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_mode("evaluation_world")))
 
@@ -759,6 +761,9 @@ class WorldEvoPPOTrainer(algorithm):
             self.gen_itr += 1
             self.net_itr += 1
 
+        if self.config["evolve_players"]:
+            self.player_evolver.increment_ages()
+
         # The training step is complete, so we are done this phase of generator-evolution.
         logbook_stats = {}
         mean_path_length = compute_archive_world_heuristics(archive=self.world_evolver.container, trainer=self)
@@ -781,6 +786,8 @@ class WorldEvoPPOTrainer(algorithm):
         idx_counter = ray.get_actor("play_idx_counter")
         player_batch = self.player_evolver.ask(self.colearn_cfg.world_batch_size)
         idx_counter.set_keys.remote(player_batch.keys())
+
+        # TODO: Parallelize environment simulation on each worker.
         hashes = self.workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
         hashes = [h for wh in hashes for h in wh]
         idx_counter.set_hashes.remote(hashes)
@@ -791,10 +798,14 @@ class WorldEvoPPOTrainer(algorithm):
         player_rews = {}
         [player_rews.update(r) for worker_rews in rews for r in worker_rews]
 
-        self.player_evolver.tell(player_batch, player_rews)
+        logbook_stats = self.player_evolver.tell(player_batch, player_rews)
+        log(self.logbook, logbook_stats, self.net_itr)
 
         step_results = {f'episode_reward_{s}': getattr(np, s)(list(player_rews.values())) for s in ['mean', 'min', 'max']}
         step_results.update({'agent_timesteps_total': 0})
+
+        if self.colearn_cfg.fixed_worlds:
+            self.player_evolver.increment_ages()
 
         return step_results
 

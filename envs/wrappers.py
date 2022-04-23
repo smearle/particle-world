@@ -107,13 +107,14 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # Figure out which world to evaluate.
         # self.world_idx = 0
         if self.evolve_player:
-            self.world_key_queue = list(worlds.keys())
+            self.world_key_queue = copy.copy(list(worlds.keys()))
             self.world_queue = worlds
+        # This handles training env evo eval
         elif idx_counter:
             self.world_key_queue = ray.get(idx_counter.get.remote(hash(self)))
             self.world_queue = {wk: worlds[wk] for wk in self.world_key_queue} if not self.evaluate else worlds
         else:
-            # If training (or something else?), shuffle world keys.
+            # If... something else? shuffle world keys.
             self.world_key_queue = list(worlds.keys())
             self.world_queue = worlds
 
@@ -181,7 +182,6 @@ class WorldEvolutionWrapper(gym.Wrapper):
             if self.world_key_queue:
                 self.world_key = self.world_key_queue[0]
                 self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
-                print(self.world_key)
                 self.set_world(self.world_queue[self.world_key])
             # Not changing world_key to None here is a workaround to allow setting regret loss after reset (which is not avoidable while calling batch. sample() ...?)
 
@@ -390,6 +390,10 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         """Set the player agent for this environment."""
         self.player_keys = ray.get(idx_counter.get.remote(hash(self)))
         self.players = [players[k] for k in self.player_keys]
+
+        # TODO: support multiple players?
+        assert len(self.player_keys) == 1
+
         self.need_world_reset = True
 
     def _preprocess_obs(self, obs):
@@ -405,7 +409,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         # world_rews = {}
         player_rew = 0
         
-        while self.world_queue:
+        while self.world_key_queue:
 
             # Load up a new world and simulate player behavior in it.
             obs = self.reset()
@@ -414,9 +418,9 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
             net_rews = {k: 0 for k in obs}
 
             while dones["__all__"] == False:
-                obs = self._preprocess_obs(obs)
-                actions = {i: self.players[i].get_actions(obs[i]) for i in range(len(self.players))}
-                actions = {(i, j): actions[i][j] for i in actions for j in range(len(actions[i]))}
+                batch_obs = self._preprocess_obs(obs)
+                actions = {i: self.players[i].get_actions(batch_obs[i]) for i in range(len(self.players))}
+                actions = {(i, j): actions[i][j] for i in actions for j in range(len(actions[i])) if (i, j) in obs}
                 obs, rews, dones, infos = self.step(actions)
                 player_rew += sum(rews.values())
                 net_rews = {k: net_rews[k] + v for k, v in rews.items()}

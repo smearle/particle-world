@@ -41,13 +41,13 @@ class Evolver(DEAPQDAlgorithm):
         # The co-learning loop will always start here, with at least a single round of world-generation
 #       idx_counter = ray.get_actor("idx_counter")
 
-    def tell(self, batch, world_stats):
+    # def tell(self, batch, world_stats):
 
-        # TODO: Refer to a dict mapping fitness functions to their minimum values?
-        self._update_individuals(batch, world_stats, min_fitness=-10)
+    #     # TODO: Refer to a dict mapping fitness functions to their minimum values?
+    #     self._update_individuals(batch, world_stats, min_fitness=-10)
 
-        # Evaluate the individuals with an invalid fitness
-        # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
+    #     # Evaluate the individuals with an invalid fitness
+    #     # invalid_ind = [ind for ind in init_batch if not ind.fitness.valid]
 
     def ask(self, batch_size: int) -> list:
         """Generate a batch of individuals to evaluate.
@@ -262,7 +262,8 @@ class WorldEvolver(Evolver):
 class PlayerEvolver(Evolver):
     def tell(self, batch, world_stats):
         logbook_stats = super().tell(batch, world_stats)
-        logbook_stats = {f"play_{k}": v for k, v in logbook_stats.items()}
+        logbook_stats = {f"{k}Play": v for k, v in logbook_stats.items()}
+        self.curr_itr += 1
         return logbook_stats
 
     def _update_individuals(self, individuals, objs):
