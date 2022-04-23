@@ -63,7 +63,7 @@ def init_parser():
     parser.add_argument("-gaw", "--gen_adversarial_worlds", action="store_true", help="Whether to generate worlds with "
                         "min_solvable objective function until convergence using trained policy, to test the extent of "
                         "the policy's abilities.")
-    parser.add_argument('-lc', '--load_config', type=int, default=None, 
+    parser.add_argument('-lc', '--load_config', type=str, default=None, 
                         help="Load a dictionary of (automatically-generated) arguments. "
                         "NOTE: THIS OVERWRITES ALL OTHER ARGUMENTS AVAILABLE IN THE COMMAND LINE.")
 
