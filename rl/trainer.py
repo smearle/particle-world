@@ -475,7 +475,6 @@ class WorldEvoPPOTrainer(algorithm):
         # FIXME: too many workers getting created when specifying 1 trainer worker and n evo eval workers?
 
     def evaluate(self, episodes_left_fn=None, duration_fn: Optional[Callable[[int], int]] = None) -> dict:
-        return {}
         # FIXME: This is a hack. Should be able to use configs for this?
         self.evaluation_workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_mode("evaluation_world")))
 
@@ -713,6 +712,7 @@ class WorldEvoPPOTrainer(algorithm):
                 # Need to take an extra batch of samples because of the way we queue/load worlds (I think). Results in
                 # duplicate evaluations on first iteration. Kind of feels like we're flying by the seat of our pants 
                 # here and trusting sample. Maybe it will win us over.
+                # while len(world_stats) < self.colearn_cfg.world_batch_size:
                 for i in range(self.colearn_cfg.world_batch_size // max(1, self.colearn_cfg.n_evo_workers) + (0 if self._just_loaded else 1)):
                 # while True:
 

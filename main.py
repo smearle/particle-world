@@ -137,7 +137,7 @@ if __name__ == '__main__':
     if cfg.evolve_players:
         cfg.archive_size = 100 if not cfg.quality_diversity else 256
     else:
-        cfg.archive_size = 4000 if not cfg.quality_diversity else 8100
+        cfg.archive_size = 100 if not cfg.quality_diversity else 256
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     n_evo_workers = (1 if cfg.n_evo_workers == 0 else cfg.n_evo_workers)
@@ -271,8 +271,11 @@ if __name__ == '__main__':
 
         # Remove the save directory if it exists and we are overwriting.
         else:
-            print(f"Overwriting save directory '{save_dir}'.")
-            shutil.rmtree(save_dir)
+            if os.path.exists(save_dir):
+                shutil.rmtree(save_dir)
+                print(f"Overwriting save directory '{save_dir}'.")
+            else:
+                print(f"No directory to overwrite, creating a new one: '{save_dir}'.")
 
         # Create the new save directory.
         os.mkdir(save_dir)

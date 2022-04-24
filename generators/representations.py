@@ -1,3 +1,4 @@
+from enum import unique
 from pdb import set_trace as TT
 
 import neat
@@ -9,7 +10,7 @@ import pytorch_neat
 from pytorch_neat.cppn import create_cppn, Leaf
 from torch import nn
 
-from evo.models import NCA, init_weights
+from evo.models import NCA, get_init_weights, init_weights, set_weights
 from utils import discrete_to_onehot
 
 
@@ -205,12 +206,20 @@ class NCAGenerator(NNGenerator):
     def generate(self, render=False, screen=None, pg_delay=1):
         self._reset()
         gen_sequence = [self.discrete_world]
-        x = discrete_to_onehot(self.discrete_world[0], self.n_chan)
+        x = discrete_to_onehot(self.discrete_world[0], self.n_chan).astype(int)
         for _ in range(self.n_nca_steps):
             x = self._update(th.Tensor(x).unsqueeze(0))
-            unique_layers = np.zeros((x.shape[0], self.n_unique_chan, x.shape[2], x.shape[3]))
-            TT()
-            self.discrete_world = np.concatenate(x[:, :self.n_unique_chan, ...].argmax(1), )
+            unique_layers = np.zeros((x.shape[0], self.n_unique_chan, x.shape[2], x.shape[3]), dtype=int)
+            self.discrete_world = x[:, :self.n_unique_chan].argmax(1)
+            for i in range(unique_layers.shape[1]):
+                unq_layer = x[:, i]
+                unq_coord = np.argmax(unq_layer.reshape(unq_layer.shape[0], -1), axis=1)
+                unq_coord = np.unravel_index(unq_coord, unq_layer.shape[1:])
+                self.discrete_world[:, unq_coord[0], unq_coord[1]] = self.n_unique_chan + i
+
+                # Discourage unique tiles from overlapping.
+                x[:, i+1, unq_coord[0], unq_coord[1]] = -100
+
             gen_sequence.append(self.discrete_world)
             if self.save_gen_sequence:
                 gen_sequence.append(self.discrete_world)

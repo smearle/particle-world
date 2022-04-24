@@ -83,7 +83,8 @@ class IdxCounter:
 
 def set_worlds(worlds: dict, workers: WorkerSet, idx_counter: IdxCounter, cfg: Namespace, load_now: bool = False):
     """Assign worlds to environments to be loaded at next reset."""
-    keys = np.random.permutation(list(worlds.keys()))
+    # keys = np.random.permutation(list(worlds.keys()))
+    keys = list(worlds.keys())
     world_gen_sequences = {k: world.gen_sequence for k, world in worlds.items() if hasattr(world, 'gen_sequence')} \
         if cfg.render else None
 
@@ -97,7 +98,8 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter: IdxCounter, cfg: N
     n_envs = len(hashes)
 
     # Pad the list of indices with duplicates in case we have more than enough eval environments
-    keys = np.repeat(keys, math.ceil(n_envs / len(keys)))
+    keys = keys * math.ceil(n_envs / len(keys))
+    keys = keys[:n_envs]
 
     idx_counter.set_keys.remote(keys)
     idx_counter.set_hashes.remote(hashes)

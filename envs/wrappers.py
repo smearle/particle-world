@@ -193,7 +193,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # Not changing world_key to None here is a workaround to allow setting regret loss after reset (which is not avoidable while calling batch. sample() ...?)
 
         # Increment eval worlds to ensure each world is evaluated an equal number of times over training
-        elif self.evaluation_world:
+        elif self.evaluate:
             # 0th world key is that assigned by the global idx_counter. This ensures no two eval envs will be 
             # evaluating the same world if it can be avoided. 
             self.last_world_key = self.world_key_queue[0] if self.last_world_key is None else self.last_world_key

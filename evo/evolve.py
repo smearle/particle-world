@@ -59,7 +59,7 @@ class Evolver(DEAPQDAlgorithm):
         contested_inds = self._disturb_elites(batch_size // 2)
         # print(f"{len(contested_inds)} contested individuals.")
         offspring = self._generate_offspring(batch_size - len(contested_inds))
-        [self.container.discard(ind) for ind in contested_inds]
+        # [self.container.discard(ind) for ind in contested_inds]
         batch = contested_inds + offspring
         batch = {i: ind for i, ind in enumerate(batch)}
 
@@ -79,7 +79,7 @@ class Evolver(DEAPQDAlgorithm):
             ind = self.stale_individuals[i]
             if ind in self.container:
                 invalid_inds.append(ind)
-                # self.container.discard(ind)
+                self.container.discard(ind)
             i += 1
         self.stale_individuals = self.stale_individuals[i:]
 

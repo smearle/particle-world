@@ -79,12 +79,12 @@ def main():
         batch_config = yaml.safe_load(f)
     batch_config = namedtuple('batch_config', batch_config.keys())(**batch_config)
 
-    exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.ngen_nplay, 
+    exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.generator_classes, batch_config.ngen_nplay, 
                             batch_config.npol_qd_objectives, batch_config.fullobs_fov_models_rotated))
     exp_configs = []
 
     for exp_i, exp_set in enumerate(exp_sets):
-        exp_name, env_cls, (gen_phase_len, play_phase_len), (n_policies, quality_diversity, objective), \
+        exp_name, env_cls, generator_class, (gen_phase_len, play_phase_len), (n_policies, quality_diversity, objective), \
             (fully_observable, field_of_view, model, rotated) = exp_set
 
         # Just for reference in terms of what's currently explicitly supported/expected:
@@ -108,7 +108,7 @@ def main():
             'fully_observable': fully_observable,
             'gen_adversarial_worlds': args.gen_adversarial_worlds,
             'gen_phase_len': gen_phase_len,
-            'generator_class': "TileFlipIndividual",
+            'generator_class':generator_class,
             'load': load or args.gen_adversarial_worlds,
             'model': model,
             'n_envs_per_worker': args.n_envs_per_worker,

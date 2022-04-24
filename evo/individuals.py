@@ -206,3 +206,10 @@ class NCAIndividual(DiscreteIndividual):
             playability_penalty += abs(len(idxs) - 1)
         super().validate()
         self.playability_penalty = playability_penalty
+
+
+    def __eq__(self, other):
+        return False
+
+        # FIXME: Otherwise equal to all other NCA individuals... but why?
+        # return (self.__class__ == other.__class__ and np.all(self.discrete == other.discrete))
