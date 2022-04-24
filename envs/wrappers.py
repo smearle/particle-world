@@ -205,12 +205,13 @@ class WorldEvolutionWrapper(gym.Wrapper):
             self.set_world(self.world_queue[self.world_key])
 
         # Randomly select a world from the training set.
-        elif self.training_world:
+        # elif self.training_world:
+        else:
             self.world_key = np.random.choice(self.world_key_queue)
             self.set_world(self.world_queue[self.world_key])
         
-        else:
-            raise Exception
+        # else:
+            # raise Exception
 
         # self.next_world = None if not self.enjoy and not self.world_queue else self.world_queue[self.world_key_queue[0]]
         # self.world_queue = self.world_queue[1:] if self.world_queue else []

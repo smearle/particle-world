@@ -173,8 +173,9 @@ def set_weights(nn, weights):
             l_param = weights[n_el: n_el + param.numel()]
             n_el += param.numel()
             l_param = l_param.reshape(param.shape).float()
-            param = th.nn.Parameter(th.Tensor(l_param), requires_grad=False)
+            param.data = th.Tensor(l_param)
             # param.weight.requires_grad = False
+
     return nn
 
 
