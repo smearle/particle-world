@@ -1,3 +1,0 @@
-[submodule "qdpy"]
-	path = submodules/qdpy
-	url = git@gitlab.com:smearle/qdpy
