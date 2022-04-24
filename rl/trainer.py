@@ -452,7 +452,8 @@ class WorldEvoPPOTrainer(algorithm):
         if evo_eval_config["fixed_worlds"]:
             # self.world_archive = full_obs_test_mazes
             # self.world_archive = corridor_test_mazes
-            self.world_archive = h_test_mazes
+            self.world_archive = s_test_mazes
+            # self.world_archive = h_test_mazes
             # self.world_archive = partial_obs_test_mazes_3
 
         else:

@@ -168,6 +168,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.stats[-1]['n_steps'] = self.n_step
 
     def reset_stats(self):
+        # print(f"Resetting stats for world {self.world_key}.")
         new_ep_stats = {'world_key': self.world_key, 'n_steps': 0}
         new_ep_stats.update({f'agent_{k}_reward': 0 for k in self.agent_ids})
         self.stats.append(new_ep_stats)
@@ -428,5 +429,8 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
                 # for (i, j) in net_rews:
                     # world_rews[self.world_key][i] += net_rews[(i, j)]
         
-        return {self.player_keys[0]: player_rew / self.n_pop}, self.get_world_stats()
+        world_stats = self.get_world_stats()
+        # print(f"World {self.world_key} stats: {world_stats}")
+        
+        return {self.player_keys[0]: player_rew / self.n_pop}, world_stats
 

@@ -19,7 +19,8 @@
     # player-training to take, respectively, before switching to a phase of the opposite type. If either is -1, then
     # we iterate until generator/player convergence (or "staleness") is reached. 0 is an invalid value.
     "ngen_nplay": [
-        [1, 1],
+        # [1, 1],
+        [3, 3],
     ],
 
     # List of [n_policies: int, quality_diversity: bool, objective: str] hyperparameters. If quality_diversity is True, 

@@ -27,7 +27,7 @@ from tqdm import tqdm
 from args import init_parser
 
 from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_mazes, cross8_test_mazes, \
-    ghost_action_test_maze, corridor_test_mazes, h_test_mazes
+    ghost_action_test_maze, corridor_test_mazes, h_test_mazes, s_test_mazes
 from envs.wrappers import make_env
 from evo.players import Player
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
@@ -82,6 +82,7 @@ def simulate_remote(players, worlds, env, cfg, render_env=False):
     :return: The result of the simulation.
     """
     ret = simulate(players, worlds, env, cfg, render_env=render_env)
+    # print(f"Remote simulation finished with {ret}")
 
     return ret
 
@@ -95,10 +96,12 @@ def simulate(players, worlds, env, cfg, render_env=False):
     """
     env.set_player_policies(players=players)
     if not isinstance(list(worlds.values())[0], np.ndarray):
+        # print(f'Simulating on world: {worlds.keys()}')
         env.queue_worlds(worlds={k: ind.discrete for k, ind in worlds.items()}, load_now=False)
     else:
         env.queue_worlds(worlds=worlds, load_now=False)
     ret = env.simulate(render_env=render_env)
+    # print(f"Simulation finished with {ret}")
 
     return ret
 
@@ -120,7 +123,7 @@ if __name__ == '__main__':
         cfg.rotated_observations = False
         cfg.translated_observations = False
 
-    cfg.single_thread = True
+    cfg.single_thread = False
     cfg.n_elite_worlds = 1
     cfg.n_elite_players = 1
     cfg.fitness_domain = [(-np.inf, np.inf)]
@@ -371,7 +374,8 @@ if __name__ == '__main__':
     # If training on fixed worlds, select the desired training set.
     if cfg.fixed_worlds:
         if cfg.evolve_players:
-            training_worlds = h_test_mazes
+            # training_worlds = h_test_mazes
+            training_worlds = s_test_mazes
         else:
             training_worlds = trainer.world_archive
         world_archive = training_worlds
@@ -423,12 +427,13 @@ if __name__ == '__main__':
 
         if isinstance(env.swarms[0], NeuralSwarm) and cfg.rllib_eval:
             # if cfg.loadIteration == -1:
-            with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
-                model_checkpoint_path = f.read()
-            # else:
-            # model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{cfg.loadIteration:06d}/checkpoint-{cfg.loadIteration}')
-            trainer.load_checkpoint(model_checkpoint_path)
-            print(f'Loaded model checkpoint at {model_checkpoint_path}')
+            if not cfg.evolve_players:
+                with open(os.path.join(save_dir, 'model_checkpoint_path.txt'), 'r') as f:
+                    model_checkpoint_path = f.read()
+                # else:
+                # model_checkpoint_path = os.path.join(save_dir, f'checkpoint_{cfg.loadIteration:06d}/checkpoint-{cfg.loadIteration}')
+                trainer.load_checkpoint(model_checkpoint_path)
+                print(f'Loaded model checkpoint at {model_checkpoint_path}')
 
         # Render and observe
         if cfg.enjoy:
@@ -449,11 +454,16 @@ if __name__ == '__main__':
                 # FIXME: Hack: avoid skipping world 0. Something about the way eval calls reset at step 0 of episode 0?
                 worlds = [worlds[0]] + worlds
 
-            for i, elite in enumerate(worlds):
-                print(f"Evaluating world {i}")
-                set_worlds({i: elite}, trainer.evaluation_workers, world_idx_counter, cfg)
-                trainer.evaluate()
-#               ret = evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
+            if cfg.evolve_players:
+                results = [simulate({0: sorted(player_archive, key=lambda ind: ind.fitness.values[0], reverse=True)[0]}, 
+                                    worlds={wk: world}, env=env, cfg=cfg, render_env=True) for wk, world in enumerate(worlds)]
+
+            else:
+                for i, elite in enumerate(worlds):
+                    print(f"Evaluating world {i}")
+                    set_worlds({i: elite}, trainer.evaluation_workers, world_idx_counter, cfg)
+                    trainer.evaluate()
+    #               ret = evaluate_worlds(trainer=trainer, worlds={i: elite}, idx_counter=idx_counter,
 #                                           evaluate_only=True, cfg=cfg)
             print('Done enjoying, goodbye!')
             sys.exit()
@@ -638,75 +648,80 @@ if __name__ == '__main__':
     if trainer:
         toggle_train_player(trainer, train_player=True, cfg=cfg)
         trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr, player_evolver)
+
     for _ in range(cfg.total_play_itrs):
         if cfg.evolve_players:
-            player_evolve_start_time = timer()
-            player_batch = player_evolver.ask(cfg.world_batch_size)
+            for _ in range(cfg.play_phase_len):
+                player_evolve_start_time = timer()
+                player_batch = player_evolver.ask(cfg.world_batch_size)
 
-            if not cfg.fixed_worlds:
-                world_batch = world_evolver.ask(cfg.world_batch_size)
-                if net_itr == 0:
-                    elite_world_lst = [ind for ind in world_batch.values()]
+                if not cfg.fixed_worlds:
+                    if gen_itr == 0:
+                        world_batch = world_evolver.ask(cfg.world_batch_size)
+                        elite_world_lst = [ind for ind in world_batch.values()]
+                    else:
+                        elite_world_lst = sorted(world_evolver.container, key=lambda ind: ind.fitness.values[0], reverse=True)
+                    elite_world_lst = elite_world_lst[:cfg.n_elite_worlds]
+                    elite_worlds = {k: ind for k, ind in enumerate(elite_world_lst)}
+                    # print(f"Evaluating players on worlds with fitness: {[ind.fitness.values[0] for ind in elite_worlds.values()]}")
+                    
                 else:
-                    elite_world_lst = sorted(world_evolver.container, key=lambda ind: ind.fitness.values[0], reverse=True)
-                elite_world_lst = elite_world_lst[:cfg.n_elite_worlds]
-                elite_worlds = {k: ind for k, ind in enumerate(elite_world_lst)}
-                # print(f"Evaluating players on worlds with fitness: {[ind.fitness.values[0] for ind in elite_worlds.values()]}")
-                
-            else:
-                elite_worlds = world_archive
+                    elite_worlds = world_archive
 
-            # Submit a bunch of simulations for player evaluation/evolution.
-            if cfg.single_thread:
-                results = [simulate(players={pk: player}, worlds=elite_worlds, env=env, cfg=cfg) for pk, player in player_batch.items()]
-            else:
-                futures = [simulate_remote.remote(players={pk: player}, worlds=elite_worlds, env=env, cfg=cfg, render_env=(pk==0)) for pk, player in player_batch.items()]
-                # Get results of player simulations.
-                results = ray.get(futures)
-
-            gen_itr += 1
-
-            # TODO: pass stats relating to world eval/evolution here too.
-            player_rews_lst, _ = [r[0] for r in results], [r[1] for r in results]
-
-            player_rews = {}
-            [player_rews.update(pr) for pr in player_rews_lst]
-            logbook_stats = player_evolver.tell(player_batch, player_rews)
-            frames = cfg.world_batch_size * env.max_episode_steps
-            player_evolve_time = timer() - player_evolve_start_time
-            logbook_stats.update({'elapsed': player_evolve_time, 'fps': frames / player_evolve_time})
-            log(logbook, logbook_stats, net_itr)
-
-            if not cfg.fixed_worlds:
-                world_evolve_start_time = timer()
-                if net_itr == 0:
-                    elite_players_lst = [ind for ind in player_batch.values()]
-                else:
-                    elite_players_lst = sorted(player_evolver.container, key=lambda ind: ind.fitness.values[0], reverse=True)
-                elite_players_lst = elite_players_lst[:cfg.n_elite_players]
-                elite_players = {k: ind for k, ind in enumerate(elite_players_lst)}
-                # print(f"Evaluating worlds on players with fitness: {[ind.fitness.values[0] for ind in elite_players.values()]}")
-
-                TT()
-                # Submit a bunch of simulations for world evaluation/evolution.
+                # Submit a bunch of simulations for player evaluation/evolution.
                 if cfg.single_thread:
-                    futures = [simulate(players=elite_players, worlds={wk: world}, env=env, cfg=cfg) for wk, world in world_batch.items()]
+                    results = [simulate(players={pk: player}, worlds=elite_worlds, env=env, cfg=cfg) for pk, player in player_batch.items()]
                 else:
-                    futures = [simulate_remote.remote(players=elite_players, worlds={wk: world}, env=env, cfg=cfg, render_env=(wk==0)) for wk, world in world_batch.items()]
+                    futures = [simulate_remote.remote(players={pk: player}, worlds=elite_worlds, env=env, cfg=cfg, render_env=(pk==0 and cfg.render)) for pk, player in player_batch.items()]
+                    # Get results of player simulations.
                     results = ray.get(futures)
-                _, world_qd_stats_lst = [r[0] for r in results], [r[1] for r in results]
-                world_qd_stats = {s['world_key']: s['qd_stats'] for s_lst in world_qd_stats_lst for s in s_lst}
-                logbook_stats = world_evolver.tell(world_batch, world_qd_stats)
-                frames = cfg.world_batch_size * env.max_steps
-                world_evolve_time = timer() - world_evolve_start_time
-                logbook_stats.update({'elapsed': world_evolve_time, 'fps': frames / world_evolve_time})
-                log(logbook, logbook_stats, net_itr)
 
-            if net_itr % 1 == 0:
+                player_rews_lst, _ = [r[0] for r in results], [r[1] for r in results]
+
+                player_rews = {}
+                [player_rews.update(pr) for pr in player_rews_lst]
+                logbook_stats = player_evolver.tell(player_batch, player_rews)
+                frames = cfg.world_batch_size * env.max_episode_steps
+                player_evolve_time = timer() - player_evolve_start_time
+                logbook_stats.update({'elapsed': player_evolve_time, 'fps': frames / player_evolve_time})
+                log(logbook, logbook_stats, net_itr)
+                play_itr += 1
+                net_itr += 1
+
+            if not cfg.fixed_worlds:
+                for _ in range(cfg.gen_phase_len):
+                    world_evolve_start_time = timer()
+                    world_batch = world_evolver.ask(cfg.world_batch_size)
+                    if play_itr == 0:
+                        elite_players_lst = [ind for ind in player_batch.values()]
+                    else:
+                        elite_players_lst = sorted(player_evolver.container, key=lambda ind: ind.fitness.values[0], reverse=True)
+                    elite_players_lst = elite_players_lst[:cfg.n_elite_players]
+                    elite_players = {k: ind for k, ind in enumerate(elite_players_lst)}
+                    # print(f"Evaluating worlds on players with fitness: {[ind.fitness.values[0] for ind in elite_players.values()]}")
+
+                    # Submit a bunch of simulations for world evaluation/evolution.
+                    # print(f"Evaluating worlds: {world_batch.keys()}")
+                    if cfg.single_thread:
+                        results = [simulate(players=elite_players, worlds={wk: world}, env=env, cfg=cfg) for wk, world in world_batch.items()]
+                    else:
+                        futures = [simulate_remote.remote(players=elite_players, worlds={wk: world}, env=env, cfg=cfg, render_env=(wk==0 and cfg.render)) for wk, world in world_batch.items()]
+                        results = ray.get(futures)
+                    _, world_qd_stats_lst = [r[0] for r in results], [r[1] for r in results]
+                    world_qd_stats = {s['world_key']: s['qd_stats'] for s_lst in world_qd_stats_lst for s in s_lst}
+                    logbook_stats = world_evolver.tell(world_batch, world_qd_stats)
+                    frames = cfg.world_batch_size * env.max_episode_steps
+                    world_evolve_time = timer() - world_evolve_start_time
+                    logbook_stats.update({'elapsed': world_evolve_time, 'fps': frames / world_evolve_time})
+                    log(logbook, logbook_stats, net_itr)
+
+                    gen_itr += 1
+                    net_itr += 1
+
+            if net_itr % 10 == 0:
                 save(world_archive=world_archive, player_archive=player_archive, gen_itr=net_itr, 
                     net_itr=net_itr, play_itr=net_itr, logbook=logbook, save_dir=cfg.save_dir)
 
-            net_itr += 1
 
             auto_garbage_collect()
 

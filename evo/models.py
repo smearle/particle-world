@@ -11,6 +11,8 @@ adjs = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
 
 adjs_to_acts = {adj: i for i, adj in enumerate(adjs)}
 
+RENDER = False
+
 class NCA(nn.Module):
     def __init__(self, n_chan):
         super(NCA, self).__init__()
@@ -110,6 +112,17 @@ class PlayNCA(NCA):
             adj_cross = th.Tensor([[0, 1, 0],
                                    [1, 1, 1],
                                    [0, 1, 0]])
+
+            if RENDER:
+                im = neighb[0, 0].cpu().numpy()
+                im = im.T
+                im = im / im.max()
+                im = np.expand_dims(np.vstack(im), axis=0)
+                im = im.transpose(1, 2, 0)
+                im = cv2.resize(im, (550, 550), interpolation=None)
+                cv2.imshow("ActionChannel", im)
+                cv2.waitKey(1)
+
             neighb *= adj_cross
 
             # For now we just pass this neighborhood through a little dense layer.
@@ -167,8 +180,6 @@ def set_weights(nn, weights):
 
 
 ### Hand-weighted path-finding NCA for reference only! ###
-
-RENDER = True
 
 class FloodFill(nn.Module):
     """Source is the goal. Activation flows from goal toward player. When the flow reaches the player, it moves in that
