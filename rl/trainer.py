@@ -30,7 +30,7 @@ from ray.rllib.utils import merge_dicts
 from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict, TrainerConfigDict, ResultDict
 from timeit import default_timer as timer
 
-from envs import eval_mazes, full_obs_test_mazes, partial_obs_test_mazes, partial_obs_test_mazes_2
+from envs import eval_mazes, full_obs_test_mazes, partial_obs_test_mazes, partial_obs_test_mazes_2, partial_obs_test_mazes_3
 from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.utils import compute_archive_world_heuristics, save
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
@@ -451,8 +451,9 @@ class WorldEvoPPOTrainer(algorithm):
 
         if evo_eval_config["fixed_worlds"]:
             # self.world_archive = full_obs_test_mazes
-            self.world_archive = partial_obs_test_mazes
+            # self.world_archive = partial_obs_test_mazes
             # self.world_archive = partial_obs_test_mazes_2
+            self.world_archive = partial_obs_test_mazes_3
 
         else:
             # Create a separate evolution evaluation worker set for evo eval.

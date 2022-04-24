@@ -12,7 +12,7 @@ from evo.models import PlayNCA, FullObsPlayNCA
 class Player(Individual):
     def __init__(self, obs_width, obs_n_chan, *args, player_chan=3, **kwargs):
         Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
-        self.model = FullObsPlayNCA(obs_width=obs_width, n_chan=obs_n_chan, player_chan=player_chan)
+        self.model = PlayNCA(obs_width=obs_width, n_chan=obs_n_chan, player_chan=player_chan)
 
     def get_actions(self, obs):
         act = self.model(th.Tensor(obs).permute(0, 3, 1, 2))
@@ -22,6 +22,9 @@ class Player(Individual):
         acts = [np.random.choice(np.arange(len(act[0])), p=act[i]) for i in range(len(act))]
 
         return acts
+
+    def reset(self):
+        self.model.reset()
 
     def mutate(self, *args, **kwargs):
         self.model.mutate(*args, **kwargs)

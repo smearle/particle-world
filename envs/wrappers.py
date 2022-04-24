@@ -416,11 +416,12 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
             # world_rews[self.world_key] = {k: 0 for k in self.player_keys}
             dones = {"__all__": False}
             net_rews = {k: 0 for k in obs}
+            [self.players[i].reset() for i in range(len(self.players))]
 
             while dones["__all__"] == False:
                 batch_obs = self._preprocess_obs(obs)
                 actions = {i: self.players[i].get_actions(batch_obs[i]) for i in range(len(self.players))}
-                actions = {(i, j): actions[i][j] for i in actions for j in range(len(actions[i])) if (i, j) in obs}
+                actions = {(i, j): actions[i][j] for i in actions for j in range(len(actions[i])) if (i, j) not in self.dead}
                 obs, rews, dones, infos = self.step(actions)
                 player_rew += sum(rews.values())
                 net_rews = {k: net_rews[k] + v for k, v in rews.items()}

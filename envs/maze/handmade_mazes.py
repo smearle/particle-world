@@ -143,6 +143,7 @@ for x, y in [(0, w//2), (w-1, w//2)]:
     partial_obs_test_mazes['partial_' + str(x) + '_' + str(y)][x, y] = goal
 
 
+# H shaped mazes
 partial_obs_test_mazes_2 = {}
 core_layout = np.ones((w, w), dtype=np.int8) * wall
 core_layout[:, w//2] = empty
@@ -153,6 +154,17 @@ for x, y in [(0, 0), (w-1, 0), (0, w-1), (w-1, w-1)]:
     partial_obs_test_mazes_2['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
     partial_obs_test_mazes_2['partial_' + str(x) + '_' + str(y)][x, y] = goal
 
+
+# 2 shaped mazes
+partial_obs_test_mazes_3 = {}
+core_layout = np.ones((w, w), dtype=np.int8) * wall
+core_layout[:, w//2] = empty
+core_layout[0, w//2: w] = core_layout[w-1, 0: w//2] = empty
+core_layout[w//2, w//2] = start
+
+for x, y in [(0, w-1), (w-1, 0)]:
+    partial_obs_test_mazes_3['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
+    partial_obs_test_mazes_3['partial_' + str(x) + '_' + str(y)][x, y] = goal
 
 
 ghost_action_test_maze = {'ghost_action_test_maze':
