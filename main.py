@@ -1,18 +1,17 @@
+import gc
 import json
 import math
 import os
 import pickle
 import random
-from re import A
 import shutil
 import sys
 from functools import partial
 from pdb import set_trace as TT
-from time import sleep
-from PIL import Image
 
 import matplotlib.pyplot as plt
 import numpy as np
+import psutil
 import ray
 from ray.tune.logger import pretty_print
 from ray.tune.registry import register_env
@@ -27,8 +26,8 @@ from timeit import default_timer as timer
 from tqdm import tqdm
 from args import init_parser
 
-from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_mazes, full_obs_test_mazes, \
-    ghost_action_test_maze, partial_obs_test_mazes
+from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_mazes, cross8_test_mazes, \
+    ghost_action_test_maze, corridor_test_mazes, h_test_mazes
 from envs.wrappers import make_env
 from evo.players import Player
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
@@ -73,6 +72,42 @@ def get_done_play_phase(play_itr, cfg):
     return play_itr % cfg.play_phase_len == 0
 
 
+@ray.remote
+def simulate_remote(players, worlds, env, cfg, render_env=False):
+    """
+    Simulate a player in a separate process.
+    :param player: The player to simulate.
+    :param env: The environment to simulate in.
+    :param cfg: The configuration.
+    :return: The result of the simulation.
+    """
+    ret = simulate(players, worlds, env, cfg, render_env=render_env)
+
+    return ret
+
+def simulate(players, worlds, env, cfg, render_env=False):
+    """
+    Simulate a player in a separate process.
+    :param player: The player to simulate.
+    :param env: The environment to simulate in.
+    :param cfg: The configuration.
+    :return: The result of the simulation.
+    """
+    env.set_player_policies(players=players)
+    if not isinstance(list(worlds.values())[0], np.ndarray):
+        env.queue_worlds(worlds={k: ind.discrete for k, ind in worlds.items()}, load_now=False)
+    else:
+        env.queue_worlds(worlds=worlds, load_now=False)
+    ret = env.simulate(render_env=render_env)
+
+    return ret
+
+
+def auto_garbage_collect(pct=80.0):
+    if psutil.virtual_memory().percent >= pct:
+        gc.collect()
+
+
 if __name__ == '__main__':
     parser = init_parser()
     cfg = parser.parse_args()
@@ -85,6 +120,9 @@ if __name__ == '__main__':
         cfg.rotated_observations = False
         cfg.translated_observations = False
 
+    cfg.single_thread = True
+    cfg.n_elite_worlds = 1
+    cfg.n_elite_players = 1
     cfg.fitness_domain = [(-np.inf, np.inf)]
     cfg.width = 15
     pg_delay = 50  # Delay for rendering in pygame (ms?). Probably not needed!
@@ -327,13 +365,16 @@ if __name__ == '__main__':
         max_items_per_bin_play = 100
         fitness_weight_play = 1
 
-    trainer = None if cfg.load and cfg.visualize else \
+    trainer = None if cfg.load and cfg.visualize or cfg.evolve_players else \
         init_trainer(env, idx_counter=world_idx_counter, env_config=env_config, cfg=cfg)
 
     # If training on fixed worlds, select the desired training set.
     if cfg.fixed_worlds:
-        # train_worlds = {0: generator.landscape}
-        training_worlds = trainer.world_archive
+        if cfg.evolve_players:
+            training_worlds = h_test_mazes
+        else:
+            training_worlds = trainer.world_archive
+        world_archive = training_worlds
 
     # If doing world/player, do any setup that is necessary regardless of whether we're reloading or starting anew.
     if not cfg.fixed_worlds or cfg.evolve_players:
@@ -530,7 +571,7 @@ if __name__ == '__main__':
                             verbose=verbose, show_warnings=show_warnings,
                             results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                             iteration_filename=f'{experiment_name}' + '/latest-{}.p',
-                            trainer=trainer, idx_counter=world_idx_counter, cfg=cfg, 
+                            curr_itr=net_itr, idx_counter=world_idx_counter, cfg=cfg, 
                             )
         world_evolver.run_setup(init_batch_size=cfg.world_batch_size)
 
@@ -565,7 +606,7 @@ if __name__ == '__main__':
                             verbose=verbose, show_warnings=show_warnings,
                             results_infos=results_infos, log_base_path=log_base_path, save_period=None,
                             iteration_filename=f'{experiment_name}' + '/latest-players-{}.p',
-                            trainer=trainer, idx_counter=world_idx_counter, cfg=cfg, 
+                            curr_itr=net_itr, idx_counter=world_idx_counter, cfg=cfg, 
                             )
         player_evolver.run_setup(init_batch_size=cfg.world_batch_size)
 
@@ -593,10 +634,84 @@ if __name__ == '__main__':
     print(f"Seed: {seed}")
 
     # The outer co-learning loop
-    toggle_train_player(trainer, train_player=True, cfg=cfg)
     # TODO: remove this function and initialize most of these objects in the trainer setup function.
-    trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr, player_evolver)
+    if trainer:
+        toggle_train_player(trainer, train_player=True, cfg=cfg)
+        trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr, player_evolver)
     for _ in range(cfg.total_play_itrs):
-        trainer.train()
+        if cfg.evolve_players:
+            player_evolve_start_time = timer()
+            player_batch = player_evolver.ask(cfg.world_batch_size)
+
+            if not cfg.fixed_worlds:
+                world_batch = world_evolver.ask(cfg.world_batch_size)
+                if net_itr == 0:
+                    elite_world_lst = [ind for ind in world_batch.values()]
+                else:
+                    elite_world_lst = sorted(world_evolver.container, key=lambda ind: ind.fitness.values[0], reverse=True)
+                elite_world_lst = elite_world_lst[:cfg.n_elite_worlds]
+                elite_worlds = {k: ind for k, ind in enumerate(elite_world_lst)}
+                # print(f"Evaluating players on worlds with fitness: {[ind.fitness.values[0] for ind in elite_worlds.values()]}")
+                
+            else:
+                elite_worlds = world_archive
+
+            # Submit a bunch of simulations for player evaluation/evolution.
+            if cfg.single_thread:
+                results = [simulate(players={pk: player}, worlds=elite_worlds, env=env, cfg=cfg) for pk, player in player_batch.items()]
+            else:
+                futures = [simulate_remote.remote(players={pk: player}, worlds=elite_worlds, env=env, cfg=cfg, render_env=(pk==0)) for pk, player in player_batch.items()]
+                # Get results of player simulations.
+                results = ray.get(futures)
+
+            gen_itr += 1
+
+            # TODO: pass stats relating to world eval/evolution here too.
+            player_rews_lst, _ = [r[0] for r in results], [r[1] for r in results]
+
+            player_rews = {}
+            [player_rews.update(pr) for pr in player_rews_lst]
+            logbook_stats = player_evolver.tell(player_batch, player_rews)
+            frames = cfg.world_batch_size * env.max_episode_steps
+            player_evolve_time = timer() - player_evolve_start_time
+            logbook_stats.update({'elapsed': player_evolve_time, 'fps': frames / player_evolve_time})
+            log(logbook, logbook_stats, net_itr)
+
+            if not cfg.fixed_worlds:
+                world_evolve_start_time = timer()
+                if net_itr == 0:
+                    elite_players_lst = [ind for ind in player_batch.values()]
+                else:
+                    elite_players_lst = sorted(player_evolver.container, key=lambda ind: ind.fitness.values[0], reverse=True)
+                elite_players_lst = elite_players_lst[:cfg.n_elite_players]
+                elite_players = {k: ind for k, ind in enumerate(elite_players_lst)}
+                # print(f"Evaluating worlds on players with fitness: {[ind.fitness.values[0] for ind in elite_players.values()]}")
+
+                TT()
+                # Submit a bunch of simulations for world evaluation/evolution.
+                if cfg.single_thread:
+                    futures = [simulate(players=elite_players, worlds={wk: world}, env=env, cfg=cfg) for wk, world in world_batch.items()]
+                else:
+                    futures = [simulate_remote.remote(players=elite_players, worlds={wk: world}, env=env, cfg=cfg, render_env=(wk==0)) for wk, world in world_batch.items()]
+                    results = ray.get(futures)
+                _, world_qd_stats_lst = [r[0] for r in results], [r[1] for r in results]
+                world_qd_stats = {s['world_key']: s['qd_stats'] for s_lst in world_qd_stats_lst for s in s_lst}
+                logbook_stats = world_evolver.tell(world_batch, world_qd_stats)
+                frames = cfg.world_batch_size * env.max_steps
+                world_evolve_time = timer() - world_evolve_start_time
+                logbook_stats.update({'elapsed': world_evolve_time, 'fps': frames / world_evolve_time})
+                log(logbook, logbook_stats, net_itr)
+
+            if net_itr % 1 == 0:
+                save(world_archive=world_archive, player_archive=player_archive, gen_itr=net_itr, 
+                    net_itr=net_itr, play_itr=net_itr, logbook=logbook, save_dir=cfg.save_dir)
+
+            net_itr += 1
+
+            auto_garbage_collect()
+
+        else:
+            trainer.train()
+
     sys.exit()
 

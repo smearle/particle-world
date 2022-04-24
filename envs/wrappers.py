@@ -92,11 +92,16 @@ class WorldEvolutionWrapper(gym.Wrapper):
         [setattr(self, m, False) for m in modes]
         setattr(self, mode, True)
 
-    def set_player_policies(self, players: dict, idx_counter):
+    def set_player_policies(self, players: dict):
         """Set the player agent for this environment."""
-        self.player_key = ray.get(idx_counter.get.remote(hash(self)))
-        self.player = players[self.player_key]
+        self.player_keys = list(players.keys())
+        self.players = [players[k] for k in self.player_keys]
+
+        # TODO: support multiple players?
+        assert len(self.player_keys) == 1
+
         self.need_world_reset = True
+
 
     def queue_worlds(self, worlds: dict, load_now: bool, idx_counter=None, next_n_pop=None, world_gen_sequences=None):
         """Assign a ``next_world`` to the environment, which will be loaded after the next step.
@@ -181,6 +186,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         if self.evo_eval_world or self.evolve_player:
             if self.world_key_queue:
                 self.world_key = self.world_key_queue[0]
+                # Remove first key from the queue.
                 self.world_key_queue = self.world_key_queue[1:] if self.world_key_queue else []
                 self.set_world(self.world_queue[self.world_key])
             # Not changing world_key to None here is a workaround to allow setting regret loss after reset (which is not avoidable while calling batch. sample() ...?)
@@ -386,16 +392,6 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
             assert not self.evaluate
             # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
 
-    def set_player_policies(self, players: dict, idx_counter):
-        """Set the player agent for this environment."""
-        self.player_keys = ray.get(idx_counter.get.remote(hash(self)))
-        self.players = [players[k] for k in self.player_keys]
-
-        # TODO: support multiple players?
-        assert len(self.player_keys) == 1
-
-        self.need_world_reset = True
-
     def _preprocess_obs(self, obs):
         policy_batch_obs = {i: th.zeros((self.n_pop, *self.observation_spaces[i].shape)) for i in range(len(self.players))}
         for (i, j) in obs:
@@ -403,7 +399,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
         return policy_batch_obs
 
-    def simulate(self):
+    def simulate(self, render_env=False):
         assert self.evolve_player
         ep_rews = None
         # world_rews = {}
@@ -413,6 +409,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
             # Load up a new world and simulate player behavior in it.
             obs = self.reset()
+            self.reset_stats()
             # world_rews[self.world_key] = {k: 0 for k in self.player_keys}
             dones = {"__all__": False}
             net_rews = {k: 0 for k in obs}
@@ -425,11 +422,11 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
                 obs, rews, dones, infos = self.step(actions)
                 player_rew += sum(rews.values())
                 net_rews = {k: net_rews[k] + v for k, v in rews.items()}
-                if self.player_keys[0] == 0:
+                if render_env:
                     self.render()
 
                 # for (i, j) in net_rews:
                     # world_rews[self.world_key][i] += net_rews[(i, j)]
         
-        return {self.player_keys[0]: player_rew / self.n_pop}
+        return {self.player_keys[0]: player_rew / self.n_pop}, self.get_world_stats()
 

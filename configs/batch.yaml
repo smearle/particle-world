@@ -31,8 +31,8 @@
         # [2, false, "paired"],
         # [2, false, "contrastive"],
         # [3, false, "contrastive"],
-        # [1, false, "min_solvable"],
-        [1, false, null]  # this trains on a fixed set of worlds
+        [1, false, "min_solvable"],
+        # [1, false, null]  # this trains on a fixed set of worlds
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 

@@ -30,7 +30,7 @@ from ray.rllib.utils import merge_dicts
 from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict, TrainerConfigDict, ResultDict
 from timeit import default_timer as timer
 
-from envs import eval_mazes, full_obs_test_mazes, partial_obs_test_mazes, partial_obs_test_mazes_2, partial_obs_test_mazes_3
+from envs import eval_mazes, cross8_test_mazes, corridor_test_mazes, h_test_mazes, s_test_mazes
 from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.utils import compute_archive_world_heuristics, save
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
@@ -451,9 +451,9 @@ class WorldEvoPPOTrainer(algorithm):
 
         if evo_eval_config["fixed_worlds"]:
             # self.world_archive = full_obs_test_mazes
-            # self.world_archive = partial_obs_test_mazes
-            # self.world_archive = partial_obs_test_mazes_2
-            self.world_archive = partial_obs_test_mazes_3
+            # self.world_archive = corridor_test_mazes
+            self.world_archive = h_test_mazes
+            # self.world_archive = partial_obs_test_mazes_3
 
         else:
             # Create a separate evolution evaluation worker set for evo eval.
@@ -785,8 +785,8 @@ class WorldEvoPPOTrainer(algorithm):
             return super()._exec_plan_or_training_iteration_fn()
 
         idx_counter = ray.get_actor("play_idx_counter")
-        player_batch = self.player_evolver.ask(self.colearn_cfg.world_batch_size)
-        idx_counter.set_keys.remote(player_batch.keys())
+        # player_batch = self.player_evolver.ask(self.colearn_cfg.world_batch_size)
+        # idx_counter.set_keys.remote(player_batch.keys())
 
         # TODO: Parallelize environment simulation on each worker.
         hashes = self.workers.foreach_worker(lambda worker: worker.foreach_env(lambda env: hash(env)))
@@ -794,13 +794,13 @@ class WorldEvoPPOTrainer(algorithm):
         idx_counter.set_hashes.remote(hashes)
 
         # Simulate using a batch of player policies on environments, each with the same set of worlds.
-        self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_player_policies(player_batch, idx_counter)))
+        # self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.set_player_policies(player_batch, idx_counter)))
         rews = self.workers.foreach_worker(lambda w: w.foreach_env(lambda e: e.simulate()))
         player_rews = {}
         [player_rews.update(r) for worker_rews in rews for r in worker_rews]
 
-        logbook_stats = self.player_evolver.tell(player_batch, player_rews)
-        log(self.logbook, logbook_stats, self.net_itr)
+        # logbook_stats = self.player_evolver.tell(player_batch, player_rews)
+        # log(self.logbook, logbook_stats, self.net_itr)
 
         step_results = {f'episode_reward_{s}': getattr(np, s)(list(player_rews.values())) for s in ['mean', 'min', 'max']}
         step_results.update({'agent_timesteps_total': 0})

@@ -9,11 +9,10 @@ import deap
 from timeit import default_timer as timer
 
 class Evolver(DEAPQDAlgorithm):
-    def __init__(self, trainer, idx_counter, cfg, *args, **kwargs):
+    def __init__(self, curr_itr, idx_counter, cfg, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # FIXME: This is circular, lose this reference!
-        self.trainer = trainer
 
         self.cfg = cfg
         self.idx_counter = idx_counter
@@ -23,7 +22,7 @@ class Evolver(DEAPQDAlgorithm):
         self.stale_generators = False
         self.time_until_stale = 10
         self.staleness = 0
-        self.curr_itr = trainer.gen_itr
+        self.curr_itr = curr_itr
         self.stale_individuals = []
 
     def reset_staleness(self) -> None:
@@ -238,7 +237,7 @@ class Evolver(DEAPQDAlgorithm):
         raise NotImplementedError
 
 class WorldEvolver(Evolver):
-    def _update_individuals(individuals, qd_stats, min_fitness=-10):
+    def _update_individuals(self, individuals, qd_stats, min_fitness=-10):
         """Update worlds with stats resulting from simulation.
         
         If worlds are unplayable, then we don't need to have simulated on them, and we penalize them so that they will be

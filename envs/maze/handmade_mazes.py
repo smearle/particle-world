@@ -99,7 +99,7 @@ goal = 3
 
 
 # Test mazes with goals in alternating corners. Will agent learn to check each corner?
-full_obs_test_mazes = {}
+cross8_test_mazes = {}
 
 w = 13
 core_layout = np.ones((w, w), dtype=np.int8) * wall
@@ -110,12 +110,12 @@ core_layout[w//2, w//2] = start
 for x, y in [(0, 1), (0, -2), (-1, 1), (-1, -2)]:
     cross_xy = core_layout.copy()
     cross_xy[x, y] = goal
-    full_obs_test_mazes['cross_' + str(x) + '_' + str(y)] = cross_xy
+    cross8_test_mazes['cross_' + str(x) + '_' + str(y)] = cross_xy
     cross_yx = core_layout.copy()
     cross_yx[y, x] = goal
-    full_obs_test_mazes['cross_' + str(y) + '_' + str(x)] = cross_yx
+    cross8_test_mazes['cross_' + str(y) + '_' + str(x)] = cross_yx
 
-eval_mazes.update(full_obs_test_mazes)
+eval_mazes.update(cross8_test_mazes)
 
 
 # Convert to 3-channel probability distribution (or agent action)-type representation
@@ -133,38 +133,38 @@ for k, y in eval_mazes.items():
 
 
 # Simple test mazes with goal on either end of hallway. Can agent learn to check both ends?
-partial_obs_test_mazes = {}
+corridor_test_mazes = {}
 core_layout = np.ones((w, w), dtype=np.int8) * wall
 core_layout[:, w//2] = empty
 core_layout[w//2, w//2] = start
 
 for x, y in [(0, w//2), (w-1, w//2)]:
-    partial_obs_test_mazes['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
-    partial_obs_test_mazes['partial_' + str(x) + '_' + str(y)][x, y] = goal
+    corridor_test_mazes['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
+    corridor_test_mazes['partial_' + str(x) + '_' + str(y)][x, y] = goal
 
 
 # H shaped mazes
-partial_obs_test_mazes_2 = {}
+h_test_mazes = {}
 core_layout = np.ones((w, w), dtype=np.int8) * wall
 core_layout[:, w//2] = empty
 core_layout[0, :] = core_layout[w-1, :] = empty
 core_layout[w//2, w//2] = start
 
 for x, y in [(0, 0), (w-1, 0), (0, w-1), (w-1, w-1)]:
-    partial_obs_test_mazes_2['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
-    partial_obs_test_mazes_2['partial_' + str(x) + '_' + str(y)][x, y] = goal
+    h_test_mazes['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
+    h_test_mazes['partial_' + str(x) + '_' + str(y)][x, y] = goal
 
 
 # 2 shaped mazes
-partial_obs_test_mazes_3 = {}
+s_test_mazes = {}
 core_layout = np.ones((w, w), dtype=np.int8) * wall
 core_layout[:, w//2] = empty
 core_layout[0, w//2: w] = core_layout[w-1, 0: w//2] = empty
 core_layout[w//2, w//2] = start
 
 for x, y in [(0, w-1), (w-1, 0)]:
-    partial_obs_test_mazes_3['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
-    partial_obs_test_mazes_3['partial_' + str(x) + '_' + str(y)][x, y] = goal
+    s_test_mazes['partial_' + str(x) + '_' + str(y)] = core_layout.copy()
+    s_test_mazes['partial_' + str(x) + '_' + str(y)][x, y] = goal
 
 
 ghost_action_test_maze = {'ghost_action_test_maze':

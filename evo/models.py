@@ -108,8 +108,8 @@ class PlayNCA(NCA):
                 neighb[pl_i, 0, :, :] = pl_x[0, player_pos[1][i] - 1: player_pos[1][i] + 2, player_pos[2][i] - 1: player_pos[2][i] + 2]
 
             adj_cross = th.Tensor([[0, 1, 0],
-                                [1, 1, 1],
-                                [0, 1, 0]])
+                                   [1, 1, 1],
+                                   [0, 1, 0]])
             neighb *= adj_cross
 
             # For now we just pass this neighborhood through a little dense layer.
