@@ -81,6 +81,7 @@ def main():
     exp_sets = list(product(batch_config.exp_names, batch_config.env_classes, batch_config.ngen_nplay, 
                             batch_config.npol_qd_objectives, batch_config.fullobs_fov_models_rotated))
     exp_configs = []
+    experiment_names = []
 
     for exp_i, exp_set in enumerate(exp_sets):
         exp_name, env_cls, (gen_phase_len, play_phase_len), (n_policies, quality_diversity, objective), \
@@ -125,6 +126,7 @@ def main():
         exp_configs.append(exp_config)
         exp_cfg_namespace = namedtuple('exp_cfg_namespace', exp_config.keys())(**exp_config)
         experiment_name = get_experiment_name(exp_cfg_namespace)
+        experiment_names.append(experiment_name)
         with open(os.path.join('configs', 'auto', f'{experiment_name}.json'), 'w') as f:
             json.dump(exp_config, f, indent=4)
 
@@ -151,7 +153,7 @@ def main():
         else:
             job_mem = 64
 
-    for exp_i, exp_set in enumerate(exp_sets):
+    for experiment_name in experiment_names:
         # Because of our parallel evo/train implementation, we need an additional CPU for the remote trainer, and 
         # anoter for the local worker (actually the latter is not true, but... for breathing room).
         launch_job(sbatch_file=sbatch_file, experiment_name=experiment_name, job_time=job_time, job_cpus=n_evo_workers+n_train_workers, \
