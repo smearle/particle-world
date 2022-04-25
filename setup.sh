@@ -1,15 +1,17 @@
 python -m pip install -r requirements.txt
 
-# Probably need to delete respective directories inside submodules for this to properly clone the submodules.
-git submodule update --init qdpy pytorch-neat
+# Might need to delete respective directories inside submodules for this to properly clone the submodules.
+git submodule update --init qdpy
 python -m pip install -e submodules/qdpy
 # python -m pip install --upgrade minerl  # As per instructions in minerl docs.
 
-# for cpu
+# Install torch
+
+# For CPU-only:
 conda install pytorch torchvision torchaudio -c pytorch
 
-# for torch
+# For most GPUs:
 # conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
 
-# for 3090
+# For 3090:
 # conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
