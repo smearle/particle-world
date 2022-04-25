@@ -78,11 +78,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.obj_fn_str = cfg.objective_function if not cfg.gen_adversarial_worlds else 'min_solvable'
         obj_func = globals()[self.obj_fn_str + '_fitness'] if self.obj_fn_str else None
         if obj_func == min_solvable_fitness:
-
-            # TODO: get this directly from the environment.
-            # The maximum reward (specific to maze environment)
             max_rew = env.max_reward
-
             obj_func = partial(obj_func, max_rew=max_rew, trg_rew=trg_rew)
         self.objective_function = obj_func
 
@@ -239,8 +235,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
     def get_world_stats(self, quality_diversity=False):
         """
-        Return the fitness (and behavior characteristics) achieved by the world after an episode of simulation. Note
-        that this only returns the fitness of the latest episode.
+        Return the objective score (and diversity measures) achieved by the world after an episode of simulation. Note
+        that this only returns the metrics corresponding to the latest episode.
         """
         # On the first iteration, the episode runs for max_steps steps. On subsequent calls to rllib's trainer.train(), the
         # reset() call occurs on the first step (resulting in max_steps - 1).
@@ -273,26 +269,29 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
             # Return a mapping of world_key to a tuple of stats in a format that is compatible with qdpy
             # stats are of the form (world_key, qdpy_stats, policy_rewards)
+
+            # Objective and placeholder measures
+            if self.obj_fn_str == 'regret':
+                # obj = self.objective_function(regret_loss)
+
+                #Placeholder regret objective as we move this logic outside the environment.
+                obj = None
+
+            # If we have no objective function (i.e. evaluating on fixed worlds), objective is None.
+            elif not self.objective_function:
+                obj = 0
+            # Most objectives are functions of agent reward.
+            else:
+                obj = self.objective_function(swarm_rewards)
+
             if quality_diversity:
                 # Objective (negative fitness of protagonist population) and measures (antagonist population fitnesses)
-                obj = min_solvable_fitness(swarm_rewards[0:1], max_rew=self.max_reward)
+                # obj = min_solvable_fitness(swarm_rewards[0:1], max_rew=self.max_reward)
+
+                # Default measures are the mean rewards of policies 2 and 3.
                 measures = [np.mean(sr) for sr in swarm_rewards[1:]]
 
             else:
-                # Objective and placeholder measures
-                if self.obj_fn_str == 'regret':
-                    # obj = self.objective_function(regret_loss)
-
-                    #Placeholder regret objective as we move this logic outside the environment.
-                    obj = None
-
-                # If we have no objective function (i.e. evaluating on fixed worlds), objective is None.
-                elif not self.objective_function:
-                    obj = 0
-                # Most objectives are functions of agent reward.
-                else:
-                    obj = self.objective_function(swarm_rewards)
-
                 # Placeholder measures
                 measures = [0, 0]
 

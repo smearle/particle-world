@@ -742,8 +742,19 @@ class WorldEvoPPOTrainer(algorithm):
                 # Get regret / positive value loss metrics from the batches.
                 if self.colearn_cfg.objective_function == "regret":
                     assert not self.colearn_cfg.evolve_players
-                    pos_val_losses = [bb.policy_batches['policy_0']['pos_val_loss'] for b in batches for bb in b]
-                    pos_val_losses = {k: v for pv in pos_val_losses for k, v in pv.items()}
+
+                    # Average regret over policies. TODO: keep this metric per-policy so we could apply, e.g., contrastive
+                    # reward to it.
+                    pos_val_losses = {}
+                    for pi in range(self.colearn_cfg.n_policies):
+                        pos_val_losses_i = [bb.policy_batches[f'policy_{pi}']['pos_val_loss'] for b in batches for bb in b]
+                        pos_val_losses_i = {k: v for pv in pos_val_losses_i for k, v in pv.items()}
+                        for k, v in pos_val_losses_i.items():
+                            if k in pos_val_losses:
+                                pos_val_losses[k] += v
+                            else:
+                                pos_val_losses[k] = v
+                    pos_val_losses = {k: v / self.colearn_cfg.n_policies for k, v in pos_val_losses.items()}
 
                     assert len(pos_val_losses) == len(world_stats)
 

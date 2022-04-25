@@ -186,36 +186,40 @@ class WorldEvoCallbacks(DefaultCallbacks):
 
         if hasattr(samples, 'policy_batches'):
             # TODO: collect regret scores of multiple policies
-            assert len(samples.policy_batches) == 1, "Regret objective only valid for single-policy scenario."
-            pol_batch = samples.policy_batches['policy_0']
+            pol_batches = [samples.policy_batches[k] for k in samples.policy_batches]
         else:
-            pol_batch = samples
+            pol_batches = [samples]
+        
+        for pol_batch in pol_batches:
 
-#       value_targets = pol_batch['value_targets']
-#       vf_preds = pol_batch['vf_preds']
-        advantages = pol_batch['advantages']
-        world_keys = np.array([info['world_key'] for info in pol_batch['infos']])
-        unique_keys = set(world_keys)
-        pos_val_losses = {}
+            pos_val_losses = {}
+    #       value_targets = pol_batch['value_targets']
+    #       vf_preds = pol_batch['vf_preds']
+            advantages = pol_batch['advantages']
+            world_keys = np.array([info['world_key'] for info in pol_batch['infos']])
+            unique_keys = set(world_keys)
 
-        for wk in unique_keys:
-            idxs = np.argwhere(world_keys == wk)
-#           w_val_trgs, w_vf_preds = value_targets[idxs], vf_preds[idxs]
+            for wk in unique_keys:
+                idxs = np.argwhere(world_keys == wk)
+    #           w_val_trgs, w_vf_preds = value_targets[idxs], vf_preds[idxs]
 
-#           # Note that below is wrong: we needed to sum, then clip, then average
-#           pos_val_loss = np.mean(np.clip(w_val_trgs - w_vf_preds, 0, None))
+    #           # Note that below is wrong: we needed to sum, then clip, then average
+    #           pos_val_loss = np.mean(np.clip(w_val_trgs - w_vf_preds, 0, None))
 
-            w_advantages = advantages[idxs]
-            # pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
+                w_advantages = advantages[idxs]
+                # pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
 
-            # Wait, no, I think we take the average magnitude of the GAE?
-            pos_val_losses[wk] = np.mean(np.abs(w_advantages))
+                # Wait, no, I think we take the average magnitude of the GAE?
+                pv = np.mean(np.abs(w_advantages))
 
-        # print(f"Regret objective is {pos_val_losses}. Passing to worker environments.")
+                pos_val_losses[wk] = pv
+
+            pol_batch['pos_val_loss'] = pos_val_losses
+
+            # print(f"Regret objective is {pos_val_losses}. Passing to worker environments.")
 
         # TODO: should be able to pass this info back more naturally somehow, as below
         # FIXME: This breaks training batches.
-        pol_batch['pos_val_loss'] = pos_val_losses
 
         # For now, just giving it back to environments to be collected later
         # TT()

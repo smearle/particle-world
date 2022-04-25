@@ -91,9 +91,11 @@ def get_experiment_name(cfg):
         if cfg.generator_class != "TileFlipIndividual":
             exp_name += f'{cfg.generator_class}_'
         if cfg.quality_diversity:
-            exp_name += 'qd'
-        else:
-            exp_name += f'{cfg.objective_function}'
+            exp_name += "qd"
+        if not (cfg.quality_diversity and cfg.objective_function == "min_solvable"):  # backward compatibility
+            exp_name += f'_{cfg.objective_function}'
+        if cfg.diversity_measures is not None:
+            exp_name += f"_{'_'.join(cfg.diversity_measures)}"
         exp_name += f'_{cfg.n_policies}-pol_{cfg.gen_phase_len}-gen_{cfg.play_phase_len}-play'
     if cfg.rotated_observations:
         exp_name += '_rotObs'

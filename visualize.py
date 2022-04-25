@@ -139,7 +139,7 @@ def visualize_archive(cfg, env, grid):
         im_grid = np.zeros((world_im_width * nb_bins[0], world_im_width * nb_bins[1], 3))
         for g in gg:
             i, j = grid.index_grid(g.features)
-            env.set_world(g.discrete)
+            env.queue_worlds({0: g.discrete}, load_now=True)
             env.reset()
             im = env.render(mode='rgb', pg_width=world_im_width, render_player=True)
             im_grid[i * world_im_width: (i + 1) * world_im_width,

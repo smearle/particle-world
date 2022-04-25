@@ -32,14 +32,21 @@
     # List of [n_policies: int, quality_diversity: bool, objective: str] hyperparameters. If quality_diversity is True, 
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
-    "npol_qd_objectives": [
-        # [3, true, null],
-        [1, false, "regret"],
-        # [2, false, "paired"],
-        # [2, false, "contrastive"],
-        # [3, false, "contrastive"],
-        # [1, false, "min_solvable"],
-        # [1, false, null]  # this trains on a fixed set of worlds
+    "npol_qd_objectives_measures": [
+        # [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
+        [1, true, "min_solvable", ["emptiness", "symmetry"]],  # ...emptiness/symmetry of map as measures
+        [3, true, "contrastive", null],
+        [2, true, "contrastive", ["emptiness", "symmetry"]],
+        [3, true, "contrastive", ["emptiness", "symmetry"]],
+        [3, true, "regret", null],
+        [1, true, "regret", ["emptiness", "symmetry"]],
+
+        # [1, false, "regret", null],
+        # [2, false, "paired", null],
+        # [2, false, "contrastive", null],
+        # [3, false, "contrastive", null],
+        # [1, false, "min_solvable", null],
+        # [1, false, null, null]  # this trains on a fixed set of worlds
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 

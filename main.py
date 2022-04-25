@@ -137,7 +137,7 @@ if __name__ == '__main__':
     if cfg.evolve_players:
         cfg.archive_size = 100 if not cfg.quality_diversity else 256
     else:
-        cfg.archive_size = 100 if not cfg.quality_diversity else 256
+        cfg.archive_size = 4000 if not cfg.quality_diversity else 8100
     # cfg.log_keys = ['episode_reward_max', 'episode_reward_mean', 'episode_reward_min', 'episode_len_mean']
 
     n_evo_workers = (1 if cfg.n_evo_workers == 0 else cfg.n_evo_workers)
@@ -325,13 +325,10 @@ if __name__ == '__main__':
     # If we're doing world evolution, set this up.
     if not cfg.fixed_worlds:
         if cfg.quality_diversity:
-            # If using QD, objective score is determined by the fitness of an additional policy.
-            assert n_policies > 1
-            # Fitness function is fixed for QD experiments.
-            assert cfg.objective_function is None
+            # If using QD, default measures are reward of two different policies.
+            if cfg.diversity_measures is None:
+                assert n_policies > 1
 
-            # TODO: We might want this to be a bit bigger than the intended archive size, assuming QD will have trouble 
-            #  filling certain bins.
             max_total_bins = cfg.archive_size
 
         else:
@@ -346,11 +343,8 @@ if __name__ == '__main__':
         # Don't need to know the dimension here since we'll simply call an individual's "mutate" method
         # initial_weights = generator.get_init_weights()
 
-        if cfg.quality_diversity:
-            # Define grid in terms of fitness of all policies (save 1, for fitness)
-            nb_features = n_policies - 1
-        else:
-            nb_features = 2  # The number of features to take into account in the container
+        # Fixing 2 QD measures for now. Either policy or map characteristics.
+        nb_features = 2
         bins_per_dim = int(pow(max_total_bins, 1. / nb_features))
 
         # The number of bins of the grid of elites. Here, we consider only $nb_features$ features with 
@@ -358,7 +352,10 @@ if __name__ == '__main__':
         nb_bins = (bins_per_dim,) * nb_features 
 
         # The domain (min/max values) of the features. Assume we are using mean policy rewards as diversity measures.
-        features_domain = [(env.min_reward, env.max_reward)] * nb_features  
+        if cfg.diversity_measures is None:
+            features_domain = [(env.min_reward, env.max_reward)] * nb_features  
+        elif cfg.diversity_measures == ["emptiness", "symmetry"]:
+            features_domain = [(0, 1)] * nb_features
 
         # If doing QD (i.e. there is more than one bin), then we have 1 individual per bin. Otherwise, we have 1 bin,
         # and all the individuals in the archive are in this bin.
@@ -415,10 +412,10 @@ if __name__ == '__main__':
         if not cfg.fixed_worlds:
             if cfg.visualize:
 
+                visualize_archive(cfg, env, world_archive)
                 visualize_train_stats(cfg.save_dir, logbook, quality_diversity=cfg.quality_diversity)
                 compile_train_stats(save_dir, logbook, net_itr, gen_itr, play_itr,
                                     quality_diversity=cfg.quality_diversity)
-                visualize_archive(cfg, env, world_archive)
                 if cfg.quality_diversity:
                                 # save fitness qd grid
                     plot_path = os.path.join(cfg.save_dir, "performancesGrid.png")
@@ -481,7 +478,7 @@ if __name__ == '__main__':
             for _ in range(10):
                 rllib_stats = trainer.evaluate()
                 qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
-                    lambda env: env.get_world_stats(evaluate=True, quality_diversity=cfg.quality_diversity)))
+                    lambda env: env.get_world_stats(quality_diversity=cfg.quality_diversity)))
 
                 # Flattening the list of lists of stats (outer lists are per-worker, inner lists are per-environment).
                 qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]

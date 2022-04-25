@@ -2,6 +2,7 @@ import os
 from pdb import set_trace as TT
 import random
 from typing import Optional
+import numpy as np
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 import ray
 
@@ -255,7 +256,17 @@ class WorldEvolver(Evolver):
                 continue
             assert k in qd_stats, f"Individual {k} not in qd_stats."
             ind.fitness.values = qd_stats[k][0]
-            ind.features = qd_stats[k][1]
+
+            # Get the diversity measures of each individual/world.
+            if self.cfg.diversity_measures is None:
+                # Default: use the fitness of policies 2 and 3. (Objective is `min_solvable` score w.r.t. policy 1.)
+                ind.features = qd_stats[k][1]
+
+            elif self.cfg.diversity_measures == ["emptiness", "symmetry"]:
+                ind.features = (np.sum(ind.discrete == 0) / ind.discrete.size, get_sym(ind.discrete))
+
+            else:
+                raise Exception(f"Unknown diversity measures: {self.cfg.diversity_measures}")
 
 
 class PlayerEvolver(Evolver):
@@ -274,3 +285,72 @@ class PlayerEvolver(Evolver):
 
 
 
+
+def get_hor_sym(int_map):
+    """
+    Function to get the horizontal symmetry of a level
+    int_map (numpy array of ints): representation of level
+    """
+    max_val = int_map.size / 2
+    m = 0
+
+    if int(int_map.shape[0]) % 2 == 0:
+        m = np.sum(
+            (
+                int_map[: int(int_map.shape[0] / 2)]
+                == np.flip(int_map[int(int_map.shape[0] / 2) :], 0)
+            ).astype(int)
+        )
+        m = m / max_val
+    else:
+        m = np.sum(
+            (
+                int_map[: int(int_map.shape[0] / 2)]
+                == np.flip(int_map[int(int_map.shape[0] / 2) + 1 :], 0)
+            ).astype(int)
+        )
+        m = m / max_val
+
+    return m
+
+
+def get_ver_sym(int_map):
+    """
+    Function to get the vertical symmetry of a level
+    int_map (numpy array of ints): representation of level
+    env (gym-pcgrl environment instance): used to get the action space dims
+    returns a symmetry float value normalized to a range of 0.0 to 1.0
+    """
+    max_val = int_map.size / 2
+    m = 0
+
+    if int(int_map.shape[1]) % 2 == 0:
+        m = np.sum(
+            (
+                int_map[:, : int(int_map.shape[1] / 2)]
+                == np.flip(int_map[:, int(int_map.shape[1] / 2) :], 1)
+            ).astype(int)
+        )
+        m = m / max_val
+    else:
+        m = np.sum(
+            (
+                int_map[:, : int(int_map.shape[1] / 2)]
+                == np.flip(int_map[:, int(int_map.shape[1] / 2) + 1 :], 1)
+            ).astype(int)
+        )
+        m = m / max_val
+
+    return m
+
+
+def get_sym(int_map):
+    """
+    Function to get the vertical symmetry of a level
+    int_map (numpy array of ints): representation of level
+    env (gym-pcgrl environment instance): used to get the action space dims
+    returns a symmetry float value normalized to a range of 0.0 to 1.0
+    """
+    result = (get_ver_sym(int_map) + get_hor_sym(int_map)) / 2.0
+
+    return result
