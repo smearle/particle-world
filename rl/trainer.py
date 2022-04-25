@@ -32,7 +32,7 @@ from timeit import default_timer as timer
 
 from envs import eval_mazes, cross8_test_mazes, corridor_test_mazes, h_test_mazes, s_test_mazes
 from evo.evolve import PlayerEvolver, WorldEvolver
-from evo.utils import compute_archive_world_heuristics, save
+from evo.utils import compute_archive_world_heuristics, save, selRoulette
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import WorldEvoCallbacks
@@ -536,9 +536,10 @@ class WorldEvoPPOTrainer(algorithm):
 #           training_worlds = self.world_evolver.generate_batch(self.colearn_cfg.world_batch_size)
 
         else:
+            training_worlds = {k: ind for k, ind in enumerate(selRoulette(self.world_archive, self.colearn_cfg.world_batch_size))}
             # training_worlds = {k: ind for k, ind in enumerate(
-            #     sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
-            training_worlds = {k: ind for k, ind in enumerate(self.world_evolver.container)}
+                # sorted(self.world_evolver.container, key=lambda i: i.fitness.values[0], reverse=True))}
+            # training_worlds = {k: ind for k, ind in enumerate(self.world_evolver.container)}
             # Randomly sample from the training worlds if we don't have enough.
             if len(training_worlds) < self.colearn_cfg.world_batch_size:
                 world_keys = np.random.choice(list(training_worlds.keys()), self.colearn_cfg.world_batch_size, replace=True)

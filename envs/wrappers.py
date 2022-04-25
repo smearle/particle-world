@@ -184,7 +184,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.need_world_reset = False
 
         # Cycle through each world once.
-        if self.evo_eval_world or self.evolve_player:
+        if self.evo_eval_world:  # or self.evolve_player:
             if self.world_key_queue:
                 self.world_key = self.world_key_queue[0]
                 # Remove first key from the queue.
@@ -331,6 +331,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
 
         # Sometimes world_key is not in world_gen_sequences... presumably due to forced reset for world loading?
         if self.world_gen_sequences is not None and not self.has_rendered_world_gen and self.world_key in self.world_gen_sequences:
+            # print(f"Render world {self.world_key} on step {self.n_step}.")
             # Render the sequence of worlds that were generated in the generation process.
             for w in self.world_gen_sequences[self.world_key]:
                 world = np.ones((w.shape[0]+2, w.shape[1]+2), dtype=int) * self.wall_chan
@@ -340,6 +341,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
                 world = discrete_to_onehot(world, n_chan=self.n_chan)
                 self.render_level(world, sidxs, gidxs, pg_scale=pg_width/self.width, pg_delay=10, 
                                 mode=mode, render_player=False, enforce_constraints=False)
+                
             self.has_rendered_world_gen = True
     
         # Render the final world and players.
@@ -407,7 +409,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
         # world_rews = {}
         player_rew = 0
         
-        while self.world_key_queue:
+        for _ in range(len(self.world_key_queue)):
 
             # Load up a new world and simulate player behavior in it.
             obs = self.reset()

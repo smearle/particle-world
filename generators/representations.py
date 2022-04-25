@@ -41,7 +41,7 @@ class Generator(object):
         return render_landscape(screen, self.landscape)
 
 
-def render_landscape(screen, landscape):
+def render_landscape(screen, landscape, **kwargs):
     screen.fill((255, 255, 255))
     bg = landscape
     bg = bg[..., None]

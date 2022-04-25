@@ -48,16 +48,6 @@ def contrastive_fitness(rews):
     return obj
 
 
-def paired_fitness(rews):
-    rews = np.array([np.array(r) for r in rews])
-    rew_a = np.mean[rews[0]]
-    rew_b = np.mean[rews[1:]]
-    obj = rew_a - rew_b
-    TT()
-
-    return obj
-
-
 # # Deprecated. We would be accepting fitnesses as an argument, in theory.
 # def fit_dist(pops, scape):
 #     '''n-1 distances in mean fitness, determining the ranking of n populations.'''

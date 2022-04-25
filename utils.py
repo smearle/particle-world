@@ -95,10 +95,14 @@ def get_experiment_name(cfg):
         else:
             exp_name += f'{cfg.objective_function}'
         exp_name += f'_{cfg.n_policies}-pol_{cfg.gen_phase_len}-gen_{cfg.play_phase_len}-play'
+    if cfg.rotated_observations:
+        exp_name += '_rotObs'
     if cfg.fully_observable:
         exp_name += '_fullObs'
     if cfg.model is not None:
         exp_name += f'_mdl-{cfg.model}'
+    if cfg.oracle_policy:
+        exp_name += '_oracle'
     exp_name += f'_{cfg.exp_name}'
     return exp_name
 

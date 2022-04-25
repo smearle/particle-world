@@ -142,7 +142,7 @@ class Evolver(DEAPQDAlgorithm):
             # offspring = [toolbox.clone(ind) for ind in batch]
             offspring = [None for ind in batch]
             for i in range(len(offspring)):
-                if random.random() < 0.00:
+                if random.random() < 0.01:
                     # Create a new random individual.
                     offspring[i] = self.toolbox.individual()
                     del offspring[i].fitness.values

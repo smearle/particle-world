@@ -62,6 +62,7 @@ def main():
     parser.add_argument('-vce', '--vis_cross_eval', action='store_true')
     parser.add_argument('-ovr', '--overwrite', action='store_true')
     parser.add_argument('-lo', '--load', action='store_true')
+    parser.add_argument('-op', '--oracle_policy', action='store_true')
     parser.add_argument('-bc', '--batch_config', type=str, default='batch')
     parser.add_argument('-gaw', '--gen_adversarial_worlds', action='store_true')
     args = parser.parse_args()
@@ -117,12 +118,13 @@ def main():
             'n_train_workers': n_train_workers,
             'num_gpus': num_gpus,
             'objective_function': objective,
+            'oracle_policy': args.oracle_policy,
             'overwrite': args.overwrite,
             'play_phase_len': play_phase_len,
             'quality_diversity': quality_diversity,
             'render': render,
-            'rotated_observations': rotated,
-            'translated_observations': False if args.evolve_players else True,
+            'rotated_observations': rotated and not args.oracle_policy,
+            'translated_observations': False if args.evolve_players or args.oracle_policy else True,
             'visualize': args.visualize,
         }
         exp_configs.append(exp_config)

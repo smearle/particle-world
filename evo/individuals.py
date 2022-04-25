@@ -193,7 +193,7 @@ class NCAIndividual(DiscreteIndividual):
         weights = self.nca_generator.get_weights()
         # mut_mask = np.random.choice(weights.shape[0], size=int(min(abs(np.random.normal(1, weights.shape[0] * .02)), weights.shape[0])), replace=False)
         # weights[mut_mask] += np.random.normal(0, 0.1, mut_mask.shape)
-        weights += np.random.normal(0, 0.05, weights.shape)
+        weights += np.random.normal(0, 0.01, weights.shape)
         self.nca_generator.set_weights(weights)
         self.generate()
         return self, 

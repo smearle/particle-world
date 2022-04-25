@@ -31,7 +31,7 @@ from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_maze
 from envs.wrappers import make_env
 from evo.players import Player
 from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
-from evo.utils import compute_archive_world_heuristics, save
+from evo.utils import compute_archive_world_heuristics, save, selRoulette
 from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
 # from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, train_players, toggle_exploration
@@ -570,7 +570,10 @@ if __name__ == '__main__':
         toolbox.register("population", tools.initRepeat, list, toolbox.individual)
         toolbox.register("clone", clone)
         toolbox.register("mutate", lambda individual: individual.mutate())
-        toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
+        if cfg.quality_diversity:
+            toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
+        else:
+            toolbox.register("select", selRoulette)
         # toolbox.register("select", tools.selBest) # But you can also use all DEAP selection functions instead to create your own QD-algorithm
 
         # Create a dict storing all relevant infos
@@ -605,7 +608,7 @@ if __name__ == '__main__':
         toolbox.register("population", tools.initRepeat, list, toolbox.individual)
         toolbox.register("clone", clone)
         toolbox.register("mutate", lambda individual: individual.mutate())
-        toolbox.register("select", tools.selRandom)  # MAP-Elites = random selection on a grid container
+        toolbox.register("select", selRoulette)
         # toolbox.register("select", tools.selBest) # But you can also use all DEAP selection functions instead to create your own QD-algorithm
 
         # Create a dict storing all relevant infos
@@ -652,9 +655,10 @@ if __name__ == '__main__':
         toggle_train_player(trainer, train_player=True, cfg=cfg)
         trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr, player_evolver)
 
+    loop_itrs = 0
     for _ in range(cfg.total_play_itrs):
         if cfg.evolve_players:
-            for _ in range(cfg.play_phase_len):
+            for _ in range(cfg.play_phase_len if not cfg.fixed_worlds else 1):
                 player_evolve_start_time = timer()
                 player_batch = player_evolver.ask(cfg.world_batch_size)
 
@@ -692,6 +696,7 @@ if __name__ == '__main__':
                 net_itr += 1
 
             if not cfg.fixed_worlds:
+                world_evolver.increment_ages()
                 for _ in range(cfg.gen_phase_len):
                     world_evolve_start_time = timer()
                     world_batch = world_evolver.ask(cfg.world_batch_size)
@@ -721,12 +726,14 @@ if __name__ == '__main__':
                     gen_itr += 1
                     net_itr += 1
 
-            if net_itr % 10 == 0:
+            player_evolver.increment_ages()
+
+            if loop_itrs % 10 == 0:
                 save(world_archive=world_archive, player_archive=player_archive, gen_itr=net_itr, 
                     net_itr=net_itr, play_itr=net_itr, logbook=logbook, save_dir=cfg.save_dir)
 
-
             auto_garbage_collect()
+            loop_itrs += 1
 
         else:
             trainer.train()

@@ -583,7 +583,7 @@ class DirectedMazeEnv(ParticleMazeEnv):
         pg_scale = pg_width / self.width
         if not self.screen:
             self.screen = pygame.display.set_mode([pg_width, pg_width])
-        render_landscape(self.screen, -1 * self.world[1] + 1, enforce_constraints=enforce_constraints)
+        render_landscape(self.screen, -1 * self.world[1] + 1)
         # Did the user click the window close button? Exit if so.
         for event in pygame.event.get():
             if event.type == pygame.QUIT:

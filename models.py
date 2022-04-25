@@ -99,7 +99,7 @@ class CustomRNNModel(TorchRNN, nn.Module):
 
 #       self.conv = nn.Conv2d(obs_space.shape[-1], out_channels=conv_filters, kernel_size=3, stride=1, padding=0)
         self.image_conv = nn.Sequential(OrderedDict([
-            ('conv', Conv2d_tf(3, conv_filters, kernel_size=conv_kernel_size, stride=1, padding='valid')),
+            ('conv', Conv2d_tf(obs_shape[-1], conv_filters, kernel_size=conv_kernel_size, stride=1, padding='valid')),
             ('flatten', nn.Flatten()),
             ('relu', nn.ReLU()),
         ]))
