@@ -81,7 +81,7 @@ def get_solution(arr, passable=0, impassable=1, src=2, trg=3):
 # print(timer() - start_time)
 
 
-def get_experiment_name(cfg):
+def get_experiment_name(cfg, i=0):
     exp_name = ''
     if cfg.evolve_players:
         exp_name += 'evolvePlay_'
@@ -94,8 +94,10 @@ def get_experiment_name(cfg):
         if cfg.quality_diversity:
             exp_name += "qd"
         if not (cfg.quality_diversity and cfg.objective_function == "min_solvable"):  # backward compatibility
-            exp_name += f'{cfg.objective_function}'
-            # exp_name += f'_{cfg.objective_function}'
+            if i == 0:
+                exp_name += f'{cfg.objective_function}'
+            else:
+                exp_name += f'_{cfg.objective_function}'
         if cfg.diversity_measures is not None:
             exp_name += f"_{'_'.join(cfg.diversity_measures)}"
         exp_name += f'_{cfg.n_policies}-pol_{cfg.gen_phase_len}-gen_{cfg.play_phase_len}-play'

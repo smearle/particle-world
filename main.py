@@ -35,7 +35,7 @@ from evo.utils import compute_archive_world_heuristics, save, selRoulette
 from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
 # from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, train_players, toggle_exploration
-from rl.trainer import init_trainer, toggle_train_player
+from rl.trainer import init_trainer, toggle_train_player, test_mazes
 from rl.utils import IdxCounter, get_world_qd_stats, get_world_stats_from_hist_stats, set_worlds
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, load_config, log
@@ -377,7 +377,7 @@ if __name__ == '__main__':
             # training_worlds = h_test_mazes
             training_worlds = s_test_mazes
         else:
-            training_worlds = trainer.world_archive
+            training_worlds = test_mazes
         world_archive = training_worlds
 
     # If doing world/player, do any setup that is necessary regardless of whether we're reloading or starting anew.

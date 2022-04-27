@@ -3,7 +3,7 @@
     # hyperparameters.
     "exp_names": [
         "4",
-        # "4_gpu",
+        "4_gpu",
         # "debug",
     ],
 
@@ -14,7 +14,7 @@
     ],
 
     "generator_classes": [
-        # "TileFlipIndividual",
+        "TileFlipIndividual",
         "NCA",
     ],
 
@@ -33,7 +33,7 @@
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
     "npol_qd_objectives_measures": [
-        # [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
+        [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
         [1, true, "min_solvable", ["emptiness", "symmetry"]],  # ...emptiness/symmetry of map as measures
         [3, true, "contrastive", null],
         [2, true, "contrastive", ["emptiness", "symmetry"]],
@@ -41,12 +41,12 @@
         [3, true, "regret", null],
         [1, true, "regret", ["emptiness", "symmetry"]],
 
-        # [1, false, "regret", null],
-        # [2, false, "paired", null],
-        # [2, false, "contrastive", null],
-        # [3, false, "contrastive", null],
-        # [1, false, "min_solvable", null],
-        # [1, false, null, null]  # this trains on a fixed set of worlds
+        [1, false, "regret", null],
+        [2, false, "paired", null],
+        [2, false, "contrastive", null],
+        [3, false, "contrastive", null],
+        [1, false, "min_solvable", null],
+        [1, false, null, null]  # this trains on a fixed set of worlds
     ],
     
     # List of pairs of [fully_observable: bool, field_of_view: int, model_name: str] hyperparameters. If the agent 
@@ -56,7 +56,7 @@
 # FIXME: currently just a placeholder when evolving players.
     "fullobs_fov_models_rotated": [
         # [true, -1, "feedforward", false],
-        # [false, 2, "rnn", false],
+        [false, 2, "rnn", false],
         [false, 2, "rnn", true],
         # [true, -1, "feedforward", false],
     ]
