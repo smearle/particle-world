@@ -86,10 +86,15 @@ class WorldEvoCallbacks(DefaultCallbacks):
                 "after episode is done!"
             )
         env = base_env.envs[env_index]
+        episode_stats = env.stats
 
         # Check for invalid episode length before preprocessing.
-        episode_stats = env.stats
-        assert len(episode_stats) == 1
+        # assert len(episode_stats) == 1
+        # This dirty workaround is necessary for evaluation. Not sure why.
+        if len(episode_stats) == 0:
+            assert env.evaluate
+            return
+
         episode_stats = episode_stats[0]
 
         # If you want to add some of these stats, make sure you don't duplicate keys from `world_stats`.

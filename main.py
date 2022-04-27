@@ -36,7 +36,7 @@ from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone
 # from rl.trainer import init_trainer, sync_player_policies, toggle_train_player, train_players, toggle_exploration
 from rl.trainer import init_trainer, toggle_train_player
-from rl.utils import IdxCounter, set_worlds
+from rl.utils import IdxCounter, get_world_qd_stats, get_world_stats_from_hist_stats, set_worlds
 from envs.maze.swarm import DirectedMazeSwarm, NeuralSwarm, MazeSwarm
 from utils import compile_train_stats, get_experiment_name, load_config, log
 from visualize import visualize_train_stats, visualize_archive
@@ -401,8 +401,17 @@ if __name__ == '__main__':
         with open(os.path.join(loadfile_name), "rb") as f:
             data = pickle.load(f)
 
-        world_archive = data['world_archive']
-        player_archive = data['player_archive']
+        # Backward compatibility.
+        if 'world_archive' in data:
+            world_archive = data['world_archive']
+        else:
+            world_archive = data['archive']
+        
+        if 'player_archive' in data:
+            player_archive = data['player_archive']
+        else:
+            player_archive = None
+
         gen_itr = data['gen_itr']
         play_itr = data['play_itr']
         net_itr = data['net_itr']
@@ -477,31 +486,33 @@ if __name__ == '__main__':
             # How many trials on each world? Kind of, minus garbage resets, and assuming evaluation_num_episodes == len(eval_worlds).
             for _ in range(10):
                 rllib_stats = trainer.evaluate()
-                qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
-                    lambda env: env.get_world_stats(quality_diversity=cfg.quality_diversity)))
+                world_stats = get_world_stats_from_hist_stats(rllib_stats['evaluation']['hist_stats'], cfg)
+                # qd_stats = get_world_qd_stats(world_stats, cfg, ignore_redundant=True)
+                # qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
+                    # lambda env: env.get_world_stats(quality_diversity=cfg.quality_diversity)))
 
                 # Flattening the list of lists of stats (outer lists are per-worker, inner lists are per-environment).
-                qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
+                # qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
 
                 # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
                 # evaluate_only=True)
 
-                for env_stats in qd_stats:
-                    for world_stats in env_stats:
-                        #                       if world_stats['n_steps'] != env.max_episode_steps:
-                        #                           # There will be one additional stats dict (the last one in the list), that was created on the last reset.
-                        #                           # We will ignore it
-                        #                           assert world_stats['n_steps'] == 0
-                        #                           continue
+                # for env_stats in qd_stats:
+                for world_stat in world_stats:
+                    #                       if world_stats['n_steps'] != env.max_episode_steps:
+                    #                           # There will be one additional stats dict (the last one in the list), that was created on the last reset.
+                    #                           # We will ignore it
+                    #                           assert world_stats['n_steps'] == 0
+                    #                           continue
 
-                        world_key = world_stats['world_key']
+                    world_key = world_stat['world_key']
 
-                        for j in range(n_policies):
-                            policy_key = f'policy_{j}'
-                            net_world_stats[world_key][policy_key]['mean_rewards'].append(
-                                world_stats[policy_key]['mean_reward'])
-                            net_world_stats[world_key][policy_key]['pct_wins'].append(
-                                world_stats[policy_key]['pct_win'])
+                    for j in range(n_policies):
+                        policy_key = f'policy_{j}'
+                        net_world_stats[world_key][policy_key]['mean_rewards'].append(
+                            world_stat[policy_key]['mean_reward'])
+                        net_world_stats[world_key][policy_key]['pct_wins'].append(
+                            world_stat[policy_key]['pct_win'])
 
             eval_stats_fname = os.path.join(save_dir, 'eval_stats.json')
             with open(os.path.join(save_dir, 'eval_stats.json'), 'w') as f:

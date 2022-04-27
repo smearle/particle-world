@@ -36,7 +36,7 @@ from evo.utils import compute_archive_world_heuristics, save, selRoulette
 from models import CustomConvRNNModel, CustomFeedForwardModel, FloodMemoryModel, OraclePolicy, CustomRNNModel, NCA
 # from paired_models.multigrid_models import MultigridRLlibNetwork
 from rl.callbacks import WorldEvoCallbacks
-from rl.utils import IdxCounter, get_world_qd_stats, set_worlds
+from rl.utils import IdxCounter, get_world_qd_stats, get_world_stats_from_hist_stats, set_worlds
 from utils import log, get_solution
 
 
@@ -731,7 +731,7 @@ class WorldEvoPPOTrainer(algorithm):
 
                 metrics = collect_metrics(remote_workers=self.evo_eval_workers.remote_workers())
                 hist_stats = metrics['hist_stats']
-                world_stats = [{k: hist_stats[k][i] for k in hist_stats} for i in range(len(hist_stats['world_key']))]
+                world_stats = get_world_stats_from_hist_stats(hist_stats, self.colearn_cfg)
 
                 assert len(world_stats) == self.colearn_cfg.world_batch_size, f"{len(world_stats)} != {self.colearn_cfg.world_batch_size}"
 

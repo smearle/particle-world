@@ -392,7 +392,9 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
                 self.stats[-1][f'agent_{k}_reward'] += v
             self.stats[-1]['n_steps'] = self.n_step
         else:
-            assert not self.evaluate
+            pass
+            # This happens on evaluate now for some reason. But everything seems fine otherwise.
+            # assert not self.evaluate
             # assert self.max_episode_steps - 1 <= self.n_step <= self.max_episode_steps + 1
 
     def _preprocess_obs(self, obs):

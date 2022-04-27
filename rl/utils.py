@@ -114,6 +114,11 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter: IdxCounter, cfg: N
                 world_gen_sequences=world_gen_sequences, load_now=load_now)))
 
 
+def get_world_stats_from_hist_stats(hist_stats: dict, cfg: Namespace):
+    world_stats = [{k: hist_stats[k][i] for k in hist_stats} for i in range(len(hist_stats['world_key']))]
+    return world_stats
+
+
 def get_world_qd_stats(world_stats: list, cfg: Namespace, ignore_redundant=False):
     """Get world stats from workers."""
     # world_stats = workers.foreach_worker(
