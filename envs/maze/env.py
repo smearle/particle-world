@@ -557,19 +557,20 @@ class DirectedMazeEnv(ParticleMazeEnv):
 # TODO: support distinct Box & Discrete observations, to be processed at separate points in the neural architecture?
 #  rllib/models/preprocessors.py seems to not consider this >:(
 
-#       self.observation_spaces = {i: gym.spaces.Dict({
-#           'map': gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], n_chan)),
-#           'direction': gym.spaces.Discrete(4)})
-#                                  for i in range(self.n_policies)}
+        self.observation_spaces = {i: gym.spaces.Dict({
+            'map': gym.spaces.Box(0.0, 1.0, shape=(self.patch_widths[i], self.patch_widths[i], self.n_obs_chan)),
+            'direction': gym.spaces.Discrete(4)})
+                                   for i in range(self.n_policies)}
 
 #       self.observation_spaces = {i: gym.spaces.Tuple((
 #           gym.spaces.Box(0.0, 1.0, shape=(self.patch_ws[i], self.patch_ws[i], n_chan)),
 #           gym.spaces.Discrete(4)))
 #                                  for i in range(self.n_policies)}
 
-        self.observation_spaces = {i: 
-            gym.spaces.Box(0.0, 1.0, shape=(self.patch_widths[i], self.patch_widths[i], self.n_obs_chan + 4))
-                                   for i in range(self.n_policies)}
+        # self.observation_spaces = {i: 
+        #     gym.spaces.Box(0.0, 1.0, shape=(self.patch_widths[i], self.patch_widths[i], self.n_obs_chan + 4))
+        #                            for i in range(self.n_policies)}
+
         self.action_spaces = {i : gym.spaces.Discrete(4) for i in range(self.n_policies)}
 
     def render(self, mode='human', pg_delay=0, pg_width=None, render_player=True, enforce_constraints=True):

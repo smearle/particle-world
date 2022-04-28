@@ -84,22 +84,31 @@ class CustomRNNModel(TorchRNN, nn.Module):
                  value_fc_layers=(32, 32),
                  conv_filters=16,
 
-                 conv_kernel_size=3,
-                 recurrent_hidden_size=256):
+                scalar_fc=5,
+                conv_kernel_size=3,
+                recurrent_hidden_size=256):
         nn.Module.__init__(self)
         super().__init__(obs_space, action_space, num_outputs, model_config,
                          name)
 
         # self.obs_size = get_preprocessor(obs_space)(obs_space).size
-        obs_shape = obs_space.shape
-        self.preprocessed_input_size = (obs_shape[-2] - conv_kernel_size + 1) * (obs_shape[-3] - conv_kernel_size + 1) * conv_filters
+        obs_space = model_config['custom_model_config']['original_observation_spaces']
+
+        # We take the first polity's observation space. #TODO: detect if multi-agent to determine if this is necessary.
+        map_obs_shape = obs_space[0]['map'].shape
+        scalar_dim = obs_space[0]['direction'].n
+
+        self.preprocessed_input_size = (map_obs_shape[-2] - conv_kernel_size + 1) * \
+            (map_obs_shape[-3] - conv_kernel_size + 1) * conv_filters + scalar_fc
         self.recurrent_hidden_size = recurrent_hidden_size
 
         self.num_actions = action_space.n
 
+        self.scalar_embed = nn.Linear(scalar_dim, scalar_fc)
+
 #       self.conv = nn.Conv2d(obs_space.shape[-1], out_channels=conv_filters, kernel_size=3, stride=1, padding=0)
         self.image_conv = nn.Sequential(OrderedDict([
-            ('conv', Conv2d_tf(obs_shape[-1], conv_filters, kernel_size=conv_kernel_size, stride=1, padding='valid')),
+            ('conv', Conv2d_tf(map_obs_shape[-1], conv_filters, kernel_size=conv_kernel_size, stride=1, padding='valid')),
             ('flatten', nn.Flatten()),
             ('relu', nn.ReLU()),
         ]))
@@ -154,9 +163,13 @@ class CustomRNNModel(TorchRNN, nn.Module):
         return th.reshape(self.critic(self._features), [-1])
 
     def forward(self, input_dict, state, seq_lens):
+        map_input = input_dict['obs']['map']
+        direction_input = input_dict['obs']['direction']
+        x_scalar = self.scalar_embed(direction_input)
         # x = nn.functional.relu(self.conv(input_dict["obs"].permute(0, 3, 1, 2)))
-        x = self.image_conv(input_dict["obs"].permute(0, 3, 1, 2))
+        x = self.image_conv(map_input.permute(0, 3, 1, 2))
         x = x.reshape(x.size(0), -1)
+        x = th.cat([x, x_scalar], dim=1)
         return super().forward(input_dict={"obs_flat": x}, state=state, seq_lens=seq_lens)
 
 

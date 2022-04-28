@@ -40,8 +40,8 @@ from rl.utils import IdxCounter, get_world_qd_stats, get_world_stats_from_hist_s
 from utils import log, get_solution
 
 
-test_mazes = corridor_test_mazes
-# test_mazes = eval_mazes
+# test_mazes = corridor_test_mazes
+test_mazes = eval_mazes
 stat_keys = ["mean", "min", "max"]  # , 'std]  # Would need to compute std manually
 
 
@@ -159,6 +159,11 @@ def init_trainer(env: Env, idx_counter: IdxCounter, env_config: dict, cfg: Names
 
         else:
             raise NotImplementedError
+
+    if is_multiagent_env:
+        model_config.update({'custom_model_config':{
+        'original_observation_spaces': env.observation_spaces,}
+        })
 
 
     # Set the number of environments per worker to result in at least n_rllib_envs-many environments.

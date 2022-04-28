@@ -150,22 +150,22 @@ class MultigridNetwork(DeviceAwareModule):
         # TODO: take scalar info
         in_embedded = in_image
 
-#       if self.xy_embed:
-#           x = one_hot(self.xy_dim, x, device=self.device)
-#           y = one_hot(self.xy_dim, y, device=self.device)
-#           in_x = self.xy_embed(x) 
-#           in_y = self.xy_embed(y)
-#       else:
-#           in_x = torch.tensor([], device=self.device)
-#           in_y = torch.tensor([], device=self.device)
+        if self.xy_embed:
+            x = one_hot(self.xy_dim, x, device=self.device)
+            y = one_hot(self.xy_dim, y, device=self.device)
+            in_x = self.xy_embed(x) 
+            in_y = self.xy_embed(y)
+        else:
+            in_x = torch.tensor([], device=self.device)
+            in_y = torch.tensor([], device=self.device)
 
-#       if self.scalar_embed:
-#           in_scalar = one_hot(self.scalar_dim, scalar).to(self.device)
-#           in_scalar = self.scalar_embed(in_scalar)
-#       else:
-#           in_scalar = torch.tensor([], device=self.device)
+        if self.scalar_embed:
+            in_scalar = one_hot(self.scalar_dim, scalar).to(self.device)
+            in_scalar = self.scalar_embed(in_scalar)
+        else:
+            in_scalar = torch.tensor([], device=self.device)
 
-#       in_embedded = torch.cat((in_image, in_x, in_y, in_scalar, in_z), dim=-1)
+        in_embedded = torch.cat((in_image, in_x, in_y, in_scalar, in_z), dim=-1)
 
         if self.rnn is not None:
             core_features, rnn_hxs = self.rnn(in_embedded, rnn_hxs, masks)

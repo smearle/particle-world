@@ -251,29 +251,29 @@ class DirectedMazeSwarm(MazeSwarm):
         ps = self.ps
         map_obs = super().get_observations(scape, flatten, ps=ps, padding_mode=padding_mode, surplus_padding=surplus_padding)
 
-        # TODO: this would give separate map/direction observations, see TODO in DirectedMazeEnv
-#       obs = [{'map': mo, 'direction': d} for mo, d in zip(map_obs, self.directions)]
-
-        # For now we'll add a onehot-encoded direction to the map, beneath the player (should it occupy the whole layer?)
-        direction_layers = np.zeros((*map_obs.shape[:-1], 4), dtype=map_obs.dtype)
-        direction_layers[np.arange(self.n_pop), self.field_of_view, self.field_of_view, self.directions] = 1
-
         # lining up render with printout
         map_obs = np.flip(map_obs, axis=1)  # flip along x axis
 
-        obs = np.concatenate((map_obs, direction_layers), axis=-1)
+        # For now we'll add a onehot-encoded direction to the map, beneath the player (should it occupy the whole layer?)
+        # direction_layers = np.zeros((*map_obs.shape[:-1], 4), dtype=map_obs.dtype)
+        # direction_layers[np.arange(self.n_pop), self.field_of_view, self.field_of_view, self.directions] = 1
+
+        # obs = np.concatenate((map_obs, direction_layers), axis=-1)
 
         # Rotate observation to match each agent's orientation (we've offset to make it look right when printing local 
         # observations and rendering the environment.)
         for i, d in enumerate(self.directions):
 
-            obs[i] = np.rot90(obs[i], k=d, axes=(0, 1))
+            map_obs[i] = np.rot90(map_obs[i], k=d, axes=(0, 1))
 
         # DEBUG: rotation
 #       v_obs = obs.transpose(0, 3, 1, 2)
 #       print(v_obs[0,0])
 #       print()
 #       print(v_obs[0,2])
+
+        # TODO: this would give separate map/direction observations, see TODO in DirectedMazeEnv
+        obs = [{'map': mo, 'direction': d} for mo, d in zip(map_obs, self.directions)]
 
         return obs
 
