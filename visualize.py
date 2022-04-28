@@ -70,9 +70,10 @@ def visualize_train_stats(save_dir, logbook, quality_diversity=True):
     path_means = remove_nones(logbook.select("meanPath"))
     path_maxs = remove_nones(logbook.select("maxPath"))
     line0 = ax1.plot(gen, path_means, "b-", label="Mean Path Length")
+    line1 = ax1.plot(gen, path_maxs, "b:", label="Max Path Length")
     ax1.set_xlabel("Generation")
     ax1.set_ylabel("Path Length")
-    lns = line0
+    lns = line0 + line1
     labs = [l.get_label() for l in lns]
     ax1.legend(lns, labs, loc="best")
     plt.tight_layout()

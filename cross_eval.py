@@ -31,10 +31,19 @@ def vis_cross_eval(exp_configs):
             print(f'No directory found for experiment {exp_name}. Skipping.')
             continue
         exp_names.append(exp_name)
-        with open(os.path.join(exp_save_dir, 'train_stats.json'), 'r') as f:
-            exp_train_stats = json.load(f)
-        with open(os.path.join(exp_save_dir, 'eval_stats.json'), 'r') as f:
-            exp_eval_stats = json.load(f)
+        try:
+            with open(os.path.join(exp_save_dir, 'train_stats.json'), 'r') as f:
+                exp_train_stats = json.load(f)
+                last_exp_train_stats = exp_train_stats
+        except FileNotFoundError:
+            exp_train_stats = {k: None for k in last_exp_train_stats}
+
+        try:
+            with open(os.path.join(exp_save_dir, 'eval_stats.json'), 'r') as f:
+                exp_eval_stats = json.load(f)
+                last_exp_eval_stats = exp_eval_stats
+        except FileNotFoundError:
+            exp_eval_stats = {k: {k1: {k2: -1 for k2 in v1} for k1, v1 in v.items()} for k, v in last_exp_eval_stats.items()}
 
         # Flatten the dict of dict of dicts into a dict for eval stats.
         flat_eval_stats = {}
@@ -52,7 +61,9 @@ def vis_cross_eval(exp_configs):
                     if plot_name not in plot_names:
                         plot_names.add(plot_name)
                         plot_vals[plot_name] = {}
+                        # plot_vals['net_test'] = {}
                     plot_vals[plot_name][bar_name] = {'mean': mean_stat, 'std': std_stat}
+                    # plot_vals['net_test']
 
         # Assume there's no identical keys appearing in these two dictionaries.
         exp_stats = {**exp_train_stats, **flat_eval_stats}
@@ -65,7 +76,7 @@ def vis_cross_eval(exp_configs):
 
         data_rows.append([exp_stats[k] if k in exp_stats else None for k in col_headers])
 
-    color_keys = ['min_solvable', 'regret', 'contrastive', 'qd']
+    color_keys = ['min_solvable', 'regret', 'contrastive', 'qd', 'paired', 'fixedWorlds']
     color_names = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
     color_map = {k: color_names[i] for i, k in enumerate(color_keys)}
     colors = []

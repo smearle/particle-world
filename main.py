@@ -256,7 +256,11 @@ if __name__ == '__main__':
 
     register_env('world_evolution_env', make_env)
 
-    experiment_name = get_experiment_name(cfg)
+    if not hasattr(cfg, 'experiment_name'):
+        experiment_name = get_experiment_name(cfg)
+    else:
+        assert cfg.load
+        experiment_name = cfg.experiment_name
     save_dir = os.path.join(cfg.outputDir, experiment_name)
     cfg.save_dir = save_dir
     cfg.env_is_minerl = env_is_minerl

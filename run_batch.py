@@ -129,29 +129,33 @@ def main():
             'translated_observations': False if args.evolve_players or args.oracle_policy else True,
             'visualize': args.visualize,
         }
-        exp_configs.append(exp_config)
-        exp_cfg_namespace = namedtuple('exp_cfg_namespace', exp_config.keys())(**exp_config)
-
-        # Remove this eventually. Very ad hoc backward compatibility with broken experiment naming schemes:
-        found_save_dir = False
-        sd_i = 0
-        while not found_save_dir:
-            if sd_i > 1:
-                break
-            experiment_name = get_experiment_name(exp_cfg_namespace, sd_i)
-            exp_save_dir = os.path.join('runs', experiment_name)
-            if not os.path.isdir(exp_save_dir):
-                print(f'No directory found for experiment at {experiment_name}.')
-            else:
-                experiment_names.append(experiment_name)
-                with open(os.path.join('configs', 'auto', f'{experiment_name}.json'), 'w') as f:
-                    json.dump(exp_config, f, indent=4)
-                break
-            sd_i += 1
-        if not found_save_dir:
-            print('No save directory found for experiment. Skipping.')
+        if not args.load:
+            exp_configs.append(exp_config)
         else:
-            print('Found save dir: ', exp_save_dir)
+            exp_cfg_namespace = namedtuple('exp_cfg_namespace', exp_config.keys())(**exp_config)
+
+            # Remove this eventually. Very ad hoc backward compatibility with broken experiment naming schemes:
+            found_save_dir = False
+            sd_i = 0
+            while not found_save_dir:
+                if sd_i > 1:
+                    break
+                experiment_name = get_experiment_name(exp_cfg_namespace, sd_i)
+                exp_save_dir = os.path.join('runs', experiment_name)
+                if not os.path.isdir(exp_save_dir):
+                    print(f'No directory found for experiment at {experiment_name}.')
+                else:
+                    exp_config['experiment_name'] = experiment_name
+                    experiment_names.append(experiment_name)
+                    exp_configs.append(exp_config)
+                    with open(os.path.join('configs', 'auto', f'{experiment_name}.json'), 'w') as f:
+                        json.dump(exp_config, f, indent=4)
+                    break
+                sd_i += 1
+            if not found_save_dir:
+                print('No save directory found for experiment. Skipping.')
+            else:
+                print('Found save dir: ', exp_save_dir)
 
     sbatch_file = os.path.join('slurm', 'run.sh')
 
