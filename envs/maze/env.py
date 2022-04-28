@@ -324,7 +324,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         self.observation_space = None
 
 
-    def get_particle_observations(self, padding_mode='wrap', surplus_padding=0):
+    def get_particle_observations(self, padding_mode='constant', surplus_padding=0):
 
         # Remove the spawn-point channel and replace the spawn point with an empty tile
         obs_scape = np.vstack((self.world[:self.start_chan], self.world[self.start_chan+1:]))

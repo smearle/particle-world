@@ -48,7 +48,7 @@ class Swarm(object):
 
         return obs.transpose(0, 2, 3, 1)
 
-    def get_observations(self, scape, flatten=True, ps=None, padding_mode='wrap', surplus_padding=0):
+    def get_observations(self, scape, field_of_view: int = None, flatten=True, ps=None, padding_mode='constant', surplus_padding=0):
         """
         Return a batch of local observations corresponding to particles in the swarm, of size (n_pop, patch_w, patch_w),
         where patch_w is a square patch allowing the agent to see field_of_view (field of vision)-many tiles in each direction.
@@ -58,8 +58,8 @@ class Swarm(object):
         :return:
         """
         ps = self.ps if ps is None else ps
-        field_of_view = self.field_of_view
-        patch_w = int(field_of_view * 2 + 1)
+        field_of_view = self.field_of_view if field_of_view is None else field_of_view
+        # patch_w = int(field_of_view * 2 + 1)
         # Add new dimensions for patch_w-width patches of the environment around each agent
         ps_int = np.floor(ps).astype(int)
         # weird edge case, is modulo broken?
@@ -246,10 +246,11 @@ class DirectedMazeSwarm(MazeSwarm):
 
         super().reset(*args, **kwargs)
 
-    def get_observations(self, scape, flatten=True, padding_mode='wrap', surplus_padding=0):
+    def get_observations(self, scape, flatten=True, padding_mode='constant', surplus_padding=0):
         # ps = self.ps + (dirs[self.directions] * self.field_of_view)
         ps = self.ps
-        map_obs = super().get_observations(scape, flatten, ps=ps, padding_mode=padding_mode, surplus_padding=surplus_padding)
+        map_obs = super().get_observations(scape=scape, flatten=flatten, ps=ps, padding_mode=padding_mode, 
+            field_of_view=2*self.field_of_view)
 
         # lining up render with printout
         map_obs = np.flip(map_obs, axis=1)  # flip along x axis
@@ -265,6 +266,10 @@ class DirectedMazeSwarm(MazeSwarm):
         for i, d in enumerate(self.directions):
 
             map_obs[i] = np.rot90(map_obs[i], k=d, axes=(0, 1))
+
+        # map_obs = map_obs[:, self.field_of_view:, self.field_of_view//2:-(self.field_of_view * 2 + 1 - self.field_of_view//2)]
+        # Assuming field of view is even.
+        map_obs = map_obs[:, :-2*self.field_of_view, self.field_of_view:-self.field_of_view, :]
 
         # DEBUG: rotation
 #       v_obs = obs.transpose(0, 3, 1, 2)
