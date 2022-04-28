@@ -155,6 +155,7 @@ def main():
                     exp_config['experiment_name'] = experiment_name
                     experiment_names.append(experiment_name)
                     dump_config(experiment_name, exp_config)
+                    found_save_dir = True
                     break
                 sd_i += 1
             if not found_save_dir:
@@ -165,7 +166,7 @@ def main():
     sbatch_file = os.path.join('slurm', 'run.sh')
 
     if args.vis_cross_eval:
-        vis_cross_eval(exp_configs)
+        vis_cross_eval(exp_names=experiment_names)
 
         return 
 

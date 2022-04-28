@@ -6,6 +6,7 @@ import numpy as np
 from pdb import set_trace as TT
 
 from matplotlib import pyplot as plt
+from matplotlib.patches import Patch
 import pandas as pd
 from utils import get_experiment_name
 
@@ -13,7 +14,6 @@ EVAL_DIR = 'runs_eval'
 
 
 def vis_cross_eval(exp_names):
-    exp_names = []
     stats = []
     col_headers = None
     data_rows = []
@@ -25,7 +25,6 @@ def vis_cross_eval(exp_names):
         if not os.path.isdir(exp_save_dir):
             print(f'No directory found for experiment {exp_name}. Skipping.')
             continue
-        exp_names.append(exp_name)
         try:
             with open(os.path.join(exp_save_dir, 'train_stats.json'), 'r') as f:
                 exp_train_stats = json.load(f)
@@ -38,7 +37,7 @@ def vis_cross_eval(exp_names):
                 exp_eval_stats = json.load(f)
                 last_exp_eval_stats = exp_eval_stats
         except FileNotFoundError:
-            exp_eval_stats = {k: {k1: {k2: -1 for k2 in v1} for k1, v1 in v.items()} for k, v in last_exp_eval_stats.items()}
+            exp_eval_stats = {k: {k1: {k2: -0.01 for k2 in v1} for k1, v1 in v.items()} for k, v in last_exp_eval_stats.items()}
 
         # Flatten the dict of dict of dicts into a dict for eval stats.
         flat_eval_stats = {}
@@ -56,9 +55,17 @@ def vis_cross_eval(exp_names):
                     if plot_name not in plot_names:
                         plot_names.add(plot_name)
                         plot_vals[plot_name] = {}
-                        # plot_vals['net_test'] = {}
                     plot_vals[plot_name][bar_name] = {'mean': mean_stat, 'std': std_stat}
-                    # plot_vals['net_test']
+
+        # Get mean performance over all worlds.
+        plot_vals['all_worlds'] = {}
+        [plot_vals['all_worlds'].update({
+            bar_name: {
+                'mean': np.mean([world_stats[bar_name]['mean'] \
+                    for world_stats in plot_vals.values() if bar_name in world_stats]), 
+                'std': np.mean([world_stats[bar_name]['std'] \
+                    for world_stats in plot_vals.values() if bar_name in world_stats])}}) \
+                        for bar_name in bar_names]
 
         # Assume there's no identical keys appearing in these two dictionaries.
         exp_stats = {**exp_train_stats, **flat_eval_stats}
@@ -71,8 +78,9 @@ def vis_cross_eval(exp_names):
 
         data_rows.append([exp_stats[k] if k in exp_stats else None for k in col_headers])
 
-    color_keys = ['min_solvable', 'regret', 'contrastive', 'qd', 'paired', 'fixedWorlds']
+    color_keys = ['qd', 'min_solvable', 'regret', 'contrastive', 'paired', 'fixedWorlds']
     color_names = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
+    legend_elements = [Patch(color=color_names[i], label=k) for i, k in enumerate(color_keys)]
     color_map = {k: color_names[i] for i, k in enumerate(color_keys)}
     colors = []
 
@@ -86,16 +94,17 @@ def vis_cross_eval(exp_names):
         if not color_found:
             raise Exception(f'No color found for {bn}.')
 
-    eval_keys = flat_eval_stats.keys()
-    for plot_name in plot_names:
+    # eval_keys = flat_eval_stats.keys()
+    for plot_name in plot_vals:
         fig, ax = plt.subplots()
-        fig.set_size_inches(10, 4)
+        fig.set_size_inches(10, 10)
         # n_subplots = len(plot_keys)
         # n_subplots = 1
         vals = [plot_vals[plot_name][bar_name]['mean'] for bar_name in bar_names]
         errs = [plot_vals[plot_name][bar_name]['std'] for bar_name in bar_names]
         plt.barh(bar_names, vals, xerr=errs, color=colors)
         ax.set_title(plot_name)
+        plt.legend(handles=legend_elements)
         plt.tight_layout()
         plt.savefig(f'{EVAL_DIR}/{plot_name}.png')
         
