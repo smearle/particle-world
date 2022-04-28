@@ -377,11 +377,7 @@ if __name__ == '__main__':
 
     # If training on fixed worlds, select the desired training set.
     if cfg.fixed_worlds:
-        if cfg.evolve_players:
-            # training_worlds = h_test_mazes
-            training_worlds = s_test_mazes
-        else:
-            training_worlds = test_mazes
+        training_worlds = test_mazes
         world_archive = training_worlds
 
     # If doing world/player, do any setup that is necessary regardless of whether we're reloading or starting anew.
@@ -491,24 +487,8 @@ if __name__ == '__main__':
             for _ in range(10):
                 rllib_stats = trainer.evaluate()
                 world_stats = get_world_stats_from_hist_stats(rllib_stats['evaluation']['hist_stats'], cfg)
-                # qd_stats = get_world_qd_stats(world_stats, cfg, ignore_redundant=True)
-                # qd_stats = trainer.evaluation_workers.foreach_worker(lambda worker: worker.foreach_env(
-                    # lambda env: env.get_world_stats(quality_diversity=cfg.quality_diversity)))
 
-                # Flattening the list of lists of stats (outer lists are per-worker, inner lists are per-environment).
-                # qd_stats = [qds for worker_stats in qd_stats for qds in worker_stats]
-
-                # rllib_stats, qd_stats, logbook_stats = rllib_evaluate_worlds(trainer=particle_trainer, worlds=worlds, idx_counter=idx_counter,
-                # evaluate_only=True)
-
-                # for env_stats in qd_stats:
                 for world_stat in world_stats:
-                    #                       if world_stats['n_steps'] != env.max_episode_steps:
-                    #                           # There will be one additional stats dict (the last one in the list), that was created on the last reset.
-                    #                           # We will ignore it
-                    #                           assert world_stats['n_steps'] == 0
-                    #                           continue
-
                     world_key = world_stat['world_key']
 
                     for j in range(n_policies):

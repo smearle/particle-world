@@ -42,6 +42,19 @@ class NCA(nn.Module):
         self.last_aux = None
 
 
+class Dense(nn.Module):
+    def __init__(self, n_in, n_out, bias=True):
+        super(Dense, self).__init__()
+        self.n_in = n_in
+        self.n_out = n_out
+        self.bias = bias
+        self.linear = nn.Linear(n_in, n_out, bias=bias)
+        self.apply(init_weights)
+
+    def forward(self, x):
+        return self.linear(x)
+
+
 class FullObsPlayNCA(NCA):
     def __init__(self, n_chan, player_chan, obs_width, **kwargs):
         super().__init__(n_chan=n_chan)
@@ -77,8 +90,7 @@ class PlayNCA(NCA):
         w = get_init_weights(self)
         set_weights(self, w + th.randn_like(w) * 0.1)
 
-
-    def forward(self, x):
+    def forward(self, x, render=False):
         with th.no_grad():
             # The coordinates of the player's position
             player_pos = th.where(x[:, self.player_chan, ...] == 1)
@@ -86,8 +98,6 @@ class PlayNCA(NCA):
             x = super().forward(x)        
 
             n_batches = x.shape[0]
-
-
 
             # TODO: sample actions from cells adjacent to players? How to batch this?
             # FIXME: here is the batching issue. x[[0, 1]:[2, 3]] <--- how do we get this? Cannot slice like this!
@@ -113,7 +123,7 @@ class PlayNCA(NCA):
                                    [1, 1, 1],
                                    [0, 1, 0]])
 
-            if RENDER:
+            if render:
                 im = neighb[0, 0].cpu().numpy()
                 im = im.T
                 im = im / im.max()

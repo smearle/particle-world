@@ -46,6 +46,11 @@ def launch_job(sbatch_file, experiment_name, job_time, job_cpus, job_gpus, job_m
         os.system('sbatch {}'.format(sbatch_file))
 
 
+def dump_config(exp_name, exp_config):
+    with open(os.path.join('configs', 'auto', f'{exp_name}.json'), 'w') as f:
+        json.dump(exp_config, f, indent=4)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-lc', '--local', action='store_true', 
@@ -126,13 +131,15 @@ def main():
             'quality_diversity': quality_diversity,
             'render': render,
             'rotated_observations': rotated and not args.oracle_policy,
-            'translated_observations': False if args.evolve_players or args.oracle_policy else True,
+            'translated_observations': False if args.evolve_players and not rotated or args.oracle_policy else True,
             'visualize': args.visualize,
         }
+        exp_cfg_namespace = namedtuple('exp_cfg_namespace', exp_config.keys())(**exp_config)
         if not args.load:
-            exp_configs.append(exp_config)
+            experiment_name = get_experiment_name(exp_cfg_namespace, 0)
+            experiment_names.append(experiment_name)
+            dump_config(experiment_name, exp_config)
         else:
-            exp_cfg_namespace = namedtuple('exp_cfg_namespace', exp_config.keys())(**exp_config)
 
             # Remove this eventually. Very ad hoc backward compatibility with broken experiment naming schemes:
             found_save_dir = False
@@ -147,9 +154,7 @@ def main():
                 else:
                     exp_config['experiment_name'] = experiment_name
                     experiment_names.append(experiment_name)
-                    exp_configs.append(exp_config)
-                    with open(os.path.join('configs', 'auto', f'{experiment_name}.json'), 'w') as f:
-                        json.dump(exp_config, f, indent=4)
+                    dump_config(experiment_name, exp_config)
                     break
                 sd_i += 1
             if not found_save_dir:

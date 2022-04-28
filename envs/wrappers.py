@@ -180,7 +180,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.need_world_reset = False
 
         # Cycle through each world once.
-        if self.evo_eval_world:  # or self.evolve_player:
+        if self.evo_eval_world or self.evolve_player:
             if self.world_key_queue:
                 self.world_key = self.world_key_queue[0]
                 # Remove first key from the queue.
@@ -422,7 +422,7 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
             while dones["__all__"] == False:
                 batch_obs = self._preprocess_obs(obs)
-                actions = {i: self.players[i].get_actions(batch_obs[i]) for i in range(len(self.players))}
+                actions = {i: self.players[i].get_actions(batch_obs[i], render=render_env) for i in range(len(self.players))}
                 actions = {(i, j): actions[i][j] for i in actions for j in range(len(actions[i])) if (i, j) not in self.dead}
                 obs, rews, dones, infos = self.step(actions)
                 player_rew += sum(rews.values())

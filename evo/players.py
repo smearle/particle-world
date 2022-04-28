@@ -14,8 +14,8 @@ class Player(Individual):
         Individual.__init__(self, fitness=Fitness((0,), weights=(1,)), features=Features(0,0))
         self.model = PlayNCA(obs_width=obs_width, n_chan=obs_n_chan, player_chan=player_chan)
 
-    def get_actions(self, obs):
-        act = self.model(th.Tensor(obs).permute(0, 3, 1, 2))
+    def get_actions(self, obs, render=False):
+        act = self.model(th.Tensor(obs).permute(0, 3, 1, 2), render=render)
         act -= act.min()
         act = act / th.norm(act, p=1, dim=1)[:,None]
         act = act.cpu().detach().numpy()

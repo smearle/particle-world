@@ -40,7 +40,8 @@ from rl.utils import IdxCounter, get_world_qd_stats, get_world_stats_from_hist_s
 from utils import log, get_solution
 
 
-test_mazes = s_test_mazes
+test_mazes = corridor_test_mazes
+# test_mazes = eval_mazes
 stat_keys = ["mean", "min", "max"]  # , 'std]  # Would need to compute std manually
 
 

@@ -12,7 +12,7 @@ from utils import get_experiment_name
 EVAL_DIR = 'runs_eval'
 
 
-def vis_cross_eval(exp_configs):
+def vis_cross_eval(exp_names):
     exp_names = []
     stats = []
     col_headers = None
@@ -20,12 +20,7 @@ def vis_cross_eval(exp_configs):
     plot_names = set({})
     bar_names = []
     plot_vals = {}
-    for exp_config in exp_configs:
-        args = namedtuple('args', exp_config.keys())(**exp_config)
-        # parser = argparse.ArgumentParser()
-        # args = parser.parse_args()
-        # [setattr(args, k, v) for k, v in exp_config.items()]
-        exp_name = get_experiment_name(args)
+    for exp_name in exp_names:
         exp_save_dir = os.path.join('runs', exp_name)
         if not os.path.isdir(exp_save_dir):
             print(f'No directory found for experiment {exp_name}. Skipping.')
