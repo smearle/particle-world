@@ -709,10 +709,12 @@ class WorldEvoPPOTrainer(algorithm):
                 idx_counter = ray.get_actor("idx_counter")
 
                 set_worlds(playable_worlds, self.evo_eval_workers, idx_counter, self.colearn_cfg, load_now=True)
+                # world_keys = set(playable_worlds.keys())
 
                 # ep_ids = set({})
                 batches = []
                 generations_done += 1
+                # evaluated_world_keys = set({})
 
                 # Need to take an extra batch of samples because of the way we queue/load worlds (I think). Results in
                 # duplicate evaluations on first iteration. Kind of feels like we're flying by the seat of our pants 
@@ -721,6 +723,9 @@ class WorldEvoPPOTrainer(algorithm):
                 for i in range(self.colearn_cfg.world_batch_size // max(1, self.colearn_cfg.n_evo_workers) + (0 if self._just_loaded else 1)):
                 # while len(batches) < self.colearn_cfg.world_batch_size * 1:
                 # while True:
+                # while len(ep_ids) < self.colearn_cfg.world_batch_size:
+                # while len(net_hist_stats) == 0 or len(net_hist_stats['world_key']) < self.colearn_cfg.world_batch_size:
+                # while len(world_keys - evaluated_world_keys) > 0:
 
                     # print(f"Sample batch {i}")
                     batch = ray.get([
@@ -732,8 +737,16 @@ class WorldEvoPPOTrainer(algorithm):
                     
                     # This is ugly. Better way to count episodes?
                     # [ep_ids.update(set(b.policy_batches['policy_0']['eps_id'])) for b in batch]
+
                     # if len(ep_ids) >= self.colearn_cfg.world_batch_size * (1 if self._just_loaded else 2):
                         # break
+
+                    # evaluated_world_keys = set(net_hist_stats['world_key'])
+                    # [evaluated_world_keys.update(set([info['world_key'] \
+                    #     for info in b.policy_batches['policy_0']['infos']])) for b in batches]
+                    # print(f"Evaluated world keys: {evaluated_world_keys}")
+                    # net_hist_stats = hist_stats if len(net_hist_stats) == 0 else \
+                        # {k: net_hist_stats[k] + v for k, v in hist_stats.items()}
 
                 metrics = collect_metrics(remote_workers=self.evo_eval_workers.remote_workers())
                 hist_stats = metrics['hist_stats']
@@ -756,14 +769,18 @@ class WorldEvoPPOTrainer(algorithm):
                     # reward to it.
                     pos_val_losses = {}
                     for pi in range(self.colearn_cfg.n_policies):
-                        pos_val_losses_i = [bb.policy_batches[f'policy_{pi}']['pos_val_loss'] for b in batches for bb in b]
+                        pos_val_losses_i = [b.policy_batches[f'policy_{pi}']['pos_val_loss'] for b in batches]
                         pos_val_losses_i = {k: v for pv in pos_val_losses_i for k, v in pv.items()}
                         for k, v in pos_val_losses_i.items():
                             if k in pos_val_losses:
                                 pos_val_losses[k] += v
                             else:
                                 pos_val_losses[k] = v
-                    pos_val_losses = {k: v / self.colearn_cfg.n_policies for k, v in pos_val_losses.items()}
+                    pos_val_losses = {k - 1000 * (self.net_itr % 10): v / self.colearn_cfg.n_policies for k, v in pos_val_losses.items()}
+
+                    # Get rid of stats from the instant resets. These are not included in `world_stats` because they are
+                    # skipped in the `on_episode_end` callback.
+                    pos_val_losses = {k: v for k, v in pos_val_losses.items() if k in world_stats}
 
                     assert len(pos_val_losses) == len(world_stats)
 

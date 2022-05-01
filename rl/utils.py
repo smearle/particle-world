@@ -128,9 +128,11 @@ def get_world_stats_from_hist_stats(hist_stats: dict, cfg: Namespace):
             for k in ws:
                 if isinstance(ws[k], dict):
                     for k1 in ws[k]:
-                        mean_world_stats[wk][k][k1] = mean_world_stats[wk][k][k1] + ws[k][k1]
+                        if ws[k][k1] is not None:
+                            mean_world_stats[wk][k][k1] = mean_world_stats[wk][k][k1] + ws[k][k1]
                 else:
-                    mean_world_stats[wk][k] = mean_world_stats[wk][k] + ws[k]
+                    if ws[k] is not None:
+                        mean_world_stats[wk][k] = mean_world_stats[wk][k] + ws[k]
             mean_world_stats[wk]['n_episodes'] += 1
 
     # Now take average of each stat.
@@ -138,9 +140,11 @@ def get_world_stats_from_hist_stats(hist_stats: dict, cfg: Namespace):
         for k in mean_world_stats[wk]:
             if isinstance(mean_world_stats[wk][k], dict):
                 for k1 in mean_world_stats[wk][k]:
-                    mean_world_stats[wk][k][k1] = mean_world_stats[wk][k][k1] / mean_world_stats[wk]['n_episodes']
+                    mean_world_stats[wk][k][k1] = mean_world_stats[wk][k][k1] / mean_world_stats[wk]['n_episodes'] \
+                        if mean_world_stats[wk][k][k1] is not None else None
             else:
-                mean_world_stats[wk][k] = mean_world_stats[wk][k] / mean_world_stats[wk]['n_episodes']
+                mean_world_stats[wk][k] = mean_world_stats[wk][k] / mean_world_stats[wk]['n_episodes'] \
+                    if mean_world_stats[wk][k] is not None else None
 
     [ws.update({'qd_stats': ((ws['obj'],), ws['measures'])}) for ws in mean_world_stats.values()]
 
