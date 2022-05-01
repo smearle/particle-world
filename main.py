@@ -392,13 +392,17 @@ if __name__ == '__main__':
 
     if cfg.load:
         # Load the world archive, logbook, and iteration counters.
-        fname = 'latest-0.p'
-        loadfile_name = os.path.join(save_dir, fname)
+        archive_path_fpath = os.path.join(save_dir, 'archive_checkpoint_path.txt')
+        if not os.path.exists(archive_path_fpath):
+            archive_checkpoint_path = 'latest-0.p'
+        else:
+            with open(archive_path_fpath) as f:
+                archive_checkpoint_path = f.read()
 
-        if not os.path.isfile(loadfile_name):
-            raise Exception(f'{loadfile_name} is not a file, cannot load.')
+        if not os.path.isfile(archive_checkpoint_path):
+            raise Exception(f'{archive_checkpoint_path} is not a file, cannot load.')
 
-        with open(os.path.join(loadfile_name), "rb") as f:
+        with open(os.path.join(archive_checkpoint_path), "rb") as f:
             data = pickle.load(f)
 
         # Backward compatibility.

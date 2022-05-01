@@ -753,13 +753,9 @@ class WorldEvoPPOTrainer(algorithm):
                 world_stats = get_world_stats_from_hist_stats(hist_stats, self.colearn_cfg)
                 world_stats = {wk - 1000 * (self.net_itr % 10): ws for wk, ws in world_stats.items()}
 
-                assert len(world_stats) == self.colearn_cfg.world_batch_size, f"{len(world_stats)} != {self.colearn_cfg.world_batch_size}"
+                assert len(world_stats) == len(playable_worlds), f"{len(world_stats)} != {len(playable_worlds)}"
                 # if len(world_stats) != self.colearn_cfg.world_batch_size:
                     # TT()
-
-                # TODO: Assuming we've only evaluated each world once. Not true if episodes can terminate early. 
-                # Should bring back some logic from `get_world_qd_stats` to aggregate over these metrics).
-                # world_stats = {w['world_key']: w for w in world_stats}
 
                 # Get regret / positive value loss metrics from the batches.
                 if self.colearn_cfg.objective_function == "regret":

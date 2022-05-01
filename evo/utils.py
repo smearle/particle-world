@@ -1,8 +1,10 @@
 import os
 from operator import attrgetter
+from pathlib import Path
 from pdb import set_trace as TT
 import pickle
 import random
+import shutil
 from timeit import default_timer as timer
 
 import numpy as np
@@ -85,8 +87,9 @@ def selRoulette(individuals, k, fit_attr="fitness"):
 
 
 def save(world_archive, player_archive, play_itr, gen_itr, net_itr, logbook, save_dir, adversarial_archive=False):
-    arch_name = 'latest-0.p' if not adversarial_archive else 'adversarial_worlds.p'
-    with open(os.path.join(save_dir, arch_name), 'wb') as f:
+    arch_name = f'latest-{net_itr}.p' if not adversarial_archive else 'adversarial_worlds.p'
+    save_path = os.path.join(save_dir, arch_name)
+    with open(save_path, 'wb') as f:
         pickle.dump(
             {
                 'world_archive': world_archive,
@@ -97,3 +100,15 @@ def save(world_archive, player_archive, play_itr, gen_itr, net_itr, logbook, sav
                 'logbook': logbook,
             }, f)
 
+    # Delete previous checkpoint
+    ckp_path_file = os.path.join(save_dir, 'archive_checkpoint_path.txt')
+    if os.path.isfile(ckp_path_file):
+        with open(ckp_path_file, 'r') as f:
+            ckp_path = Path(f.read())
+            ckp_path = ckp_path.absolute()
+            if os.path.isdir(ckp_path):
+                shutil.rmtree(ckp_path)
+    # Record latest checkpoint path in case of re-loading
+    with open(ckp_path_file, 'w') as f:
+        f.write(save_path)
+    # print("checkpoint saved at", checkpoint)
