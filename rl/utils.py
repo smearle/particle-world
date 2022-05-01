@@ -116,7 +116,35 @@ def set_worlds(worlds: dict, workers: WorkerSet, idx_counter: IdxCounter, cfg: N
 
 def get_world_stats_from_hist_stats(hist_stats: dict, cfg: Namespace):
     world_stats = [{k: hist_stats[k][i] for k in hist_stats} for i in range(len(hist_stats['world_key']))]
-    return world_stats
+
+    # Take sum of each stat for each world. Can have nested dicts (2 layers deep).
+    mean_world_stats = {}
+    for ws in world_stats:
+        wk = ws.pop('world_key')
+        if wk not in mean_world_stats:
+            ws['n_episodes'] = 1
+            mean_world_stats[wk] = ws
+        else:
+            for k in ws:
+                if isinstance(ws[k], dict):
+                    for k1 in ws[k]:
+                        mean_world_stats[wk][k][k1] = mean_world_stats[wk][k][k1] + ws[k][k1]
+                else:
+                    mean_world_stats[wk][k] = mean_world_stats[wk][k] + ws[k]
+            mean_world_stats[wk]['n_episodes'] += 1
+
+    # Now take average of each stat.
+    for wk in mean_world_stats:
+        for k in mean_world_stats[wk]:
+            if isinstance(mean_world_stats[wk][k], dict):
+                for k1 in mean_world_stats[wk][k]:
+                    mean_world_stats[wk][k][k1] = mean_world_stats[wk][k][k1] / mean_world_stats[wk]['n_episodes']
+            else:
+                mean_world_stats[wk][k] = mean_world_stats[wk][k] / mean_world_stats[wk]['n_episodes']
+
+    [ws.update({'qd_stats': ((ws['obj'],), ws['measures'])}) for ws in mean_world_stats.values()]
+
+    return mean_world_stats
 
 
 def get_world_qd_stats(world_stats: list, cfg: Namespace, ignore_redundant=False):

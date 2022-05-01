@@ -289,17 +289,17 @@ class WorldEvolutionWrapper(gym.Wrapper):
                 # obj = min_solvable_fitness(swarm_rewards[0:1], max_rew=self.max_reward)
 
                 # Default measures are the mean rewards of policies 2 and 3.
-                measures = [np.mean(sr) for sr in swarm_rewards[1:]]
+                measures = np.array([np.mean(sr) for sr in swarm_rewards[1:]])
 
             else:
                 # Placeholder measures
-                measures = [0, 0]
+                measures = np.array([0, 0])
 
             # Format things for qdpy consumption.
-            qd_stats_i = ((obj,), measures)
+            # qd_stats_i = ((obj,), measures)
 
             # Add some additional per-policy stats (just mean reward for now).
-            world_stats_i = {"world_key": world_key, "qd_stats": qd_stats_i, "n_steps": stats_dict["n_steps"]}  #, [np.mean(sr) for sr in swarm_rewards])
+            world_stats_i = {"world_key": world_key, "obj": obj, "measures": measures, "n_steps": stats_dict["n_steps"]}  #, [np.mean(sr) for sr in swarm_rewards])
             world_stats_i.update({f'policy_{i}': {} for i in range(len(swarm_rewards))})
             [world_stats_i[f'policy_{i}'].update({'mean_reward': np.mean(sr)}) for i, sr in enumerate(swarm_rewards)]
             [world_stats_i[f'policy_{i}'].update({'pct_win': np.sum(np.array(sr) > 0) / len(sr)}) for i, sr in enumerate(swarm_rewards)]
@@ -373,10 +373,12 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
 
     def get_dones(self, dones):
         assert '__all__' not in dones
-        dones['__all__'] = self.n_step > 0 and self.n_step == self.max_episode_steps or\
+        force_env_done = self.n_step > 0 and self.n_step == self.max_episode_steps or\
              self.need_world_reset
         if not self.evo_eval_world:
-            dones['__all__'] = dones['__all__'] or np.all(list(dones.values()))
+            dones['__all__'] = force_env_done or np.all(list(dones.values()))
+        else:
+            dones['__all__'] = force_env_done
         return dones
 
     def log_stats(self, rews):

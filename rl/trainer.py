@@ -285,7 +285,7 @@ def init_trainer(env: Env, idx_counter: IdxCounter, env_config: dict, cfg: Names
         # This guarantees that each call to train() simulates 1 episode in each environment/world.
 
         # TODO: try increasing batch size to ~500k, expect a few minutes update time
-        # "train_batch_size": env.max_episode_steps * cfg.n_eps_on_train,
+        # "train_batch_size": 20000,
 #       "train_batch_size": env.max_episode_steps * num_envs_per_worker,
         # "sgd_minibatch_size": env.max_episode_steps * cfg.n_rllib_envs if (cfg.enjoy or cfg.evaluate) and cfg.render else 128,
         "logger_config": logger_config if not (cfg.enjoy or cfg.evaluate) else {},
@@ -555,9 +555,10 @@ class WorldEvoPPOTrainer(algorithm):
         # else {k: ind for k, ind in enumerate(self.world_evolver.container)}
 
         if self.colearn_cfg.quality_diversity:
+            pass
             # Eliminate impossible worlds
-            learnable_training_worlds = {k: ind for k, ind in training_worlds.items() if not ind.features == [0, 0]}
-            training_worlds = learnable_training_worlds if len(learnable_training_worlds) > 0 else training_worlds
+            # learnable_training_worlds = {k: ind for k, ind in training_worlds.items() if not ind.features == [0, 0]}
+            # training_worlds = learnable_training_worlds if len(learnable_training_worlds) > 0 else training_worlds
 
 #           # In case all worlds are impossible, do more rounds of evolution until some worlds are feasible.
 #           if len(training_worlds) == 0:
@@ -565,12 +566,6 @@ class WorldEvoPPOTrainer(algorithm):
 
         # Filter out unplayable worlds if applicable.
         training_worlds = {k: ind for k, ind in training_worlds.items() if isinstance(ind, np.ndarray) or ind.playability_penalty == 0}
-
-        # If evolving a player, take a smaller set of the best worlds for evaluating player agents.
-        if self.colearn_cfg.evolve_players and not self.colearn_cfg.evolve_players:
-            sorted([ind for ind in training_worlds.values()], key=lambda i: i.fitness.values[0], reverse=True)
-            training_worlds[:self.colearn_cfg.world_batch_size]
-            training_worlds = {k: ind for k, ind in enumerate(training_worlds)}
 
         # TODO: Would num_worlds < num_envs be a problem here? Work around this if so (make world-assignment optionally
         #   flexible).
@@ -704,7 +699,9 @@ class WorldEvoPPOTrainer(algorithm):
 #           print("Ages of stale individuals: ", [ind.fitness.age for ind in self.world_evolver.stale_individuals])
             world_batch = self.world_evolver.ask(self.colearn_cfg.world_batch_size)
             # unplayable_worlds = [w for w in world_batch if not w.playability_penalty > 0]
-            playable_worlds = {wk: ind for wk, ind in world_batch.items() if ind.playability_penalty == 0}
+
+            # Ensure world idxs will be different between generations so we can catch hangover-world type bugs.
+            playable_worlds = {wk + 1000 * (self.net_itr % 10): ind for wk, ind in world_batch.items() if ind.playability_penalty == 0}
             world_qd_stats = {}
 
             if len(playable_worlds) > 0:
@@ -722,14 +719,16 @@ class WorldEvoPPOTrainer(algorithm):
                 # here and trusting sample. Maybe it will win us over.
                 # while len(world_stats) < self.colearn_cfg.world_batch_size:
                 for i in range(self.colearn_cfg.world_batch_size // max(1, self.colearn_cfg.n_evo_workers) + (0 if self._just_loaded else 1)):
+                # while len(batches) < self.colearn_cfg.world_batch_size * 1:
                 # while True:
 
                     # print(f"Sample batch {i}")
                     batch = ray.get([
                         w.sample.remote() for i, w in enumerate(
-                            self.evo_eval_workers.remote_workers())
+                            self.evo_eval_workers.remote_workers()) \
+                                # if len(batches) + i < self.colearn_cfg.world_batch_size
                     ])
-                    batches.append(batch)
+                    batches += batch
                     
                     # This is ugly. Better way to count episodes?
                     # [ep_ids.update(set(b.policy_batches['policy_0']['eps_id'])) for b in batch]
@@ -739,12 +738,15 @@ class WorldEvoPPOTrainer(algorithm):
                 metrics = collect_metrics(remote_workers=self.evo_eval_workers.remote_workers())
                 hist_stats = metrics['hist_stats']
                 world_stats = get_world_stats_from_hist_stats(hist_stats, self.colearn_cfg)
+                world_stats = {wk - 1000 * (self.net_itr % 10): ws for wk, ws in world_stats.items()}
 
                 assert len(world_stats) == self.colearn_cfg.world_batch_size, f"{len(world_stats)} != {self.colearn_cfg.world_batch_size}"
+                # if len(world_stats) != self.colearn_cfg.world_batch_size:
+                    # TT()
 
                 # TODO: Assuming we've only evaluated each world once. Not true if episodes can terminate early. 
                 # Should bring back some logic from `get_world_qd_stats` to aggregate over these metrics).
-                world_stats = {w['world_key']: w for w in world_stats}
+                # world_stats = {w['world_key']: w for w in world_stats}
 
                 # Get regret / positive value loss metrics from the batches.
                 if self.colearn_cfg.objective_function == "regret":

@@ -523,7 +523,7 @@ if __name__ == '__main__':
 
             # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
             # NOTE: [avg, std, min, max] match the headers in deap.DEAPQDAlgorithm._init_stats. Could do this more cleanly.
-            logbook.header += ["containerSize", "evals", "nbUpdated"] + stats.fields + ["meanPath", "maxPath"]
+            logbook.header += ["containerSize", "evals", "nbUpdated"] + stats.fields + ["meanPath", "maxPath", "meanRew", "meanEvalRew"]
         
         else:
             # TODO: use "chapters" to hierarchicalize generator fitness, agent reward, and path length stats?
@@ -537,7 +537,6 @@ if __name__ == '__main__':
 
         else:
             player_archive = None
-            logbook.header += ["meanRew", "meanEvalRew"]
 
         logbook.header += ["fps", "elapsed"]
 
