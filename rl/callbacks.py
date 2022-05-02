@@ -212,12 +212,12 @@ class WorldEvoCallbacks(DefaultCallbacks):
     #           pos_val_loss = np.mean(np.clip(w_val_trgs - w_vf_preds, 0, None))
 
                 w_advantages = advantages[idxs]
-                # pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
+                pos_val_losses[wk] = np.mean(np.clip(np.sum(w_advantages), 0, None))
 
                 # Wait, no, I think we take the average magnitude of the GAE?
-                pv = np.mean(np.abs(w_advantages))
+                # pv = np.mean(np.abs(w_advantages))
 
-                pos_val_losses[wk] = pv
+                # pos_val_losses[wk] = pv
 
             pol_batch['pos_val_loss'] = pos_val_losses
 
