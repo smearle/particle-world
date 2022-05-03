@@ -80,7 +80,14 @@ class Evolver(DEAPQDAlgorithm):
             ind = self.stale_individuals[i]
             if ind in self.container:
                 invalid_inds.append(ind)
-                self.container.discard(ind)
+                
+                # FIXME: The individual appears in the container here, but then does not appear in the grid during the
+                #   discard process inside qdpy.
+                try:
+                    self.container.discard(ind)
+                except ValueError as e:
+                    print(f"{ind} not in container.")
+                    print(e)
             i += 1
         self.stale_individuals = self.stale_individuals[i:]
 
