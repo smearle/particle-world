@@ -394,7 +394,7 @@ if __name__ == '__main__':
         # Load the world archive, logbook, and iteration counters.
         archive_path_fpath = os.path.join(save_dir, 'archive_checkpoint_path.txt')
         if not os.path.exists(archive_path_fpath):
-            archive_checkpoint_path = 'latest-0.p'
+            archive_checkpoint_path = os.path.join(save_dir, 'latest-0.p')
         else:
             with open(archive_path_fpath) as f:
                 archive_checkpoint_path = f.read()
@@ -646,7 +646,7 @@ if __name__ == '__main__':
 
     # The outer co-learning loop
     # TODO: remove this function and initialize most of these objects in the trainer setup function.
-    if trainer:
+    if trainer is not None:
         toggle_train_player(trainer, train_player=True, cfg=cfg)
         trainer.set_attrs(world_evolver, world_idx_counter, logbook, cfg, net_itr, gen_itr, play_itr, player_evolver)
 
@@ -723,9 +723,9 @@ if __name__ == '__main__':
 
             player_evolver.increment_ages()
 
-            if loop_itrs % 10 == 0:
-                save(world_archive=world_archive, player_archive=player_archive, gen_itr=net_itr, 
-                    net_itr=net_itr, play_itr=net_itr, logbook=logbook, save_dir=cfg.save_dir)
+            # if loop_itrs % 10 == 0:
+                # save(world_archive=world_archive, player_archive=player_archive, gen_itr=net_itr, 
+                    # net_itr=net_itr, play_itr=net_itr, logbook=logbook, save_dir=cfg.save_dir)
 
             auto_garbage_collect()
             loop_itrs += 1

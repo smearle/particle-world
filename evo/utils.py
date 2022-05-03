@@ -106,8 +106,8 @@ def save(world_archive, player_archive, play_itr, gen_itr, net_itr, logbook, sav
         with open(ckp_path_file, 'r') as f:
             ckp_path = Path(f.read())
             ckp_path = ckp_path.absolute()
-            if os.path.isdir(ckp_path):
-                shutil.rmtree(ckp_path)
+            if os.path.exists(ckp_path):
+                os.remove(ckp_path)
     # Record latest checkpoint path in case of re-loading
     with open(ckp_path_file, 'w') as f:
         f.write(save_path)
