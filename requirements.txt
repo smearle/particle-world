@@ -5,12 +5,11 @@ opencv-python
 pandas
 pygame
 pyglet
-ray[rllib]==1.9.2  # upgrading to 1.10 results in different train_batch length. Also evaluating only 1 world in all envs?
+ray[rllib]==1.11
 gym
 qdpy
 # ribs
 tqdm
-./submodules/pytorch-neat
 numpy==1.21  # For compatibility with numba.
 
 # Install this in editable mode in setup.sh
