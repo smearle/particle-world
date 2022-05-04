@@ -291,9 +291,14 @@ class WorldEvolutionWrapper(gym.Wrapper):
                 # Default measures are the mean rewards of policies 2 and 3 (or 0 and 1 if necessary).
                 if len(swarm_rewards) >= 3:
                     measures = np.array([np.mean(sr) for sr in swarm_rewards[1:]])
-                else:
-                    assert len(swarm_rewards) == 2, "Need at least 2 policies to compute diversity measures."
+                elif len(swarm_rewards) == 2:
+                    # assert len(swarm_rewards) == 2, "Need at least 2 policies to compute diversity measures."
                     measures = np.array([np.mean(sr) for sr in swarm_rewards])
+                else:
+                    # Placeholder measures (assuming we're using measures based on the world here, overwriting these 
+                    # at a later point in the code.)
+                    measures = np.array([0, 0])
+
 
             else:
                 # Placeholder measures
