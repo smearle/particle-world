@@ -4,6 +4,8 @@
     "exp_names": [
         # "4",
         # "4_gpu",
+        # "5",
+        "5_gpu",
         # "debug",
         "test_regret",
     ],
@@ -34,14 +36,15 @@
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
     "npol_qd_objectives_measures": [
-        # [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
         # [1, true, "min_solvable", ["emptiness", "symmetry"]],  # ...emptiness/symmetry of map as measures
         # [3, true, "contrastive", null],
         # [2, true, "contrastive", ["emptiness", "symmetry"]],
         # [3, true, "contrastive", ["emptiness", "symmetry"]],
         # [3, true, "regret", null],
+        # [2, true, "regret", null],
         # [1, true, "regret", ["emptiness", "symmetry"]],
 
+        [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
         [1, false, "regret", null],
         # [2, false, "paired", null],
         # [2, false, "contrastive", null],
