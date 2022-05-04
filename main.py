@@ -30,7 +30,7 @@ from envs import DirectedMazeEnv, MazeEnvForNCAgents, ParticleMazeEnv, eval_maze
     ghost_action_test_maze, corridor_test_mazes, h_test_mazes, s_test_mazes
 from envs.wrappers import make_env
 from evo.players import Player
-from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
+# from generators.representations import TileFlipGenerator2D, TileFlipGenerator3D, SinCPPNGenerator, CPPN, Rastrigin, Hill
 from evo.utils import compute_archive_world_heuristics, save, selRoulette
 from evo.evolve import PlayerEvolver, WorldEvolver
 from evo.individuals import TileFlipIndividual2D, NCAIndividual, TileFlipIndividual3D, clone

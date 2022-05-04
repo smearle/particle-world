@@ -2,8 +2,10 @@
     # The names of the experiments. Add a range of integers to allow for multiple trials of experiments with the same 
     # hyperparameters.
     "exp_names": [
-        "4",
-        "4_gpu",
+        # "4",
+        # "4_gpu",
+        # "5",
+        "5_gpu",
         # "debug",
     ],
 
@@ -15,7 +17,7 @@
 
     "generator_classes": [
         "TileFlipIndividual",
-        "NCA",
+        # "NCA",
     ],
 
     # List of [n_gen_itr, n_play_itr] hyperparameters. These indicate the number of steps of generator-evolution and 
@@ -33,14 +35,15 @@
     # objective must be None. ``contrastive`` requires > 1 policy. QD is currently only compatible with 3 (2 "diversity
     # measure" policies, 1 "protagonist" who provides the objective).
     "npol_qd_objectives_measures": [
-        [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
-        [1, true, "min_solvable", ["emptiness", "symmetry"]],  # ...emptiness/symmetry of map as measures
-        [3, true, "contrastive", null],
-        [2, true, "contrastive", ["emptiness", "symmetry"]],
-        [3, true, "contrastive", ["emptiness", "symmetry"]],
-        [3, true, "regret", null],
-        [1, true, "regret", ["emptiness", "symmetry"]],
+        # [1, true, "min_solvable", ["emptiness", "symmetry"]],  # ...emptiness/symmetry of map as measures
+        # [3, true, "contrastive", null],
+        # [2, true, "contrastive", ["emptiness", "symmetry"]],
+        # [3, true, "contrastive", ["emptiness", "symmetry"]],
+        # [3, true, "regret", null],
+        # [2, true, "regret", null],
+        # [1, true, "regret", ["emptiness", "symmetry"]],
 
+        [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
         [1, false, "regret", null],
         [2, false, "paired", null],
         [2, false, "contrastive", null],
@@ -56,7 +59,7 @@
 # FIXME: currently just a placeholder when evolving players.
     "fullobs_fov_models_rotated": [
         # [true, -1, "feedforward", false],
-        [false, 2, "rnn", false],
+        # [false, 2, "rnn", false],
         [false, 2, "rnn", true],
         # [true, -1, "feedforward", false],
     ]
