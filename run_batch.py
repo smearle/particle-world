@@ -35,7 +35,7 @@ def launch_job(sbatch_file, experiment_name, job_time, job_cpus, job_gpus, job_m
             gpu_str = f"#SBATCH --gres=gpu:{job_gpus}" if job_gpus > 0 else f"##SBATCH --gres=gpu:1"
             content = re.sub(r'#+SBATCH --gres=gpu:\d+', gpu_str, content)
             content = re.sub(r'#SBATCH --time=\d+:', '#SBATCH --time={}:'.format(job_time), content)
-            content = re.sub(r'#SBATCH --cpus-per-task=\d+', '#SBATCH --cpus-per-task={}'.format(job_cpus), content)
+            content = re.sub(r'#SBATCH --cpus-per-task=\d+', '#SBATCH --cpus-per-task={}'.format(max(1, job_cpus)), content)
             content = re.sub(r'#SBATCH --mem=\d+GB', '#SBATCH --mem={}GB'.format(job_mem), content)
             cmd = '\n' + cmd
             new_content = re.sub('\n.*python main.py.*', cmd, content)

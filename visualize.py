@@ -130,7 +130,7 @@ def remove_nones(l):
 
 def visualize_archive(cfg, env, grid):
     # visualize current worlds
-    gg = sorted(grid, key=lambda i: i.features)
+    gg = sorted(grid, key=lambda i: tuple(i.features))
     world_im_width = cfg.width * 10
 
                 # if doing QD, render a grid of 1 world per cell in archive
