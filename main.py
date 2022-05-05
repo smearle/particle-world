@@ -492,8 +492,7 @@ if __name__ == '__main__':
                 rllib_stats = trainer.evaluate()
                 world_stats = get_world_stats_from_hist_stats(rllib_stats['evaluation']['hist_stats'], cfg)
 
-                for world_stat in world_stats:
-                    world_key = world_stat['world_key']
+                for world_key, world_stat in world_stats.items():
 
                     for j in range(n_policies):
                         policy_key = f'policy_{j}'
