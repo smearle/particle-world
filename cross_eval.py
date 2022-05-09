@@ -30,7 +30,8 @@ def vis_cross_eval(exp_names):
                 exp_train_stats = json.load(f)
                 last_exp_train_stats = exp_train_stats
         except FileNotFoundError:
-            exp_train_stats = {k: None for k in last_exp_train_stats}
+            # exp_train_stats = {k: None for k in last_exp_train_stats}
+            exp_train_stats = {}
 
         try:
             with open(os.path.join(exp_save_dir, 'eval_stats.json'), 'r') as f:
