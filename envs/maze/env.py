@@ -259,7 +259,7 @@ class ParticleGymRLlib(ParticleGym):
 #       self.last_world_key = self.world_key
 #       self.next_world = None
 
-    def set_world(self, world):
+    def set_world(self, world: np.ndarray):
         """
         Set the world (from some external process, e.g. world-generator optimization), and set the env to be reset at
         the next step.
@@ -372,7 +372,7 @@ class ParticleMazeEnv(ParticleGymRLlib):
         return obs
 
 
-    def set_world(self, world):
+    def set_world(self, world: np.ndarray):
         """
         Convert an encoding produced by the generator into a world map. The encoding has channels (empty, wall, start/goal)
 

@@ -54,7 +54,7 @@ class MineRLWrapper(gym.Wrapper):
 #       # self.worlds = {idx: worlds[idx]}
 #       # print('set worlds ', worlds.keys())
 
-    def set_world(self, world):
+    def set_world(self, world: np.ndarray):
         """
         Convert an encoding produced by the generator into a world map. The encoding has channels (empty, wall, start/goal)
         :param world: Encoding, optimized directly or produced by a world-generator.

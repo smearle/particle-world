@@ -7,6 +7,7 @@ import numpy as np
 import ray
 from ray.rllib.evaluation.worker_set import WorkerSet
 import torch as th
+from evo.individuals import Individual
 
 from utils import discrete_to_onehot, get_solution
 
@@ -81,7 +82,7 @@ class IdxCounter:
         return self.hashes_to_keys
 
 
-def set_worlds(worlds: dict, workers: WorkerSet, idx_counter: IdxCounter, cfg: Namespace, load_now: bool = False):
+def set_worlds(worlds: dict[int: Individual], workers: WorkerSet, idx_counter: IdxCounter, cfg: Namespace, load_now: bool = False):
     """Assign worlds to environments to be loaded at next reset."""
     # keys = np.random.permutation(list(worlds.keys()))
     keys = list(worlds.keys())
