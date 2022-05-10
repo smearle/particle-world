@@ -21,8 +21,8 @@ import numpy as np
 import torch
 
 from minihack.navigation import MiniHackNavigation
-import register
-import minihackgrid
+from envs.minihack import register
+from envs.minihack import minihackgrid
 from nle import nethack
 from nle.nethack import Command
 from minihack.tiles.rendering import get_des_file_rendering

@@ -755,7 +755,6 @@ class WorldEvoPPOTrainer(algorithm):
 
                 assert len(world_stats) == len(playable_worlds), f"{len(world_stats)} != {len(playable_worlds)}"
                 # if len(world_stats) != self.colearn_cfg.world_batch_size:
-                    # TT()
 
                 # Get regret / positive value loss metrics from the batches.
                 if self.colearn_cfg.objective_function == "regret":

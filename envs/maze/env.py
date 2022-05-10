@@ -283,18 +283,18 @@ class ParticleMazeEnv(ParticleGymRLlib):
     goal_chan = 3
     unique_chans = [start_chan, goal_chan]
 
-    def __init__(self, cfg):
+    def __init__(self, env_config):
         n_chan = 4
-        cfg.update({'n_chan': n_chan})
-        cfg['swarm_cls'] = cfg.get('swarm_cls', MazeSwarm)
-        width = cfg['width']
+        env_config.update({'n_chan': n_chan})
+        env_config['swarm_cls'] = env_config.get('swarm_cls', MazeSwarm)
+        width = env_config['width']
 
-        self.evaluate = cfg.get('evaluate')
-        self.fully_observable = cfg.get('fully_observable')
-        self.translated_observations = cfg.get('translated_observations')
+        self.evaluate = env_config.get('evaluate')
+        self.fully_observable = env_config.get('fully_observable')
+        self.translated_observations = env_config.get('translated_observations')
         if self.evaluate:
             self.eval_maze_i = 0
-        super().__init__(cfg)
+        super().__init__(env_config)
 
         # Set this broken dummy world only to placate RLlib during dummy reset. Immediately after, we should queue_worlds,
         # which will instigate another reset at the next step.
@@ -545,8 +545,8 @@ class DirectedMazeEnv(ParticleMazeEnv):
     Agents can turn left and right, and move forward and backward. Their observation is a one-hot encoding of the 
     neighborhood that surrounds them, rotated to that they are "looking forward."
     """
-    def __init__(self, cfg):
-        super().__init__(cfg)
+    def __init__(self, env_config):
+        super().__init__(env_config)
         self.dead_action = 3
         self.actions = [0, 1, 2, 3]
 #       if self.fully_observable:

@@ -16,7 +16,7 @@
 """Register MiniHack environments with OpenAI gym."""
 
 import gym
-from registration import register as gym_register
+from envs.registration import register as gym_register
 
 env_list = []
 

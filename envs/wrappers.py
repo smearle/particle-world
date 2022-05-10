@@ -33,7 +33,7 @@ def make_env(env_config):
         # env.max_episode_steps = 10000  # dummy
         # env.unique_chans = []  # dummy
     else:
-        env = environment_class(env_config)
+        env = environment_class(env_config=env_config)
 
     if issubclass(environment_class, MultiAgentEnv):
         env = WorldEvolutionMultiAgentWrapper(env, env_config)
@@ -66,7 +66,8 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world_queue = None
         cfg = env_cfg.get('cfg')
 
-        self.evolve_player = self.training_world = self.evaluation_world = self.evo_eval_world = False
+        # self.evolve_player = self.training_world = self.evaluation_world = self.evo_eval_world = False
+        self.evolve_player = env_cfg['cfg'].evolve_players
 
         # Is this world being used to train learning player agents?
         # self.training_world = env_cfg["training_world"]
@@ -249,7 +250,6 @@ class WorldEvolutionWrapper(gym.Wrapper):
             # We will simulate on this world on future steps, so keep this empty stats dict around.
             if stats_dict["n_steps"] == 0:
             #     next_stats.append(stats_dict)
-            #     TT()
 
                 continue
 
@@ -361,7 +361,6 @@ class WorldEvolutionMultiAgentWrapper(WorldEvolutionWrapper, MultiAgentEnv):
     def __init__(self, env, env_config):
         WorldEvolutionWrapper.__init__(self, env, env_config)
         self.env = env
-        self.evolve_player = env_config['cfg'].evolve_players
         # MultiAgentEnv.__init__(self)
 
     def step(self, actions):

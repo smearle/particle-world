@@ -1,3 +1,5 @@
+from pdb import set_trace as TT
+
 import cv2
 import gym
 import minihack
@@ -6,13 +8,14 @@ from minihack.tiles.window import Window
 from networkx import grid_graph
 import numpy as np
 
-from adversarial import MiniHackAdversarialEnv
+from envs.minihack.adversarial import MiniHackAdversarialEnv
 
 # Set numpy to print full arrays and not wrap rows
 np.set_printoptions(threshold=np.inf, linewidth=np.inf)
 
 
-class MiniHackEvoLevel(MiniHackAdversarialEnv):
+
+class MiniHackEvoWorld(MiniHackAdversarialEnv):
     """A wrapper of the MiniHack environment that allows to evolve the environment in a co-learning loop.
     
     Inherits from the env subclass from ucl-dard which allows for adversarial environment generation (i.e. by an RL 
@@ -22,13 +25,21 @@ class MiniHackEvoLevel(MiniHackAdversarialEnv):
     wall_chan = 1
     start_chan = 2
     goal_chan = 3
+    unique_chans = (2, 3)
+    n_pop = 1
+    n_policies = 1
+    min_reward = 0
+    max_reward = 1
+    max_episode_steps = 256
 
-    def __init__(self, *args, render: bool = True, **kwargs):
+    # MiniHack glyphs (probably best to get these from MiniHack itself somewhere).
+    # WALL = 
+
+    def __init__(self, *args, render: bool = True, env_config=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.render_env: bool = render
         self.reset()
-        if render:
-            self.window = Window("MiniHack")
+        self.window = None
             # self.win = cv2.namedWindow("MiniHack")
 
     def reset(self):
@@ -92,6 +103,8 @@ class MiniHackEvoLevel(MiniHackAdversarialEnv):
         self.window.show_obs(img, msg)
 
     def render(self):
+        if self.window is None:
+            self.window = Window("MiniHack")
         assert self.render_env is True
         self.redraw(self._last_obs_dict)
         # im = super().render()

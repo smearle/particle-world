@@ -3,7 +3,7 @@ import time
 
 import numpy as np
 
-from envs.minihack.env import MiniHackEvoLevel
+from envs.minihack.env import MiniHackEvoWorld
 
 
 if __name__ == "__main__":
@@ -14,9 +14,16 @@ if __name__ == "__main__":
     # env.step(1)  # move agent '@' north
     # env.render()
 
-    env = MiniHackEvoLevel()
+    env = MiniHackEvoWorld()
     for _ in range(100):
-        world = np.random.randint(0, 2, (env.width, env.height))
+        width, height = env.width, env.height
+        # Number of free tile types for placement.
+        n_tiles = 2
+        # Generate random map with different weights for each tile type.
+        weights = np.random.random(n_tiles)
+        # Normalize weights.
+        weights /= np.sum(weights)
+        world = np.random.choice(n_tiles, (width, height), p=weights)
         world[2,2] = env.start_chan
         world[-1,-1] = env.goal_chan
         env.set_world(world=world)
@@ -26,7 +33,11 @@ if __name__ == "__main__":
             # env.step_adversary(env.adversary_action_space.sample())
         # env.compile_env()
 
+        done = False
         for _ in range(10000):
             action = env.action_space.sample()
-            obs = env.step(action)
+            obs, reward, done, info = env.step(action)
             env.render()
+            print(obs['chars'][21//2-width//2:21//2+width//2, 79//2-height//2:79//2+height//2])
+            if done:
+                break

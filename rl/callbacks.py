@@ -32,7 +32,6 @@ class WorldEvoCallbacks(DefaultCallbacks):
         # episode.user_data["pole_angles"] = []
         # episode.hist_data["pole_angles"] = []
         # if env_index == 0:
-            # TT()
         env = base_env.envs[env_index]
         env.reset_stats()
 
@@ -227,6 +226,5 @@ class WorldEvoCallbacks(DefaultCallbacks):
         # FIXME: This breaks training batches.
 
         # For now, just giving it back to environments to be collected later
-        # TT()
         # worker.foreach_env(lambda env: env.set_regret_loss(pos_val_losses))
 

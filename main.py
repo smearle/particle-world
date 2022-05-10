@@ -18,6 +18,7 @@ from ray.tune.registry import register_env
 from deap import base
 from deap import creator
 from deap import tools
+from envs.minihack.env import MiniHackEvoWorld
 from qdpy import containers
 from qdpy.algorithms.deap import DEAPQDAlgorithm
 # from qdpy.base import ParallelismManager
@@ -238,6 +239,21 @@ if __name__ == '__main__':
         # touchstone = ObtainDiamond(dense=True)
 
         touchstone.register()  # Need to register since this is a custom env.
+        env_config = {}
+
+    elif cfg.environment_class == 'MiniHack':
+        environment_class = MiniHackEvoWorld
+
+        # set the generator
+        if cfg.generator_class == 'TileFlipIndividual':
+            generator_class = TileFlipIndividual2D
+
+        elif cfg.generator_class == 'NCA':
+            generator_class = NCAIndividual
+
+        else:
+            raise NotImplementedError
+
         env_config = {}
 
     else:
