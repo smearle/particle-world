@@ -18,7 +18,7 @@ import ray
 import torch as th
 from ray.rllib import MultiAgentEnv
 from ray.rllib.agents.ppo import PPOTrainer
-from ray.rllib.agents.impala import ImpalaTrainer
+from ray.rllib.algorithms.impala import Impala
 # from ray.tune.logger import pretty_print
 from ray.rllib.models import MODEL_DEFAULTS, ModelCatalog
 from ray.rllib.policy.policy import PolicySpec
@@ -383,6 +383,7 @@ def toggle_exploration(trainer: Trainer, explore: bool, n_policies: int):
 
 def toggle_train_player(trainer: Trainer, train_player: bool, cfg: Namespace):
     if train_player:
+        breakpoint()
         trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
     else:
         trainer.workers.local_worker().set_policies_to_train([])

@@ -2,12 +2,13 @@
     # The names of the experiments. Add a range of integers to allow for multiple trials of experiments with the same 
     # hyperparameters.
     "exp_names": [
+        0,
         # "4",
         # "4_gpu",
         # "5",
-        "5_gpu",
+        # "5_gpu",
         # "debug",
-        "test_regret",
+        # "test_regret",
     ],
 
     # The name of the class corresponding to the environment we wich to generate/play.
@@ -44,12 +45,12 @@
         # [2, true, "regret", null],
         # [1, true, "regret", ["emptiness", "symmetry"]],
 
-        [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
-        [1, false, "regret", null],
+        # [3, true, "min_solvable", null],  # QD using min_solvability of player 1 as objective, and rewards of players 2 and 3 as measures
+        # [1, false, "regret", null],
         # [2, false, "paired", null],
         # [2, false, "contrastive", null],
         # [3, false, "contrastive", null],
-        # [1, false, "min_solvable", null],
+        [1, false, "min_solvable", null],
         # [1, false, null, null]  # this trains on a fixed set of worlds
     ],
     
