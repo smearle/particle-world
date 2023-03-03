@@ -25,6 +25,7 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.tune.logger import Logger
 from ray.rllib.agents import Trainer
 from ray.rllib.evaluation.metrics import collect_metrics
+from ray.rllib.evaluation.rollout_worker import RolloutWorker
 from ray.rllib.evaluation.worker_set import WorkerSet
 from ray.rllib.utils import merge_dicts
 from ray.rllib.utils.typing import Callable, Optional, PartialTrainerConfigDict, TrainerConfigDict, ResultDict
@@ -382,11 +383,13 @@ def toggle_exploration(trainer: Trainer, explore: bool, n_policies: int):
 
 
 def toggle_train_player(trainer: Trainer, train_player: bool, cfg: Namespace):
+    lc_w: RolloutWorker = trainer.workers.local_worker()
     if train_player:
-        breakpoint()
-        trainer.workers.local_worker().set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
+        lc_w.set_is_policy_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
+        # .set_policies_to_train([f'policy_{i}' for i in range(cfg.n_policies)])
     else:
-        trainer.workers.local_worker().set_policies_to_train([])
+        lc_w.set_is_policy_to_train([])
+        # trainer.workers.local_worker().set_policies_to_train([])
 
 
 def sync_player_policies(play_trainer: Trainer, gen_trainer: Trainer, cfg: Namespace):

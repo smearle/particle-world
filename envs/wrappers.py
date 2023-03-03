@@ -64,6 +64,7 @@ class WorldEvolutionWrapper(gym.Wrapper):
         self.world = None
         self.world_gen_sequences = None
         self.world_queue = None
+        self.world_key_queue = None
         cfg = env_cfg.get('cfg')
 
         self.evolve_player = self.training_world = self.evaluation_world = self.evo_eval_world = False
@@ -203,7 +204,9 @@ class WorldEvolutionWrapper(gym.Wrapper):
         # Randomly select a world from the training set.
         # elif self.training_world:
         else:
-            self.world_key = np.random.choice(self.world_key_queue)
+            world_keys = list(self.world_queue.keys())
+            # self.world_key = np.random.choice(self.world_key_queue)
+            self.world_key = np.random.choice(world_keys)
             self.set_world(self.world_queue[self.world_key])
         
         # else:
